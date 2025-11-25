@@ -1,0 +1,83 @@
+# =========================
+# .editorconfig
+# =========================
+# This tells EditorConfig to stop looking for other
+# .editorconfig files in parent folders.
+# Your repo becomes the single source of truth.
+root = true
+
+
+# =========================
+# Default rules for ALL files
+# =========================
+[*]
+
+# Use UTF-8 encoding for all files
+# Prevents character/emoji encoding issues
+charset = utf-8
+
+# Force Unix-style line endings (LF)
+# Prevents CRLF problems from Windows machines
+end_of_line = lf
+
+# Ensure every file ends with a newline
+# Many tools, compilers, and Git expect this
+insert_final_newline = true
+
+# Remove extra spaces at the end of lines
+# Keeps diffs clean and avoids sloppy formatting
+trim_trailing_whitespace = true
+
+
+# =========================
+# Python files (.py and .pyi)
+# =========================
+[*.{py,pyi}]
+
+# Always use spaces for indentation in Python
+# Tabs can break Python syntax
+indent_style = space
+
+# PEP8 standard indentation (4 spaces)
+indent_size = 4
+
+
+# =========================
+# YAML files (.yml, .yaml)
+# =========================
+[*.{yml,yaml}]
+
+# YAML convention is 2 spaces
+indent_style = space
+indent_size = 2
+
+
+# =========================
+# JSON & TOML files
+# =========================
+[*.{json,toml}]
+
+# Common standard for these formats
+indent_style = space
+indent_size = 2
+
+
+# =========================
+# Markdown files (.md)
+# =========================
+[*.md]
+
+# Trailing spaces matter in Markdown
+# (used for line breaks)
+# So we DO NOT automatically remove them
+trim_trailing_whitespace = false
+
+
+# =========================
+# Makefile
+# =========================
+[Makefile]
+
+# Makefiles REQUIRE tabs
+# Spaces will break them
+indent_style = tab
