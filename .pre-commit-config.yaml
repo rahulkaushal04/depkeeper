@@ -1,0 +1,49 @@
+# pre-commit configuration for depkeeper
+# Run: pre-commit install   |   pre-commit run --all-files
+
+repos:
+  # -------------------------------------------------------
+  # Basic file hygiene & formatting checks
+  # -------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=1000"]
+      - id: check-case-conflict
+      - id: check-merge-conflict
+
+  # -------------------------------------------------------
+  # Ruff (formatter + linter)
+  # -------------------------------------------------------
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.3.4
+    hooks:
+      - id: ruff
+        name: ruff (lint)
+        args: ["--fix", "--exit-non-zero-on-fix"]
+
+      - id: ruff-format
+        name: ruff (format)
+
+  # -------------------------------------------------------
+  # Mypy - type checking
+  # -------------------------------------------------------
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.8.0
+    hooks:
+      - id: mypy
+        name: mypy (type checking)
+        additional_dependencies:
+          - types-setuptools
+        args:
+          - --ignore-missing-imports
+          - --warn-unused-ignores
+          - --strict
