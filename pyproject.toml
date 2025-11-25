@@ -135,6 +135,8 @@ select = [
 ]
 ignore = [
     "E501",      # line too long (handled by formatter)
+    "ERA001",    # commented-out code
+    "PLC0415",   # import at top-level (allow lazy imports)
     "PLR0913",   # too many arguments
     "TRY003",    # avoid long exception messages
 ]

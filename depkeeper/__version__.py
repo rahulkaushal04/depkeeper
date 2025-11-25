@@ -15,6 +15,8 @@ Examples:
 
 from __future__ import annotations
 
+import re
+
 # ---------------------------------------------------------------------------
 # Main version (single source of truth)
 # ---------------------------------------------------------------------------
@@ -41,13 +43,13 @@ def _parse_version(version: str):
             "is_dev": bool,
         }
     """
-    import re
 
     pattern = r"^(\d+)\.(\d+)\.(\d+)(?:[.-]([a-zA-Z0-9]+))?$"
     match = re.match(pattern, version)
 
     if not match:
-        raise ValueError(f"Invalid version string: {version}")
+        error_message = f"Invalid version string: {version}"
+        raise ValueError(error_message)
 
     major, minor, patch, pre = match.groups()
 
