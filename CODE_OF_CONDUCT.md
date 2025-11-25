@@ -74,7 +74,7 @@ If you experience or witness unacceptable behavior, please report it to:
 
 📧 **support@depkeeper.dev**
 
-All reports will be reviewed promptly, fairly, and confidentially.  
+All reports will be reviewed promptly, fairly, and confidentially.
 Community leaders must respect the privacy of reporters.
 
 ---
@@ -85,59 +85,59 @@ The following guidelines outline how community leaders will handle violations.
 
 ### 1. **Correction**
 
-**Community Impact:**  
+**Community Impact:**
 Minor inappropriate behavior or first-time offense.
 
-**Consequence:**  
-Private written warning explaining what went wrong and how to improve.  
+**Consequence:**
+Private written warning explaining what went wrong and how to improve.
 A public apology may be requested.
 
 ---
 
 ### 2. **Warning**
 
-**Community Impact:**  
+**Community Impact:**
 Repeated violations or more serious behavior.
 
-**Consequence:**  
-Formal warning with clear consequences for continued behavior.  
+**Consequence:**
+Formal warning with clear consequences for continued behavior.
 Avoiding interaction with affected parties may be required.
 
 ---
 
 ### 3. **Temporary Ban**
 
-**Community Impact:**  
+**Community Impact:**
 Serious or repeated violations.
 
-**Consequence:**  
-Temporary ban from participation in all community spaces.  
+**Consequence:**
+Temporary ban from participation in all community spaces.
 Any attempt to circumvent the ban may result in escalation.
 
 ---
 
 ### 4. **Permanent Ban**
 
-**Community Impact:**  
+**Community Impact:**
 Pattern of sustained inappropriate behavior, harassment, or discrimination.
 
-**Consequence:**  
+**Consequence:**
 Permanent ban from all community participation.
 
 ---
 
 ## Attribution
 
-This Code of Conduct is adapted from the [Contributor Covenant][homepage] v2.1:  
+This Code of Conduct is adapted from the [Contributor Covenant][homepage] v2.1:
 https://www.contributor-covenant.org/version/2/1/code_of_conduct/
 
-Community Impact Guidelines were inspired by:  
+Community Impact Guidelines were inspired by:
 Mozilla’s Code of Conduct Enforcement Ladder.
 
-For FAQs:  
+For FAQs:
 https://www.contributor-covenant.org/faq
 
-Translations:  
+Translations:
 https://www.contributor-covenant.org/translations
 
 [homepage]: https://www.contributor-covenant.org

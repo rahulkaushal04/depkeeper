@@ -1,6 +1,6 @@
 # Contributing to depkeeper
 
-Thank you for your interest in contributing to **depkeeper**!  
+Thank you for your interest in contributing to **depkeeper**!
 We welcome all contributions — whether they are bug fixes, new features, documentation improvements, or ideas.
 
 This guide helps you get started quickly and ensures a smooth development process.
@@ -9,7 +9,7 @@ This guide helps you get started quickly and ensures a smooth development proces
 
 ## 📜 Code of Conduct
 
-Participation in this project requires adherence to our  
+Participation in this project requires adherence to our
 👉 [Code of Conduct](./CODE_OF_CONDUCT.md)
 
 If you experience or witness unacceptable behavior, please report it via

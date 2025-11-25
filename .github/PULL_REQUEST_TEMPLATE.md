@@ -1,6 +1,6 @@
 # 🔥 Pull Request
 
-Thank you for contributing to **depkeeper**!  
+Thank you for contributing to **depkeeper**!
 Please fill out the details below to help us review your PR quickly and effectively.
 
 ---
