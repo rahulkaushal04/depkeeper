@@ -1,0 +1,4 @@
+click>=8.1.0
+packaging>=23.0
+httpx>=0.24.0
+rich>=13.0.0

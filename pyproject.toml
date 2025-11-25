@@ -1,0 +1,241 @@
+# ============================================================
+# Build configuration
+# ============================================================
+
+[build-system]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+# ============================================================
+# Project metadata (PEP 621)
+# ============================================================
+
+[project]
+name = "depkeeper"
+version = "0.1.0.dev0"
+description = "Modern Python dependency management for requirements.txt files"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "Apache-2.0" }
+
+authors = [
+    { name = "depkeeper Contributors" },
+]
+
+keywords = [
+    "dependencies",
+    "requirements",
+    "pip",
+    "package-management",
+    "security",
+    "updates",
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Software Distribution",
+]
+
+# Library dependencies (minimum versions only)
+dependencies = [
+    "click>=8.1.0",
+    "packaging>=23.0",
+    "httpx>=0.24.0",
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
+]
+
+
+# ============================================================
+# Optional dependencies
+# ============================================================
+
+[project.optional-dependencies]
+
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-mock>=3.11.0",
+    "pytest-httpx>=0.22.0",
+    "ruff>=0.1.0",
+    "mypy>=1.5.0",
+    "types-setuptools",
+    "pre-commit>=3.4.0",
+]
+test = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-mock>=3.11.0",
+    "pytest-httpx>=0.22.0",
+]
+docs = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.4.0",
+    "mkdocstrings[python]>=0.23.0",
+]
+
+
+# ============================================================
+# Project URLs
+# ============================================================
+
+[project.urls]
+Homepage     = "https://github.com/rahulkaushal04/depkeeper"
+Documentation = "https://docs.depkeeper.dev"
+Repository   = "https://github.com/rahulkaushal04/depkeeper"
+"Bug Tracker" = "https://github.com/rahulkaushal04/depkeeper/issues"
+Changelog    = "https://github.com/rahulkaushal04/depkeeper/blob/main/CHANGELOG.md"
+
+
+# ============================================================
+# Entry points / CLI
+# ============================================================
+
+[project.scripts]
+depkeeper = "depkeeper.cli:main"
+
+
+# ============================================================
+# Setuptools configuration
+# ============================================================
+
+[tool.setuptools]
+packages = ["depkeeper"]
+
+[tool.setuptools.package-data]
+depkeeper = ["py.typed"]
+
+
+# ============================================================
+# Ruff (formatter + linter)
+# ============================================================
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+
+[tool.ruff.lint]
+select = [
+    "E","W","F","I","N","UP","B","C4","DTZ","T10","EM","ISC",
+    "ICN","G","PIE","T20","PT","Q","RSE","RET","SIM","TID",
+    "TCH","ARG","PTH","ERA","PL","TRY","RUF"
+]
+ignore = [
+    "E501",      # line too long (handled by formatter)
+    "ERA001",    # commented-out code
+    "PLC0415",   # import at top-level (allow lazy imports)
+    "PLR0913",   # too many arguments
+    "TRY003",    # avoid long exception messages
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "PLR2004",   # magic numbers in tests
+    "S101",      # assert usage
+    "ARG",       # unused args OK in fixtures
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["depkeeper"]
+
+
+# ============================================================
+# Mypy configuration
+# ============================================================
+
+[tool.mypy]
+python_version = "3.8"
+strict = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+
+
+# ============================================================
+# Pytest configuration
+# ============================================================
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+addopts = [
+    "--verbose",
+    "--cov=depkeeper",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml",
+    "--strict-markers",
+    "--tb=short",
+]
+
+markers = [
+    "slow: slow tests",
+    "integration: integration tests",
+    "e2e: end-to-end tests",
+    "network: tests requiring network",
+]
+
+asyncio_mode = "auto"
+
+
+# ============================================================
+# Coverage.py configuration
+# ============================================================
+
+[tool.coverage.run]
+source = ["depkeeper"]
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "*/site-packages/*",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+    "@abc.abstractmethod",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+[tool.coverage.xml]
+output = "coverage.xml"
