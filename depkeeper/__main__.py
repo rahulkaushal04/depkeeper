@@ -30,7 +30,7 @@ def main() -> int:
         # CLI not implemented yet (Phase 0) or import error during development
         sys.stderr.write("depkeeper CLI is not available yet.")
         sys.stderr.write("This is expected during early development (Phase 0).")
-        sys.stderr.write()
+        sys.stderr.write("\n")
         sys.stderr.write(f"Python version : {sys.version}")
         try:
             from depkeeper.__version__ import __version__
@@ -38,7 +38,7 @@ def main() -> int:
             sys.stderr.write(f"depkeeper version: {__version__}")
         except Exception:
             sys.stderr.write("depkeeper version: <unknown>")
-        sys.stderr.write()
+        sys.stderr.write("\n")
         sys.stderr.write(f"ImportError: {exc}")
         return 0
 

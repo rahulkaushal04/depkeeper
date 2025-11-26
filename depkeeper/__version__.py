@@ -16,6 +16,7 @@ Examples:
 from __future__ import annotations
 
 import re
+from typing import Dict, Any
 
 # ---------------------------------------------------------------------------
 # Main version (single source of truth)
@@ -29,7 +30,7 @@ __version__ = "0.1.0.dev0"
 # ---------------------------------------------------------------------------
 
 
-def _parse_version(version: str):
+def _parse_version(version: str) -> Dict[str, Any]:
     """
     Internal helper to break a semantic version into components.
     Avoids manual duplication and mistakes.
