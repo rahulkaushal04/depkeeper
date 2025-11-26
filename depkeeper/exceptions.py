@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional
 # Base Error
 # =============================================================================
 
+
 class DepKeeperError(Exception):
     """Base exception for all depkeeper errors.
 
@@ -45,6 +46,7 @@ class DepKeeperError(Exception):
 # Helper Functions
 # =============================================================================
 
+
 def _add_if(details: Dict[str, Any], key: str, value: Any) -> None:
     """Add a field to `details` only if value is not None."""
     if value is not None:
@@ -59,6 +61,7 @@ def _truncate(text: str, length: int = 200) -> str:
 # =============================================================================
 # Parse Errors
 # =============================================================================
+
 
 class ParseError(DepKeeperError):
     """Raised when a requirements file cannot be parsed."""
@@ -88,6 +91,7 @@ class ParseError(DepKeeperError):
 # Validation Errors
 # =============================================================================
 
+
 class ValidationError(DepKeeperError):
     """Raised when validation of fields or data structures fails."""
 
@@ -112,6 +116,7 @@ class ValidationError(DepKeeperError):
 # =============================================================================
 # Network & PyPI Errors
 # =============================================================================
+
 
 class NetworkError(DepKeeperError):
     """Raised when HTTP or networking operations fail."""
@@ -159,6 +164,7 @@ class PyPIError(NetworkError):
 # Conflict Errors
 # =============================================================================
 
+
 class ConflictError(DepKeeperError):
     """Raised when dependency version conflicts are detected."""
 
@@ -191,6 +197,7 @@ class ConflictError(DepKeeperError):
 # Cache Errors
 # =============================================================================
 
+
 class CacheError(DepKeeperError):
     """Raised when cache read/write operations fail."""
 
@@ -216,6 +223,7 @@ class CacheError(DepKeeperError):
 # File Operation Errors
 # =============================================================================
 
+
 class FileOperationError(DepKeeperError):
     """Raised when accessing or modifying files fails."""
 
@@ -231,7 +239,9 @@ class FileOperationError(DepKeeperError):
         details: Dict[str, Any] = {}
         _add_if(details, "path", file_path)
         _add_if(details, "operation", operation)
-        _add_if(details, "original_error", str(original_error) if original_error else None)
+        _add_if(
+            details, "original_error", str(original_error) if original_error else None
+        )
 
         super().__init__(message, details)
 
@@ -243,6 +253,7 @@ class FileOperationError(DepKeeperError):
 # =============================================================================
 # Configuration Errors
 # =============================================================================
+
 
 class ConfigurationError(DepKeeperError):
     """Raised when depkeeper configuration files contain invalid values."""
@@ -268,6 +279,7 @@ class ConfigurationError(DepKeeperError):
 # =============================================================================
 # Security Errors
 # =============================================================================
+
 
 class SecurityVulnerabilityError(DepKeeperError):
     """Raised when known security vulnerabilities are detected."""

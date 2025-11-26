@@ -44,6 +44,7 @@ LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 # Configuration TypedDicts
 # =============================================================================
 
+
 class CacheConfig(TypedDict, total=False):
     """Cache configuration options."""
 
@@ -105,6 +106,7 @@ class DepKeeperConfig(TypedDict, total=False):
 # =============================================================================
 # Protocols for Dependency Injection
 # =============================================================================
+
 
 class ParserProtocol(Protocol):
     """Protocol for requirement parsers."""
@@ -187,6 +189,7 @@ class CacheProtocol(Protocol):
 # Results TypedDicts
 # =============================================================================
 
+
 class ParseResult(TypedDict):
     """Result of a parsing operation."""
 
@@ -231,6 +234,7 @@ class SecurityResult(TypedDict):
 # =============================================================================
 # Metadata TypedDicts
 # =============================================================================
+
 
 class PackageMetadata(TypedDict, total=False):
     """Metadata fetched from a package index."""

@@ -42,9 +42,9 @@ CACHE_DB_NAME: Final[str] = "cache.db"
 # =============================================================================
 
 DEFAULT_CONCURRENT_REQUESTS: Final[int] = 10
-DEFAULT_TIMEOUT: Final[int] = 30      # seconds
+DEFAULT_TIMEOUT: Final[int] = 30  # seconds
 DEFAULT_MAX_RETRIES: Final[int] = 3
-DEFAULT_RETRY_DELAY: Final[int] = 1   # seconds
+DEFAULT_RETRY_DELAY: Final[int] = 1  # seconds
 
 # User agent is dynamically formatted by clients when sending requests
 HTTP_USER_AGENT: Final[str] = USER_AGENT_TEMPLATE
@@ -89,20 +89,23 @@ HASH_DIRECTIVE: Final[str] = "--hash"
 # Update Strategies
 # =============================================================================
 
+
 class UpdateStrategy(str, Enum):
     """Package update strategy."""
 
     CONSERVATIVE = "conservative"  # Patch only
-    MODERATE = "moderate"          # Minor updates
-    AGGRESSIVE = "aggressive"      # Major updates
-    CUSTOM = "custom"              # Per-package rules
+    MODERATE = "moderate"  # Minor updates
+    AGGRESSIVE = "aggressive"  # Major updates
+    CUSTOM = "custom"  # Per-package rules
 
     def __str__(self) -> str:
         return self.value
 
+
 # =============================================================================
 # Version Operators (PEP 440)
 # =============================================================================
+
 
 class VersionOperator(str, Enum):
     """PEP 440 version comparison operators."""
@@ -119,9 +122,11 @@ class VersionOperator(str, Enum):
     def __str__(self) -> str:
         return self.value
 
+
 # =============================================================================
 # Exit Codes
 # =============================================================================
+
 
 class ExitCode(int, Enum):
     """Standard CLI exit codes."""
@@ -137,6 +142,7 @@ class ExitCode(int, Enum):
 
     def __int__(self) -> int:
         return self.value
+
 
 # =============================================================================
 # Logging Defaults
@@ -158,7 +164,7 @@ SEMVER_PATTERN: Final[str] = (
 # Calendar Versioning (CalVer)
 CALVER_PATTERNS: Final[List[str]] = [
     r"^\d{4}\.\d{1,2}\.\d{1,2}",  # YYYY.MM.DD
-    r"^\d{2}\.\d{1,2}",          # YY.MM
+    r"^\d{2}\.\d{1,2}",  # YY.MM
 ]
 
 # =============================================================================
