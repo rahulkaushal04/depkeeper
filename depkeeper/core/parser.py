@@ -36,19 +36,15 @@ from packaging.requirements import Requirement as PkgRequirement, InvalidRequire
 from depkeeper.models.requirement import Requirement
 from depkeeper.exceptions import ParseError, FileOperationError
 from depkeeper.constants import (
+    HASH_DIRECTIVE,
     INCLUDE_DIRECTIVE,
     CONSTRAINT_DIRECTIVE,
     EDITABLE_DIRECTIVE,
+    INCLUDE_DIRECTIVE_LONG,
+    CONSTRAINT_DIRECTIVE_LONG,
+    EDITABLE_DIRECTIVE_LONG,
 )
 
-
-# ---------------------------------------------------------------------------
-# Precompiled regular expressions
-# ---------------------------------------------------------------------------
-
-
-NORMALIZE_RE = re.compile(r"[-_.]+")
-HASH_RE = re.compile(r"--hash[=\s]+(\S+)")
 
 URL_SCHEMES = (
     "git+https://",
@@ -78,19 +74,24 @@ class RequirementsParser:
     - Single-line parsing via :meth:`parse_line`
     - Whole-file parsing via :meth:`parse_file`
     - String input parsing via :meth:`parse_string`
-    - Recursive include directives (-r)
-    - Constraint directives (-c)
-    - Circular dependency detection
 
     Errors are collected in `self.errors` and never raised unless a file
     read operation fails.
+
+    Attributes
+    ----------
+    errors : List[ParseError]
+        Collection of parse errors encountered during parsing.
+    warnings : List[str]
+        Collection of non-fatal warnings generated during parsing.
     """
 
     def __init__(self) -> None:
+        """Initialize the parser with empty state."""
         self.errors: List[ParseError] = []
         self.warnings: List[str] = []
-        self._include_stack: List[Path] = []
-        self._constraints: Dict[str, Requirement] = {}
+        self._included_files_stack: List[Path] = []
+        self._constraint_requirements: Dict[str, Requirement] = {}
 
     # ----------------------------------------------------------------------
     # Top-level entry points
@@ -98,124 +99,137 @@ class RequirementsParser:
 
     def parse_file(
         self,
-        path: str | Path,
-        is_constraint: bool = False,
-        _parent_path: Optional[Path] = None,
+        file_path: str | Path,
+        is_constraint_file: bool = False,
+        _parent_directory_path: Optional[Path] = None,
     ) -> List[Requirement]:
         """
         Parse a requirements file from disk.
 
         Parameters
         ----------
-        path :
-            Path to the file on disk.
-        is_constraint :
-            If True, treat as constraint file (doesn't return requirements).
-        _parent_path :
-            Internal parameter for recursive includes.
+        file_path : str | Path
+            Path to the requirements file on disk.
+        is_constraint_file : bool, optional
+            If True, treat as constraint file (stores constraints, doesn't return requirements).
+            Default is False.
+        _parent_directory_path : Path, optional
+            Internal parameter for resolving relative paths in recursive includes.
 
         Returns
         -------
-        list[Requirement]
+        List[Requirement]
+            List of parsed requirement objects. Empty if is_constraint_file is True.
 
         Raises
         ------
         FileOperationError
             If the file does not exist or cannot be read.
         ParseError
-            If circular dependency is detected.
+            If circular dependency is detected in include directives.
         """
-        path = self._resolve_path(path=Path(path), parent=_parent_path)
+        resolved_path = self._resolve_file_path(
+            file_path=Path(file_path), parent_directory=_parent_directory_path
+        )
 
-        # Check for circular dependencies
-        if path in self._include_stack:
-            cycle = " -> ".join(str(p) for p in self._include_stack + [path])
+        # Check for circular dependencies in include directives
+        if resolved_path in self._included_files_stack:
+            cycle_path = " -> ".join(
+                str(p) for p in self._included_files_stack + [resolved_path]
+            )
             raise ParseError(
-                f"Circular dependency detected: {cycle}",
-                file_path=str(path),
+                f"Circular dependency detected: {cycle_path}",
+                file_path=str(resolved_path),
             )
 
-        if not path.exists():
+        if not resolved_path.exists():
             raise FileOperationError(
-                f"Requirements file not found: {path}",
-                file_path=str(path),
+                f"Requirements file not found: {resolved_path}",
+                file_path=str(resolved_path),
                 operation="read",
             )
 
         try:
-            content = path.read_text(encoding="utf-8")
+            file_content = resolved_path.read_text(encoding="utf-8")
         except Exception as exc:
             raise FileOperationError(
-                f"Could not read file: {path}",
-                file_path=str(path),
+                f"Could not read file: {resolved_path}",
+                file_path=str(resolved_path),
                 operation="read",
                 original_error=exc,
             ) from exc
 
         # Track include stack for circular dependency detection
-        self._include_stack.append(path)
+        self._included_files_stack.append(resolved_path)
         try:
             return self.parse_string(
-                content,
-                file_path=str(path),
-                is_constraint=is_constraint,
-                _current_path=path,
+                file_content,
+                source_file_path=str(resolved_path),
+                is_constraint_file=is_constraint_file,
+                _current_directory_path=resolved_path,
             )
         finally:
-            self._include_stack.pop()
+            self._included_files_stack.pop()
 
     def parse_string(
         self,
-        content: str,
-        file_path: Optional[str] = None,
-        is_constraint: bool = False,
-        _current_path: Optional[Path] = None,
+        requirements_content: str,
+        source_file_path: Optional[str] = None,
+        is_constraint_file: bool = False,
+        _current_directory_path: Optional[Path] = None,
     ) -> List[Requirement]:
         """
-        Parse requirements from raw text.
+        Parse requirements from raw text content.
 
-        Non-fatal parse errors are collected in `self.errors`.
+        Non-fatal parse errors are collected in `self.errors` rather than raised.
 
         Parameters
         ----------
-        content :
-            Raw file text.
-        file_path :
-            Optional file path, recorded for error metadata.
-        is_constraint :
-            If True, store as constraints instead of returning.
-        _current_path :
-            Internal parameter for recursive includes.
+        requirements_content : str
+            Raw text content of a requirements file.
+        source_file_path : str, optional
+            Optional file path for error metadata and context.
+        is_constraint_file : bool, optional
+            If True, store parsed requirements as constraints instead of returning them.
+            Default is False.
+        _current_directory_path : Path, optional
+            Internal parameter for resolving relative paths in recursive includes.
 
         Returns
         -------
-        list[Requirement]
+        List[Requirement]
+            List of parsed requirement objects. Empty if is_constraint_file is True.
         """
-        requirements: List[Requirement] = []
+        parsed_requirements: List[Requirement] = []
 
-        for line_no, line in enumerate(content.splitlines(), start=1):
+        for line_number, line_text in enumerate(
+            requirements_content.splitlines(), start=1
+        ):
             try:
-                result = self.parse_line(
-                    line, line_no, file_path, _current_path=_current_path
+                parse_result = self.parse_line(
+                    line_text,
+                    line_number,
+                    source_file_path,
+                    _current_directory_path=_current_directory_path,
                 )
 
-                if result is None:
+                if parse_result is None:
                     continue
 
-                # Handle include directive result
-                if isinstance(result, list):
-                    requirements.extend(result)
-                elif isinstance(result, Requirement):
-                    if is_constraint:
-                        # Store constraints for later application
-                        self._constraints[result.name] = result
+                # Handle include directive result (returns list of requirements)
+                if isinstance(parse_result, list):
+                    parsed_requirements.extend(parse_result)
+                elif isinstance(parse_result, Requirement):
+                    if is_constraint_file:
+                        # Store constraints for later application to requirements
+                        self._constraint_requirements[parse_result.name] = parse_result
                     else:
-                        requirements.append(result)
+                        parsed_requirements.append(parse_result)
 
-            except ParseError as exc:
-                self.errors.append(exc)
+            except ParseError as parse_error:
+                self.errors.append(parse_error)
 
-        return requirements
+        return parsed_requirements
 
     # ----------------------------------------------------------------------
     # Line parsing
@@ -223,93 +237,112 @@ class RequirementsParser:
 
     def parse_line(
         self,
-        line: str,
+        line_text: str,
         line_number: int,
-        file_path: Optional[str] = None,
-        _current_path: Optional[Path] = None,
+        source_file_path: Optional[str] = None,
+        _current_directory_path: Optional[Path] = None,
     ) -> Optional[Requirement | List[Requirement]]:
         """
-        Parse an individual line in a `requirements.txt` file.
+        Parse an individual line from a requirements.txt file.
+
+        Parameters
+        ----------
+        line_text : str
+            The raw line text to parse.
+        line_number : int
+            The line number in the source file (for error reporting).
+        source_file_path : str, optional
+            The source file path for error metadata.
+        _current_directory_path : Path, optional
+            Internal parameter for resolving relative paths.
 
         Returns
         -------
         Requirement | List[Requirement] | None
             - Requirement: A single parsed requirement
             - List[Requirement]: Multiple requirements from include directive
-            - None: Empty/comment line or processed directive
+            - None: Empty line, comment line, or processed constraint directive
         """
-        stripped = line.strip()
+        stripped_line = line_text.strip()
 
-        # Skip empty / pure comment lines
-        if not stripped or stripped.startswith("#"):
+        # Skip empty lines and pure comment lines
+        if not stripped_line or stripped_line.startswith("#"):
             return None
 
-        stripped, comment = self._split_comment_from_line(stripped)
+        requirement_spec, inline_comment = self._extract_inline_comment(stripped_line)
 
-        # Handle include directives (-r)
-        if stripped.startswith((INCLUDE_DIRECTIVE, "--requirement")):
+        # Handle include directives (-r / --requirement)
+        if requirement_spec.startswith((INCLUDE_DIRECTIVE, INCLUDE_DIRECTIVE_LONG)):
             return self._handle_include_directive(
-                stripped, line_number, file_path, _current_path
+                requirement_spec, line_number, source_file_path, _current_directory_path
             )
 
-        # Handle constraint directives (-c)
-        if stripped.startswith(CONSTRAINT_DIRECTIVE):
+        # Handle constraint directives (-c / --constraint)
+        if requirement_spec.startswith(
+            (CONSTRAINT_DIRECTIVE, CONSTRAINT_DIRECTIVE_LONG)
+        ):
             return self._handle_constraint_directive(
-                stripped, line_number, file_path, _current_path
+                requirement_spec, line_number, source_file_path, _current_directory_path
             )
 
-        # Remove quotes if present
-        stripped = self._remove_quotes(stripped)
+        # Remove surrounding quotes if present
+        requirement_spec = self._remove_surrounding_quotes(requirement_spec)
 
-        # Editable installs
-        editable = stripped.startswith((EDITABLE_DIRECTIVE, "--editable"))
-        if editable:
-            stripped = stripped.split(None, 1)[1] if " " in stripped else ""
+        # Check if this is an editable install
+        is_editable = requirement_spec.startswith(
+            (EDITABLE_DIRECTIVE, EDITABLE_DIRECTIVE_LONG)
+        )
+        if is_editable:
+            requirement_spec = (
+                requirement_spec.split(None, 1)[1] if " " in requirement_spec else ""
+            )
 
-        # Extract --hash arguments
-        hashes = HASH_RE.findall(stripped)
-        if hashes:
-            stripped = " ".join(
-                part for part in stripped.split() if not part.startswith("--hash")
+        # Extract hash values from --hash arguments
+        hash_values = re.findall(pattern=r"--hash[=\s]+(\S+)", string=requirement_spec)
+        if hash_values:
+            requirement_spec = " ".join(
+                token
+                for token in requirement_spec.split()
+                if not token.startswith(HASH_DIRECTIVE)
             )
 
         # Parse direct URLs FIRST (git/https/file) - must come before local paths
-        url_info = self._parse_url(stripped)
-        if url_info:
-            req = self._build_url_requirement(
-                url=stripped,
-                url_info=url_info,
-                editable=editable,
-                hashes=hashes,
-                comment=comment,
-                raw_line=line,
+        url_components = self._parse_direct_url(requirement_spec)
+        if url_components:
+            parsed_requirement = self._build_url_based_requirement(
+                url_string=requirement_spec,
+                url_components=url_components,
+                is_editable=is_editable,
+                hash_values=hash_values,
+                inline_comment=inline_comment,
+                original_line=line_text,
                 line_number=line_number,
             )
 
-        elif path_info := self._parse_local_path(stripped):
-            req = self._build_path_requirement(
-                path_info=path_info,
-                current_path=_current_path,
-                editable=editable,
-                hashes=hashes,
-                comment=comment,
-                raw_line=line,
+        elif local_path_components := self._parse_local_file_path(requirement_spec):
+            parsed_requirement = self._build_local_path_requirement(
+                path_components=local_path_components,
+                current_directory=_current_directory_path,
+                is_editable=is_editable,
+                hash_values=hash_values,
+                inline_comment=inline_comment,
+                original_line=line_text,
                 line_number=line_number,
             )
 
         else:
-            req = self._build_standard_requirement(
-                line=stripped,
-                editable=editable,
-                hashes=hashes,
-                comment=comment,
-                raw_line=line,
+            parsed_requirement = self._build_standard_pep508_requirement(
+                requirement_spec=requirement_spec,
+                is_editable=is_editable,
+                hash_values=hash_values,
+                inline_comment=inline_comment,
+                original_line=line_text,
                 line_number=line_number,
-                file_path=file_path,
+                source_file_path=source_file_path,
             )
 
-        # Apply constraints if applicable
-        return self._apply_constraints(req)
+        # Apply constraint specifications if applicable
+        return self._apply_constraint_to_requirement(parsed_requirement)
 
     # ----------------------------------------------------------------------
     # Directive handlers
@@ -317,22 +350,40 @@ class RequirementsParser:
 
     def _handle_include_directive(
         self,
-        line: str,
+        directive_line: str,
         line_number: int,
-        file_path: Optional[str],
-        current_path: Optional[Path],
+        source_file_path: Optional[str],
+        current_directory: Optional[Path],
     ) -> Optional[List[Requirement]]:
-        """Handle -r/--requirement directive."""
-        parts = line.split(maxsplit=1)
-        if len(parts) < 2:
+        """
+        Handle -r/--requirement include directive.
+
+        Parameters
+        ----------
+        directive_line : str
+            The directive line to parse.
+        line_number : int
+            Line number for error reporting.
+        source_file_path : str, optional
+            Source file path for error context.
+        current_directory : Path, optional
+            Current directory for resolving relative paths.
+
+        Returns
+        -------
+        List[Requirement] | None
+            List of requirements from the included file, or None if error occurred.
+        """
+        line_parts = directive_line.split(maxsplit=1)
+        if len(line_parts) < 2:
             self.warnings.append(
                 f"Line {line_number}: Include directive missing file path"
             )
             return None
 
-        include_path = parts[1].strip()
+        included_file_path = line_parts[1].strip()
 
-        if not current_path:
+        if not current_directory:
             self.warnings.append(
                 f"Line {line_number}: Cannot resolve include path without base file"
             )
@@ -340,37 +391,57 @@ class RequirementsParser:
 
         try:
             return self.parse_file(
-                include_path, is_constraint=False, _parent_path=current_path
+                included_file_path,
+                is_constraint_file=False,
+                _parent_directory_path=current_directory,
             )
         except (FileOperationError, ParseError) as exc:
             self.errors.append(
                 ParseError(
                     f"Failed to process include directive: {exc}",
                     line_number=line_number,
-                    line_content=line,
-                    file_path=file_path,
+                    line_content=directive_line,
+                    file_path=source_file_path,
                 )
             )
             return None
 
     def _handle_constraint_directive(
         self,
-        line: str,
+        directive_line: str,
         line_number: int,
-        file_path: Optional[str],
-        current_path: Optional[Path],
+        source_file_path: Optional[str],
+        current_directory: Optional[Path],
     ) -> None:
-        """Handle -c/--constraint directive."""
-        parts = line.split(maxsplit=1)
-        if len(parts) < 2:
+        """
+        Handle -c/--constraint directive.
+
+        Parameters
+        ----------
+        directive_line : str
+            The directive line to parse.
+        line_number : int
+            Line number for error reporting.
+        source_file_path : str, optional
+            Source file path for error context.
+        current_directory : Path, optional
+            Current directory for resolving relative paths.
+
+        Returns
+        -------
+        None
+            Constraints are stored internally, not returned.
+        """
+        line_parts = directive_line.split(maxsplit=1)
+        if len(line_parts) < 2:
             self.warnings.append(
                 f"Line {line_number}: Constraint directive missing file path"
             )
             return None
 
-        constraint_path = parts[1].strip()
+        constraint_file_path = line_parts[1].strip()
 
-        if not current_path:
+        if not current_directory:
             self.warnings.append(
                 f"Line {line_number}: Cannot resolve constraint path without base file"
             )
@@ -378,264 +449,503 @@ class RequirementsParser:
 
         try:
             self.parse_file(
-                constraint_path, is_constraint=True, _parent_path=current_path
+                constraint_file_path,
+                is_constraint_file=True,
+                _parent_directory_path=current_directory,
             )
         except (FileOperationError, ParseError) as exc:
             self.errors.append(
                 ParseError(
                     f"Failed to process constraint directive: {exc}",
                     line_number=line_number,
-                    line_content=line,
-                    file_path=file_path,
+                    line_content=directive_line,
+                    file_path=source_file_path,
                 )
             )
 
         return None
 
     # ----------------------------------------------------------------------
-    # Standard PEP 508 requirement helper
+    # Requirement builders
     # ----------------------------------------------------------------------
 
-    def _build_standard_requirement(
+    def _build_standard_pep508_requirement(
         self,
-        line: str,
-        editable: bool,
-        hashes: List[str],
-        comment: Optional[str],
-        raw_line: str,
+        requirement_spec: str,
+        is_editable: bool,
+        hash_values: List[str],
+        inline_comment: Optional[str],
+        original_line: str,
         line_number: int,
-        file_path: Optional[str],
+        source_file_path: Optional[str],
     ) -> Requirement:
         """
-        Parse a PEP 508 dependency with the `packaging` library.
+        Build a standard PEP 508 requirement using the `packaging` library.
+
+        Parameters
+        ----------
+        requirement_spec : str
+            The requirement specification string (e.g., "requests>=2.28.0").
+        is_editable : bool
+            Whether this is an editable install.
+        hash_values : List[str]
+            List of hash values for verification.
+        inline_comment : str, optional
+            Inline comment from the requirement line.
+        original_line : str
+            The original unparsed line text.
+        line_number : int
+            Line number for error reporting.
+        source_file_path : str, optional
+            Source file path for error context.
+
+        Returns
+        -------
+        Requirement
+            Parsed requirement object.
+
+        Raises
+        ------
+        ParseError
+            If the requirement syntax is invalid.
         """
         try:
-            pkg = PkgRequirement(line)
+            parsed_pkg = PkgRequirement(requirement_spec)
         except InvalidRequirement as exc:
             raise ParseError(
                 f"Invalid requirement syntax: {exc}",
                 line_number=line_number,
-                line_content=line,
-                file_path=file_path,
+                line_content=requirement_spec,
+                file_path=source_file_path,
             ) from exc
 
         return Requirement(
-            name=self._normalize_name(pkg.name),
-            specs=[(spec.operator, spec.version) for spec in pkg.specifier],
-            extras=list(pkg.extras),
-            markers=str(pkg.marker) if pkg.marker else None,
-            url=getattr(pkg, "url", None),
-            editable=editable,
-            hashes=hashes,
-            comment=comment,
+            name=self._normalize_package_name(parsed_pkg.name),
+            specs=[(spec.operator, spec.version) for spec in parsed_pkg.specifier],
+            extras=list(parsed_pkg.extras),
+            markers=str(parsed_pkg.marker) if parsed_pkg.marker else None,
+            url=getattr(parsed_pkg, "url", None),
+            editable=is_editable,
+            hashes=hash_values,
+            comment=inline_comment,
             line_number=line_number,
-            raw_line=raw_line,
+            raw_line=original_line,
         )
 
-    # ----------------------------------------------------------------------
-    # Direct URL requirement helper
-    # ----------------------------------------------------------------------
-
-    def _build_url_requirement(
+    def _build_url_based_requirement(
         self,
-        url: str,
-        url_info: Dict[str, str],
-        editable: bool,
-        hashes: List[str],
-        comment: Optional[str],
-        raw_line: str,
+        url_string: str,
+        url_components: Dict[str, str],
+        is_editable: bool,
+        hash_values: List[str],
+        inline_comment: Optional[str],
+        original_line: str,
         line_number: int,
     ) -> Requirement:
         """
-        Parse dependencies specified by direct URLs such as `git+https://...`.
+        Build a requirement from a direct URL (e.g., git+https://...).
+
+        Parameters
+        ----------
+        url_string : str
+            The complete URL string.
+        url_components : Dict[str, str]
+            Parsed URL components including scheme, path, and egg name.
+        is_editable : bool
+            Whether this is an editable install.
+        hash_values : List[str]
+            List of hash values for verification.
+        inline_comment : str, optional
+            Inline comment from the requirement line.
+        original_line : str
+            The original unparsed line text.
+        line_number : int
+            Line number for error reporting.
+
+        Returns
+        -------
+        Requirement
+            Parsed requirement object.
+
+        Raises
+        ------
+        ParseError
+            If package name cannot be determined from URL.
         """
-        # Prefer #egg= name
-        egg_name = url_info.get("egg") or self._extract_name_from_url(url)
-        if not egg_name:
+        # Prefer #egg= name, otherwise infer from URL
+        package_name = url_components.get("egg") or self._infer_package_name_from_url(
+            url_string
+        )
+        if not package_name:
             raise ParseError(
                 "URL requirements must include '#egg=<name>' or an inferable package name.",
                 line_number=line_number,
-                line_content=url,
+                line_content=url_string,
             )
 
         return Requirement(
-            name=self._normalize_name(egg_name),
+            name=self._normalize_package_name(package_name),
             specs=[],
             extras=[],
             markers=None,
-            url=url,
-            editable=editable,
-            hashes=hashes,
-            comment=comment,
+            url=url_string,
+            editable=is_editable,
+            hashes=hash_values,
+            comment=inline_comment,
             line_number=line_number,
-            raw_line=raw_line,
+            raw_line=original_line,
         )
 
-    # ----------------------------------------------------------------------
-    # Path-based requirement helper
-    # ----------------------------------------------------------------------
-
-    def _build_path_requirement(
+    def _build_local_path_requirement(
         self,
-        path_info: Dict[str, str],
-        current_path: Optional[Path],
-        editable: bool,
-        hashes: List[str],
-        comment: Optional[str],
-        raw_line: str,
+        path_components: Dict[str, str],
+        current_directory: Optional[Path],
+        is_editable: bool,
+        hash_values: List[str],
+        inline_comment: Optional[str],
+        original_line: str,
         line_number: int,
     ) -> Requirement:
         """
-        Parse local path-based dependencies.
+        Build a requirement from a local file path.
+
+        Parameters
+        ----------
+        path_components : Dict[str, str]
+            Parsed path components including path and optional egg name.
+        current_directory : Path, optional
+            Current directory for resolving relative paths.
+        is_editable : bool
+            Whether this is an editable install.
+        hash_values : List[str]
+            List of hash values for verification.
+        inline_comment : str, optional
+            Inline comment from the requirement line.
+        original_line : str
+            The original unparsed line text.
+        line_number : int
+            Line number for error reporting.
+
+        Returns
+        -------
+        Requirement
+            Parsed requirement object.
         """
-        path = self._resolve_path(path=Path(path_info["path"]), parent=current_path)
-        egg_name = path_info.get("egg") or self._extract_package_name_from_path(path)
+        resolved_path = self._resolve_file_path(
+            file_path=Path(path_components["path"]), parent_directory=current_directory
+        )
+        package_name = path_components.get("egg") or self._infer_package_name_from_path(
+            resolved_path
+        )
 
         return Requirement(
-            name=self._normalize_name(egg_name),
+            name=self._normalize_package_name(package_name),
             specs=[],
             extras=[],
             markers=None,
-            url=path.as_uri(),
-            editable=editable,
-            hashes=hashes,
-            comment=comment,
+            url=resolved_path.as_uri(),
+            editable=is_editable,
+            hashes=hash_values,
+            comment=inline_comment,
             line_number=line_number,
-            raw_line=raw_line,
+            raw_line=original_line,
         )
 
     # ----------------------------------------------------------------------
-    # Utilities
+    # Path and URL parsing utilities
     # ----------------------------------------------------------------------
 
-    def _resolve_path(self, path: Path, parent: Optional[Path]) -> Path:
-        if parent and not path.is_absolute():
-            return (parent.parent / path).resolve()
-        return path.resolve()
+    def _resolve_file_path(
+        self, file_path: Path, parent_directory: Optional[Path]
+    ) -> Path:
+        """
+        Resolve a file path, handling relative paths from a parent directory.
 
-    def _parse_url(self, line: str) -> Optional[Dict[str, str]]:
+        Parameters
+        ----------
+        file_path : Path
+            The file path to resolve.
+        parent_directory : Path, optional
+            Parent directory for resolving relative paths.
+
+        Returns
+        -------
+        Path
+            Resolved absolute path.
+        """
+        if parent_directory and not file_path.is_absolute():
+            return (parent_directory.parent / file_path).resolve()
+        return file_path.resolve()
+
+    def _parse_direct_url(self, requirement_line: str) -> Optional[Dict[str, str]]:
+        """
+        Parse a direct URL requirement (e.g., git+https://...).
+
+        Parameters
+        ----------
+        requirement_line : str
+            The requirement line to parse.
+
+        Returns
+        -------
+        Dict[str, str] | None
+            Dictionary with 'scheme', 'path', and 'egg' keys if URL found, None otherwise.
+        """
         for scheme in URL_SCHEMES:
-            if line.startswith(scheme):
-                egg = None
-                if "#egg=" in line:
-                    url_part, egg_part = line.split("#egg=", 1)
-                    egg = egg_part.split("&")[0].split()[0]
+            if requirement_line.startswith(scheme):
+                egg_name = None
+                if "#egg=" in requirement_line:
+                    url_part, egg_part = requirement_line.split("#egg=", 1)
+                    egg_name = egg_part.split("&")[0].split()[0]
                     return {
                         "scheme": scheme,
                         "path": url_part[len(scheme) :],
-                        "egg": egg,
+                        "egg": egg_name,
                     }
-                return {"scheme": scheme, "path": line[len(scheme) :], "egg": None}
+                return {
+                    "scheme": scheme,
+                    "path": requirement_line[len(scheme) :],
+                    "egg": None,
+                }
         return None
 
-    def _parse_local_path(self, line: str) -> Optional[Dict[str, str]]:
+    def _parse_local_file_path(self, requirement_line: str) -> Optional[Dict[str, str]]:
+        """
+        Parse a local file path requirement.
 
-        is_path = False
+        Parameters
+        ----------
+        requirement_line : str
+            The requirement line to parse.
 
-        if line.startswith(("./", "../", ".\\", ":\\")):
-            is_path = True
+        Returns
+        -------
+        Dict[str, str] | None
+            Dictionary with 'path' and 'egg' keys if local path found, None otherwise.
+        """
+        is_local_path = False
 
-        elif line.startswith("/") or (len(line) > 3 and line[1:3] == ":\\"):
-            is_path = True
+        # Check for relative paths (Unix and Windows)
+        if requirement_line.startswith(("./", "../", ".\\", ":\\")):
+            is_local_path = True
+        # Check for absolute paths (Unix and Windows)
+        elif requirement_line.startswith("/") or (
+            len(requirement_line) > 3 and requirement_line[1:3] == ":\\"
+        ):
+            is_local_path = True
 
-        if not is_path:
+        if not is_local_path:
             return None
 
-        if "#egg=" in line:
-            path_part, egg_part = line.split("#egg=", 1)
-            egg = egg_part.split("&")[0].split()[0]
-            return {"path": path_part, "egg": egg}
+        if "#egg=" in requirement_line:
+            path_part, egg_part = requirement_line.split("#egg=", 1)
+            egg_name = egg_part.split("&")[0].split()[0]
+            return {"path": path_part, "egg": egg_name}
 
-        return {"path": line, "egg": None}
+        return {"path": requirement_line, "egg": None}
 
-    def _extract_package_name_from_path(self, path: Path):
-        name = path.name
-
-        for ext in (".tar.gz", ".tar.bz2", ".zip", ".whl"):
-            if name.endswith(ext):
-                return name[: -len(ext)]
-        return name
-
-    def _normalize_name(self, name: str) -> str:
+    def _infer_package_name_from_path(self, file_path: Path) -> str:
         """
-        Normalize distribution name according to PEP 503.
+        Infer package name from a file path.
+
+        Parameters
+        ----------
+        file_path : Path
+            The file path to extract the package name from.
+
+        Returns
+        -------
+        str
+            Inferred package name.
         """
-        return NORMALIZE_RE.sub("-", name).lower()
+        filename = file_path.name
 
-    def _remove_quotes(self, text: str) -> str:
-        """
-        Remove surrounding quotes from a line.
-        """
-        if len(text) >= 2 and text[0] in ('"', "'") and text[0] == text[-1]:
-            return text[1:-1]
-        return text
+        # Remove common archive extensions
+        for extension in (".tar.gz", ".tar.bz2", ".zip", ".whl"):
+            if filename.endswith(extension):
+                return filename[: -len(extension)]
+        return filename
 
-
-
-    def _extract_name_from_url(self, url: str) -> Optional[str]:
+    def _infer_package_name_from_url(self, url: str) -> Optional[str]:
         """
         Attempt to infer the package name from a URL path.
+
+        Parameters
+        ----------
+        url : str
+            The URL to parse.
+
+        Returns
+        -------
+        str | None
+            Inferred package name or None if unable to infer.
         """
-        path = url.split("://", 1)[1] if "://" in url else url
-        path = path.rstrip("/")
+        # Remove scheme
+        url_path = url.split("://", 1)[1] if "://" in url else url
+        url_path = url_path.rstrip("/")
 
-        if path.endswith(".git"):
-            path = path[:-4]
+        # Remove .git extension if present
+        if url_path.endswith(".git"):
+            url_path = url_path[:-4]
 
-        segments = path.replace("\\", "/").split("/")
-        for segment in reversed(segments):
+        # Split by path separator and find last meaningful segment
+        path_segments = url_path.replace("\\", "/").split("/")
+        for segment in reversed(path_segments):
             if segment and segment not in ("#", "?"):
                 return segment
 
         return None
 
-    def _apply_constraints(self, req: Requirement) -> Requirement:
-        """
-        Apply stored constraints to a requirement.
-        """
-        if req.name in self._constraints:
-            constraint = self._constraints[req.name]
-            # Merge specs from constraint
-            if constraint.specs and not req.specs:
-                req.specs = constraint.specs
-        return req
+    # ----------------------------------------------------------------------
+    # String manipulation utilities
+    # ----------------------------------------------------------------------
 
-    def _split_comment_from_line(self, line: str) -> Tuple[str, Optional[str]]:
-        for i, char in enumerate(line):
+    def _normalize_package_name(self, package_name: str) -> str:
+        """
+        Normalize distribution name according to PEP 503.
+
+        Parameters
+        ----------
+        package_name : str
+            The package name to normalize.
+
+        Returns
+        -------
+        str
+            Normalized package name (lowercase with hyphens).
+        """
+        return re.sub(pattern=r"[-_.]+", repl="-", string=package_name).lower()
+
+    def _remove_surrounding_quotes(self, text: str) -> str:
+        """
+        Remove surrounding quotes from a string.
+
+        Parameters
+        ----------
+        text : str
+            The text to process.
+
+        Returns
+        -------
+        str
+            Text with surrounding quotes removed if present.
+        """
+        if len(text) >= 2 and text[0] in ('"', "'") and text[0] == text[-1]:
+            return text[1:-1]
+        return text
+
+    def _extract_inline_comment(self, line: str) -> Tuple[str, Optional[str]]:
+        """
+        Extract inline comment from a requirement line.
+
+        Handles URLs containing '#' by checking for '://' prefix.
+
+        Parameters
+        ----------
+        line : str
+            The line to parse.
+
+        Returns
+        -------
+        Tuple[str, str | None]
+            Tuple of (requirement_spec, comment) where comment may be None.
+        """
+        for char_index, char in enumerate(line):
             if char != "#":
                 continue
 
-            before = line[:i]
-            url_start = before.rfind("://")
+            text_before_hash = line[:char_index]
+            url_scheme_position = text_before_hash.rfind("://")
 
-            if url_start == -1 or " " in before[url_start:]:
-                return line[:i].strip(), line[i + 1 :].strip()
+            # If no URL scheme or there's whitespace after scheme, this is a comment
+            if (
+                url_scheme_position == -1
+                or " " in text_before_hash[url_scheme_position:]
+            ):
+                return line[:char_index].strip(), line[char_index + 1 :].strip()
 
         return line, None
 
     # ----------------------------------------------------------------------
-    # Public accessors for collected errors / warnings
+    # Constraint application
+    # ----------------------------------------------------------------------
+
+    def _apply_constraint_to_requirement(self, requirement: Requirement) -> Requirement:
+        """
+        Apply stored constraints to a requirement.
+
+        Parameters
+        ----------
+        requirement : Requirement
+            The requirement to apply constraints to.
+
+        Returns
+        -------
+        Requirement
+            The requirement with constraints applied.
+        """
+        if requirement.name in self._constraint_requirements:
+            constraint = self._constraint_requirements[requirement.name]
+            # Merge specs from constraint if requirement has no specs
+            if constraint.specs and not requirement.specs:
+                requirement.specs = constraint.specs
+        return requirement
+
+    # ----------------------------------------------------------------------
+    # Public accessors
     # ----------------------------------------------------------------------
 
     def get_errors(self) -> List[ParseError]:
-        """Return list of collected parse errors."""
+        """
+        Return list of collected parse errors.
+
+        Returns
+        -------
+        List[ParseError]
+            List of parse errors encountered during parsing.
+        """
         return self.errors
 
     def get_warnings(self) -> List[str]:
-        """Return list of collected parse warnings."""
+        """
+        Return list of collected parse warnings.
+
+        Returns
+        -------
+        List[str]
+            List of warning messages generated during parsing.
+        """
         return self.warnings
 
     def has_errors(self) -> bool:
-        """Return True if any parse errors were collected."""
+        """
+        Check if any parse errors were collected.
+
+        Returns
+        -------
+        bool
+            True if errors exist, False otherwise.
+        """
         return bool(self.errors)
 
     def get_constraints(self) -> Dict[str, Requirement]:
-        """Return dictionary of loaded constraints."""
-        return self._constraints.copy()
+        """
+        Return dictionary of loaded constraints.
+
+        Returns
+        -------
+        Dict[str, Requirement]
+            Copy of internal constraints dictionary.
+        """
+        return self._constraint_requirements.copy()
 
     def reset(self) -> None:
-        """Reset parser state for reuse."""
+        """
+        Reset parser state for reuse.
+
+        Clears all errors, warnings, include stack, and constraints.
+        """
         self.errors = []
         self.warnings = []
-        self._include_stack = []
-        self._constraints = {}
+        self._included_files_stack = []
+        self._constraint_requirements = {}

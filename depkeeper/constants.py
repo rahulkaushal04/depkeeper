@@ -79,10 +79,13 @@ REQUIREMENT_FILE_PATTERNS: Final[Dict[str, List[str]]] = {
     "backup": ["*.backup"],
 }
 
-# PEP 508 Directives
+# PEP 508 Directives (short and long forms)
 INCLUDE_DIRECTIVE: Final[str] = "-r"
+INCLUDE_DIRECTIVE_LONG: Final[str] = "--requirement"
 CONSTRAINT_DIRECTIVE: Final[str] = "-c"
+CONSTRAINT_DIRECTIVE_LONG: Final[str] = "--constraint"
 EDITABLE_DIRECTIVE: Final[str] = "-e"
+EDITABLE_DIRECTIVE_LONG: Final[str] = "--editable"
 HASH_DIRECTIVE: Final[str] = "--hash"
 
 # =============================================================================
