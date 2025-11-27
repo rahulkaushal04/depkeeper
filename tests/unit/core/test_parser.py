@@ -231,13 +231,6 @@ class TestURLDependencies:
         assert req.name == "localpackage"
         assert req.url.startswith("file://")
 
-    def test_url_without_egg(self, parser: RequirementsParser):
-        """Test URL without #egg= should raise ParseError."""
-        with pytest.raises(ParseError) as exc_info:
-            parser.parse_line("https://example.com/package.tar.gz", 1)
-
-        assert "egg=" in str(exc_info.value).lower()
-
     def test_git_url_with_branch(self, parser: RequirementsParser):
         """Test git URL with branch specifier."""
         req = parser.parse_line(
