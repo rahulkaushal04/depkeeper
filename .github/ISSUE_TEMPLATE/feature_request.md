@@ -63,8 +63,8 @@ If another tool implements something similar,
 list them and explain what you like/dislike.
 -->
 
-- **Tool Name** – description or link
-- **Tool Name** – description or link
+- **Tool Name** - description or link
+- **Tool Name** - description or link
 
 ## 🛠️ Implementation Considerations (Optional)
 

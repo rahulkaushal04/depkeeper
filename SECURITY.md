@@ -31,12 +31,12 @@ We appreciate coordinated disclosure and will work with you to verify, fix, and 
 
 ### Include in Your Report
 
-1. **Description** – Clear explanation of the issue
-2. **Impact** – What an attacker could achieve
-3. **Affected Versions** – Specific versions tested
-4. **Reproduction Steps** – Required to verify the issue
-5. **Proof of Concept (PoC)** – If available
-6. **Potential Fix** – If you have thoughts or patches
+1. **Description** - Clear explanation of the issue
+2. **Impact** - What an attacker could achieve
+3. **Affected Versions** - Specific versions tested
+4. **Reproduction Steps** - Required to verify the issue
+5. **Proof of Concept (PoC)** - If available
+6. **Potential Fix** - If you have thoughts or patches
 
 Example format:
 
@@ -51,7 +51,7 @@ Impact:
 Remote code execution during dependency checks …
 
 Affected Versions:
-0.1.0 – 0.1.5
+0.1.0 - 0.1.5
 
 Reproduction:
 
@@ -75,7 +75,7 @@ Sanitize inputs in parser and enforce safe evaluation rules.
 
 - **48 hours** → Initial acknowledgment
 - **5 business days** → Validation decision
-- **Every 5–7 days** → Status updates
+- **Every 5-7 days** → Status updates
 - **Within 30 days** → Target resolution for critical vulnerabilities
 
 ### Our Process
@@ -233,8 +233,8 @@ Typical flow:
 | Day  | Action                           |
 | ---- | -------------------------------- |
 | 0    | Vulnerability privately reported |
-| 1–5  | Triage & validation              |
-| 5–30 | Fix development & testing        |
+| 1-5  | Triage & validation              |
+| 5-30 | Fix development & testing        |
 | ~30  | Public disclosure & advisory     |
 
 Earlier disclosure may occur if:

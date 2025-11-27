@@ -177,11 +177,13 @@ class RequirementsParser:
         comment = None
         comment_match = COMMENT_RE.search(stripped)
         if comment_match:
-            comment = stripped[comment_match.start() + 1:].strip()
+            comment = stripped[comment_match.start() + 1 :].strip()
             stripped = stripped[: comment_match.start()].strip()
 
         # Include / constraint directives (supported later in depkeeper)
-        if stripped.startswith(INCLUDE_DIRECTIVE) or stripped.startswith(CONSTRAINT_DIRECTIVE):
+        if stripped.startswith(INCLUDE_DIRECTIVE) or stripped.startswith(
+            CONSTRAINT_DIRECTIVE
+        ):
             self.warnings.append(
                 f"Line {line_number}: include/constraint directives not fully implemented: {stripped}"
             )
@@ -191,7 +193,7 @@ class RequirementsParser:
         editable = False
         if stripped.startswith(EDITABLE_DIRECTIVE):
             editable = True
-            stripped = stripped[len(EDITABLE_DIRECTIVE):].strip()
+            stripped = stripped[len(EDITABLE_DIRECTIVE) :].strip()
 
         # Extract --hash arguments
         hashes = HASH_RE.findall(stripped)
