@@ -1,0 +1,23 @@
+# Complex mixed requirements file
+
+# Standard packages
+requests==2.28.0
+django>=3.2,<5.0
+
+# Packages with extras
+celery[redis]>=5.0
+
+# With markers
+typing-extensions>=4.0; python_version<"3.10"
+
+# Direct URLs
+git+https://github.com/user/repo.git#egg=mypackage
+
+# With hashes
+flask==2.0.1 --hash=sha256:abc123
+
+# Editable installs
+-e git+https://github.com/user/dev-repo.git#egg=devpackage
+
+# With inline comments
+numpy>=1.20  # Scientific computing

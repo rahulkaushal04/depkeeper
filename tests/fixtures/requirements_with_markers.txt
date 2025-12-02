@@ -1,0 +1,4 @@
+# Requirements with environment markers
+typing-extensions>=4.0; python_version<"3.10"
+pywin32>=300; sys_platform=="win32"
+backports.zoneinfo>=0.2.1; python_version<"3.9" and platform_system=="Linux"

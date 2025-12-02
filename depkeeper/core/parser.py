@@ -16,7 +16,6 @@ and includes the following capabilities:
 • Quoted URL support
 • Circular dependency detection
 • Inline comments
-• Graceful error recovery (errors are collected, not raised)
 • Preserves raw lines for round-tripping
 
 Implementation notes:
@@ -75,20 +74,14 @@ class RequirementsParser:
     - Whole-file parsing via :meth:`parse_file`
     - String input parsing via :meth:`parse_string`
 
-    Errors are collected in `self.errors` and never raised unless a file
-    read operation fails.
-
     Attributes
     ----------
-    errors : List[ParseError]
-        Collection of parse errors encountered during parsing.
     warnings : List[str]
         Collection of non-fatal warnings generated during parsing.
     """
 
     def __init__(self) -> None:
         """Initialize the parser with empty state."""
-        self.errors: List[ParseError] = []
         self.warnings: List[str] = []
         self._included_files_stack: List[Path] = []
         self._constraint_requirements: Dict[str, Requirement] = {}
@@ -181,8 +174,6 @@ class RequirementsParser:
         """
         Parse requirements from raw text content.
 
-        Non-fatal parse errors are collected in `self.errors` rather than raised.
-
         Parameters
         ----------
         requirements_content : str
@@ -205,29 +196,25 @@ class RequirementsParser:
         for line_number, line_text in enumerate(
             requirements_content.splitlines(), start=1
         ):
-            try:
-                parse_result = self.parse_line(
-                    line_text,
-                    line_number,
-                    source_file_path,
-                    _current_directory_path=_current_directory_path,
-                )
+            parse_result = self.parse_line(
+                line_text,
+                line_number,
+                source_file_path,
+                _current_directory_path=_current_directory_path,
+            )
 
-                if parse_result is None:
-                    continue
+            if parse_result is None:
+                continue
 
-                # Handle include directive result (returns list of requirements)
-                if isinstance(parse_result, list):
-                    parsed_requirements.extend(parse_result)
-                elif isinstance(parse_result, Requirement):
-                    if is_constraint_file:
-                        # Store constraints for later application to requirements
-                        self._constraint_requirements[parse_result.name] = parse_result
-                    else:
-                        parsed_requirements.append(parse_result)
-
-            except ParseError as parse_error:
-                self.errors.append(parse_error)
+            # Handle include directive result (returns list of requirements)
+            if isinstance(parse_result, list):
+                parsed_requirements.extend(parse_result)
+            elif isinstance(parse_result, Requirement):
+                if is_constraint_file:
+                    # Store constraints for later application to requirements
+                    self._constraint_requirements[parse_result.name] = parse_result
+                else:
+                    parsed_requirements.append(parse_result)
 
         return parsed_requirements
 
@@ -396,15 +383,12 @@ class RequirementsParser:
                 _parent_directory_path=current_directory,
             )
         except (FileOperationError, ParseError) as exc:
-            self.errors.append(
-                ParseError(
-                    f"Failed to process include directive: {exc}",
-                    line_number=line_number,
-                    line_content=directive_line,
-                    file_path=source_file_path,
-                )
-            )
-            return None
+            raise ParseError(
+                f"Failed to process include directive: {exc}",
+                line_number=line_number,
+                line_content=directive_line,
+                file_path=source_file_path,
+            ) from exc
 
     def _handle_constraint_directive(
         self,
@@ -454,14 +438,12 @@ class RequirementsParser:
                 _parent_directory_path=current_directory,
             )
         except (FileOperationError, ParseError) as exc:
-            self.errors.append(
-                ParseError(
-                    f"Failed to process constraint directive: {exc}",
-                    line_number=line_number,
-                    line_content=directive_line,
-                    file_path=source_file_path,
-                )
-            )
+            raise ParseError(
+                f"Failed to process constraint directive: {exc}",
+                line_number=line_number,
+                line_content=directive_line,
+                file_path=source_file_path,
+            ) from exc
 
         return None
 
@@ -519,6 +501,15 @@ class RequirementsParser:
                 file_path=source_file_path,
             ) from exc
 
+        for spec in parsed_pkg.specifier:
+            if not spec.version:
+                raise ParseError(
+                    f"Invalid version specifier: empty version in '{spec.operator}{spec.version}'",
+                    line_number=line_number,
+                    line_content=requirement_spec,
+                    file_path=source_file_path,
+                )
+
         return Requirement(
             name=self._normalize_package_name(parsed_pkg.name),
             specs=[(spec.operator, spec.version) for spec in parsed_pkg.specifier],
@@ -572,16 +563,21 @@ class RequirementsParser:
         ParseError
             If package name cannot be determined from URL.
         """
-        # Prefer #egg= name, otherwise infer from URL
-        package_name = url_components.get("egg") or self._infer_package_name_from_url(
-            url_string
-        )
+        package_name = url_components.get("egg")
+
         if not package_name:
-            raise ParseError(
-                "URL requirements must include '#egg=<name>' or an inferable package name.",
-                line_number=line_number,
-                line_content=url_string,
-            )
+            package_name = self._infer_package_name_from_url(url_string)
+
+            if package_name:
+                self.warnings.append(
+                    f"Line {line_number}: URL without '#egg=' - inferred name '{package_name}'. "
+                )
+            else:
+                raise ParseError(
+                    "URL requirements must include '#egg=<name>' or an inferable package name.",
+                    line_number=line_number,
+                    line_content=url_string,
+                )
 
         return Requirement(
             name=self._normalize_package_name(package_name),
@@ -725,8 +721,11 @@ class RequirementsParser:
         """
         is_local_path = False
 
+        # Check for current directory (single dot)
+        if requirement_line == "." or requirement_line.startswith(".#"):
+            is_local_path = True
         # Check for relative paths (Unix and Windows)
-        if requirement_line.startswith(("./", "../", ".\\", ":\\")):
+        elif requirement_line.startswith(("./", "../", ".\\", ":\\")):
             is_local_path = True
         # Check for absolute paths (Unix and Windows)
         elif requirement_line.startswith("/") or (
@@ -838,7 +837,7 @@ class RequirementsParser:
         """
         Extract inline comment from a requirement line.
 
-        Handles URLs containing '#' by checking for '://' prefix.
+        Handles URLs containing '#' by checking for '://' prefix and '#egg=' fragments.
 
         Parameters
         ----------
@@ -855,14 +854,21 @@ class RequirementsParser:
                 continue
 
             text_before_hash = line[:char_index]
+            text_after_hash = line[char_index + 1 :]
             url_scheme_position = text_before_hash.rfind("://")
+
+            # Check if this is a URL fragment (#egg=, #subdirectory=, etc.)
+            if text_after_hash.startswith(
+                ("egg=", "subdirectory=", "sha1=", "sha256=")
+            ):
+                continue
 
             # If no URL scheme or there's whitespace after scheme, this is a comment
             if (
                 url_scheme_position == -1
                 or " " in text_before_hash[url_scheme_position:]
             ):
-                return line[:char_index].strip(), line[char_index + 1 :].strip()
+                return text_before_hash.strip(), text_after_hash.strip()
 
         return line, None
 
@@ -895,17 +901,6 @@ class RequirementsParser:
     # Public accessors
     # ----------------------------------------------------------------------
 
-    def get_errors(self) -> List[ParseError]:
-        """
-        Return list of collected parse errors.
-
-        Returns
-        -------
-        List[ParseError]
-            List of parse errors encountered during parsing.
-        """
-        return self.errors
-
     def get_warnings(self) -> List[str]:
         """
         Return list of collected parse warnings.
@@ -916,17 +911,6 @@ class RequirementsParser:
             List of warning messages generated during parsing.
         """
         return self.warnings
-
-    def has_errors(self) -> bool:
-        """
-        Check if any parse errors were collected.
-
-        Returns
-        -------
-        bool
-            True if errors exist, False otherwise.
-        """
-        return bool(self.errors)
 
     def get_constraints(self) -> Dict[str, Requirement]:
         """
@@ -943,9 +927,8 @@ class RequirementsParser:
         """
         Reset parser state for reuse.
 
-        Clears all errors, warnings, include stack, and constraints.
+        Clears all warnings, include stack, and constraints.
         """
-        self.errors = []
         self.warnings = []
         self._included_files_stack = []
         self._constraint_requirements = {}

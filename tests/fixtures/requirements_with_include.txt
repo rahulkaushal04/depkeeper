@@ -1,0 +1,6 @@
+# Main requirements with include
+-r base_requirements.txt
+
+# Additional packages
+flask==2.0.1
+celery>=5.0

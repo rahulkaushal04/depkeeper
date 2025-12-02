@@ -1,0 +1,12 @@
+# Main requirements file
+# Web framework
+django>=3.2  # Latest LTS version
+
+# HTTP library
+requests==2.28.0  # Pinned for stability
+
+# Empty lines and comments
+
+
+# Testing tools
+pytest>=7.0  # Test runner

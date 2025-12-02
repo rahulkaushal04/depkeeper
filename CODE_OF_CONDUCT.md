@@ -70,12 +70,12 @@ Representation examples include using an official email, posting via a project a
 
 ## Enforcement
 
-If you experience or witness unacceptable behavior, please report it to:
+If you experience or witness unacceptable behavior, please report it through our confidential contact form:
 
-📧 **support@depkeeper.dev**
+🔒 https://github.com/depkeeper/depkeeper/security/advisories/new
 
 All reports will be reviewed promptly, fairly, and confidentially.
-Community leaders must respect the privacy of reporters.
+Community leaders will respect the privacy and safety of reporters at all times.
 
 ---
 

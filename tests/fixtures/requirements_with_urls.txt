@@ -1,0 +1,4 @@
+# Requirements with direct URLs
+git+https://github.com/user/repo.git#egg=mypackage
+git+https://github.com/user/repo.git@develop#egg=devpackage
+https://github.com/user/repo/archive/main.zip#egg=zippackage

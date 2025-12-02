@@ -1,0 +1,4 @@
+# Requirements with extras
+celery[redis,msgpack]>=5.0
+requests[security]==2.28.0
+django[argon2,bcrypt]>=3.2
