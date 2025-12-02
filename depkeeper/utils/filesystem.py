@@ -16,8 +16,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, List
 
-from depkeeper.constants import REQUIREMENT_FILE_PATTERNS, MAX_FILE_SIZE
 from depkeeper.exceptions import FileOperationError
+from depkeeper.constants import REQUIREMENT_FILE_PATTERNS, MAX_FILE_SIZE
 
 
 # ============================================================================
