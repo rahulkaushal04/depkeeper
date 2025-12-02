@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Tuple
 from packaging.requirements import Requirement as PkgRequirement, InvalidRequirement
 
-from depkeeper.utils.logger import get_logger
+from depkeeper.utils import get_logger
 from depkeeper.models.requirement import Requirement
 from depkeeper.exceptions import ParseError, FileOperationError
 from depkeeper.constants import (
