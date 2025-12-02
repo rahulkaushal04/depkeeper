@@ -289,14 +289,16 @@ class TestURLDependencies:
         assert req.name == "package"
         assert req.url.startswith("svn+https://")
 
-    def test_url_without_egg_generates_warning(self, parser: RequirementsParser):
+    def test_url_without_egg_generates_warning(
+        self, parser: RequirementsParser, caplog: pytest.LogCaptureFixture
+    ):
         """Test URL without #egg parameter generates warning but works."""
         req = parser.parse_line("git+https://github.com/user/repo.git", 1)
 
         assert req is not None
         assert req.name == "repo"
-        assert len(parser.warnings) == 1
-        assert "egg=" in parser.warnings[0].lower()
+        assert len(caplog.records) == 1
+        assert "egg=" in caplog.records[0].message.lower()
 
     def test_http_url(self, parser: RequirementsParser):
         """Test parsing http archive URL."""
@@ -592,19 +594,23 @@ class TestDirectives:
 
         assert result is None
 
-    def test_include_directive_missing_path(self, parser: RequirementsParser):
+    def test_include_directive_missing_path(
+        self, parser: RequirementsParser, caplog: pytest.LogCaptureFixture
+    ):
         """Test include directive without file path."""
         result = parser.parse_line("-r", 1)
 
         assert result is None
-        assert len(parser.warnings) > 0
+        assert len(caplog.records) > 0
 
-    def test_constraint_directive_missing_path(self, parser: RequirementsParser):
+    def test_constraint_directive_missing_path(
+        self, parser: RequirementsParser, caplog: pytest.LogCaptureFixture
+    ):
         """Test constraint directive without file path."""
         result = parser.parse_line("-c", 1)
 
         assert result is None
-        assert len(parser.warnings) > 0
+        assert len(caplog.records) > 0
 
 
 class TestErrorHandling:

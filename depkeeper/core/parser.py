@@ -527,7 +527,7 @@ class RequirementsParser:
     def _build_url_based_requirement(
         self,
         url_string: str,
-        url_components: Dict[str, str],
+        url_components: Dict[str, Optional[str]],
         is_editable: bool,
         hash_values: List[str],
         inline_comment: Optional[str],
@@ -541,7 +541,7 @@ class RequirementsParser:
         ----------
         url_string : str
             The complete URL string.
-        url_components : Dict[str, str]
+        url_components : Dict[str, Optional[str]]
             Parsed URL components including scheme, path, and egg name.
         is_editable : bool
             Whether this is an editable install.
@@ -595,7 +595,7 @@ class RequirementsParser:
 
     def _build_local_path_requirement(
         self,
-        path_components: Dict[str, str],
+        path_components: Dict[str, Optional[str]],
         current_directory: Optional[Path],
         is_editable: bool,
         hash_values: List[str],
@@ -608,7 +608,7 @@ class RequirementsParser:
 
         Parameters
         ----------
-        path_components : Dict[str, str]
+        path_components : Dict[str, Optional[str]]
             Parsed path components including path and optional egg name.
         current_directory : Path, optional
             Current directory for resolving relative paths.
@@ -628,8 +628,12 @@ class RequirementsParser:
         Requirement
             Parsed requirement object.
         """
+        path_value = path_components.get("path")
+        if not path_value:
+            raise ValueError("Path component is required")
+
         resolved_path = self._resolve_file_path(
-            file_path=Path(path_components["path"]), parent_directory=current_directory
+            file_path=Path(path_value), parent_directory=current_directory
         )
         package_name = path_components.get("egg") or self._infer_package_name_from_path(
             resolved_path
@@ -674,7 +678,9 @@ class RequirementsParser:
             return (parent_directory.parent / file_path).resolve()
         return file_path.resolve()
 
-    def _parse_direct_url(self, requirement_line: str) -> Optional[Dict[str, str]]:
+    def _parse_direct_url(
+        self, requirement_line: str
+    ) -> Optional[Dict[str, Optional[str]]]:
         """
         Parse a direct URL requirement (e.g., git+https://...).
 
@@ -685,7 +691,7 @@ class RequirementsParser:
 
         Returns
         -------
-        Dict[str, str] | None
+        Dict[str, Optional[str]] | None
             Dictionary with 'scheme', 'path', and 'egg' keys if URL found, None otherwise.
         """
         for scheme in URL_SCHEMES:
@@ -706,7 +712,9 @@ class RequirementsParser:
                 }
         return None
 
-    def _parse_local_file_path(self, requirement_line: str) -> Optional[Dict[str, str]]:
+    def _parse_local_file_path(
+        self, requirement_line: str
+    ) -> Optional[Dict[str, Optional[str]]]:
         """
         Parse a local file path requirement.
 
@@ -717,7 +725,7 @@ class RequirementsParser:
 
         Returns
         -------
-        Dict[str, str] | None
+        Dict[str, Optional[str]] | None
             Dictionary with 'path' and 'egg' keys if local path found, None otherwise.
         """
         is_local_path = False
