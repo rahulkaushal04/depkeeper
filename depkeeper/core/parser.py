@@ -32,8 +32,8 @@ from pathlib import Path
 from typing import List, Optional, Dict, Tuple
 from packaging.requirements import Requirement as PkgRequirement, InvalidRequirement
 
-from depkeeper.utils import get_logger
 from depkeeper.models.requirement import Requirement
+from depkeeper.utils import get_logger, safe_read_file
 from depkeeper.exceptions import ParseError, FileOperationError
 from depkeeper.constants import (
     HASH_DIRECTIVE,
@@ -136,22 +136,8 @@ class RequirementsParser:
                 file_path=str(resolved_path),
             )
 
-        if not resolved_path.exists():
-            raise FileOperationError(
-                f"Requirements file not found: {resolved_path}",
-                file_path=str(resolved_path),
-                operation="read",
-            )
-
-        try:
-            file_content = resolved_path.read_text(encoding="utf-8")
-        except Exception as exc:
-            raise FileOperationError(
-                f"Could not read file: {resolved_path}",
-                file_path=str(resolved_path),
-                operation="read",
-                original_error=exc,
-            ) from exc
+        # Use safe_read_file for validated file reading with size checks
+        file_content = safe_read_file(resolved_path)
 
         # Track include stack for circular dependency detection
         self._included_files_stack.append(resolved_path)
