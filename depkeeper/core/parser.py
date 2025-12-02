@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Tuple
 from packaging.requirements import Requirement as PkgRequirement, InvalidRequirement
 
+from depkeeper.utils.logger import get_logger
 from depkeeper.models.requirement import Requirement
 from depkeeper.exceptions import ParseError, FileOperationError
 from depkeeper.constants import (
@@ -76,13 +77,13 @@ class RequirementsParser:
 
     Attributes
     ----------
-    warnings : List[str]
-        Collection of non-fatal warnings generated during parsing.
+    logger : logging.Logger
+        Logger instance for outputting warnings and debug information.
     """
 
     def __init__(self) -> None:
         """Initialize the parser with empty state."""
-        self.warnings: List[str] = []
+        self.logger = get_logger("parser")
         self._included_files_stack: List[Path] = []
         self._constraint_requirements: Dict[str, Requirement] = {}
 
@@ -363,7 +364,7 @@ class RequirementsParser:
         """
         line_parts = directive_line.split(maxsplit=1)
         if len(line_parts) < 2:
-            self.warnings.append(
+            self.logger.warning(
                 f"Line {line_number}: Include directive missing file path"
             )
             return None
@@ -371,7 +372,7 @@ class RequirementsParser:
         included_file_path = line_parts[1].strip()
 
         if not current_directory:
-            self.warnings.append(
+            self.logger.warning(
                 f"Line {line_number}: Cannot resolve include path without base file"
             )
             return None
@@ -418,7 +419,7 @@ class RequirementsParser:
         """
         line_parts = directive_line.split(maxsplit=1)
         if len(line_parts) < 2:
-            self.warnings.append(
+            self.logger.warning(
                 f"Line {line_number}: Constraint directive missing file path"
             )
             return None
@@ -426,7 +427,7 @@ class RequirementsParser:
         constraint_file_path = line_parts[1].strip()
 
         if not current_directory:
-            self.warnings.append(
+            self.logger.warning(
                 f"Line {line_number}: Cannot resolve constraint path without base file"
             )
             return None
@@ -569,8 +570,8 @@ class RequirementsParser:
             package_name = self._infer_package_name_from_url(url_string)
 
             if package_name:
-                self.warnings.append(
-                    f"Line {line_number}: URL without '#egg=' - inferred name '{package_name}'. "
+                self.logger.warning(
+                    f"Line {line_number}: URL without '#egg=' - inferred name '{package_name}'"
                 )
             else:
                 raise ParseError(
@@ -901,17 +902,6 @@ class RequirementsParser:
     # Public accessors
     # ----------------------------------------------------------------------
 
-    def get_warnings(self) -> List[str]:
-        """
-        Return list of collected parse warnings.
-
-        Returns
-        -------
-        List[str]
-            List of warning messages generated during parsing.
-        """
-        return self.warnings
-
     def get_constraints(self) -> Dict[str, Requirement]:
         """
         Return dictionary of loaded constraints.
@@ -927,8 +917,7 @@ class RequirementsParser:
         """
         Reset parser state for reuse.
 
-        Clears all warnings, include stack, and constraints.
+        Clears include stack and constraints.
         """
-        self.warnings = []
         self._included_files_stack = []
         self._constraint_requirements = {}
