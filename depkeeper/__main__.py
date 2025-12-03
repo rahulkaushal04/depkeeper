@@ -1,16 +1,3 @@
-"""
-Executable module for depkeeper.
-
-Running:
-    python -m depkeeper
-
-is equivalent to:
-    depkeeper
-
-This module simply forwards execution to the CLI entrypoint defined in
-`depkeeper.cli`.
-"""
-
 from __future__ import annotations
 
 import sys
