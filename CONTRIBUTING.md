@@ -146,8 +146,6 @@ make all
 Or individually:
 
 ```bash
-make format       # ruff format
-make lint         # ruff check
 make typecheck    # mypy
 ```
 
@@ -212,7 +210,7 @@ def test_parse_requirement_with_range():
 
 ### Python Style
 
-- Follows PEP 8 (enforced by `ruff`)
+- Follows PEP 8
 - Max line length: **100**
 - String quotes: **double quotes**
 - Use type hints everywhere

@@ -146,8 +146,6 @@ Next steps:
 
 2. Useful commands:
    • make test        — Run tests
-   • make lint        — Lint with Ruff
-   • make format      — Format with Ruff
    • make typecheck   — Mypy type checking
    • make all         — Run all quality checks
 
