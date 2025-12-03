@@ -1,30 +1,3 @@
-"""
-Requirements file parser.
-
-This module provides robust parsing of `requirements.txt` files with full
-PEP 508 support. It is designed for modern dependency management workflows
-and includes the following capabilities:
-
-• Version specifiers (==, >=, <=, ~=, !=, ===)
-• Extras (package[extra])
-• Environment markers (e.g., python_version < "3.10")
-• Direct URL dependencies (VCS/HTTP/file)
-• Editable installs (-e / --editable)
-• Hashes (--hash)
-• Include / constraint directives (-r, -c) with recursive parsing
-• Local path-based dependencies (relative/absolute)
-• Quoted URL support
-• Circular dependency detection
-• Inline comments
-• Preserves raw lines for round-tripping
-
-Implementation notes:
-- Built on top of `packaging` library for strict PEP 508 compliance.
-- Normalizes names according to PEP 503.
-- Provides convenient programmatic API via `parse_file`, `parse_string`,
-  and `parse_line`.
-"""
-
 from __future__ import annotations
 
 import re

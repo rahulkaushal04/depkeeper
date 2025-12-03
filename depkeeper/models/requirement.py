@@ -1,19 +1,11 @@
-"""
-Requirement data model.
-
-Defines the `Requirement` class representing a parsed requirement from a
-requirements.txt file, including version specifiers, markers, extras,
-hashes, and formatting preservation.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 from packaging.markers import Marker
-from packaging.specifiers import SpecifierSet
 from packaging.version import Version
+from packaging.specifiers import SpecifierSet
 
 
 @dataclass

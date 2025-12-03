@@ -7,11 +7,12 @@ import asyncio
 from typing import Any, Optional, Dict, Tuple, List
 
 from depkeeper.utils.logger import get_logger
+from depkeeper.__version__ import __version__
 from depkeeper.exceptions import NetworkError, PyPIError
 from depkeeper.constants import (
     DEFAULT_TIMEOUT,
     DEFAULT_MAX_RETRIES,
-    HTTP_USER_AGENT,
+    USER_AGENT_TEMPLATE,
 )
 
 logger = get_logger("http")
@@ -47,7 +48,7 @@ class HTTPClient:
         self.max_retries = max_retries
         self.rate_limit_delay = rate_limit_delay
         self.verify_ssl = verify_ssl
-        self.user_agent = user_agent or HTTP_USER_AGENT
+        self.user_agent = user_agent or USER_AGENT_TEMPLATE.format(version=__version__)
         self.max_concurrency = max_concurrency
         self.enable_caching = enable_caching
 

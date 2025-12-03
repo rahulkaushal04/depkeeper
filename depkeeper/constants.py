@@ -30,24 +30,11 @@ PYPI_SIMPLE_API: Final[str] = "https://pypi.org/simple/{package}/"
 PYPI_BASE_URL: Final[str] = "https://pypi.org"
 
 # =============================================================================
-# Cache Configuration
-# =============================================================================
-
-DEFAULT_CACHE_TTL: Final[int] = 3600  # 1 hour
-DEFAULT_CACHE_DIR: Final[str] = "~/.cache/depkeeper"
-CACHE_DB_NAME: Final[str] = "cache.db"
-
-# =============================================================================
 # HTTP Configuration
 # =============================================================================
 
-DEFAULT_CONCURRENT_REQUESTS: Final[int] = 10
 DEFAULT_TIMEOUT: Final[int] = 30  # seconds
 DEFAULT_MAX_RETRIES: Final[int] = 3
-DEFAULT_RETRY_DELAY: Final[int] = 1  # seconds
-
-# User agent is dynamically formatted by clients when sending requests
-HTTP_USER_AGENT: Final[str] = USER_AGENT_TEMPLATE
 
 # =============================================================================
 # Supported Python Versions
