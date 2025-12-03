@@ -1,12 +1,3 @@
-"""
-Filesystem utilities for depkeeper.
-
-Provides safe, atomic file operations, backup/restore functionality, path
-validation, and discovery of requirement files. Designed to minimize risk of
-data loss, prevent path traversal, and ensure consistent behavior across
-platforms.
-"""
-
 from __future__ import annotations
 
 
@@ -118,7 +109,12 @@ def _restore_backup_internal(backup: Path, target: Path) -> None:
 # ============================================================================
 
 
-def safe_read_file(file_path: str | Path) -> str:
+def safe_read_file(
+    file_path: str | Path,
+    *,
+    max_size: Optional[int] = MAX_FILE_SIZE,
+    encoding: str = "utf-8",
+) -> str:
     """
     Safely read a file with size checks and clear error messages.
 
@@ -132,15 +128,15 @@ def safe_read_file(file_path: str | Path) -> str:
     path = _validated_file(Path(file_path))
 
     size = path.stat().st_size
-    if size > MAX_FILE_SIZE:
+    if size > max_size:
         raise FileOperationError(
-            f"File too large: {size} bytes (max {MAX_FILE_SIZE})",
+            f"File too large: {size} bytes (max {max_size})",
             file_path=str(path),
             operation="read",
         )
 
     try:
-        return path.read_text(encoding="utf-8", errors="strict")
+        return path.read_text(encoding=encoding, errors="strict")
     except Exception as exc:
         raise FileOperationError(
             f"Failed to read file: {exc}",

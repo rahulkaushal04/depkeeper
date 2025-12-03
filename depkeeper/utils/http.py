@@ -1,15 +1,3 @@
-"""
-Async HTTP client for depkeeper.
-
-Provides:
-  - Connection pooling
-  - HTTP/2 support
-  - Retry logic with exponential backoff + jitter
-  - Rate limiting
-  - ETag caching
-  - Safe error translation into depkeeper exceptions
-"""
-
 from __future__ import annotations
 
 import time
@@ -48,10 +36,11 @@ class HTTPClient:
         self,
         timeout: int = DEFAULT_TIMEOUT,
         max_retries: int = DEFAULT_MAX_RETRIES,
-        rate_limit_delay: float = 0.1,
+        rate_limit_delay: float = 0.0,
         verify_ssl: bool = True,
         user_agent: Optional[str] = None,
         max_concurrency: int = 10,
+        enable_caching: bool = False,
     ) -> None:
 
         self.timeout = timeout
@@ -60,6 +49,7 @@ class HTTPClient:
         self.verify_ssl = verify_ssl
         self.user_agent = user_agent or HTTP_USER_AGENT
         self.max_concurrency = max_concurrency
+        self.enable_caching = enable_caching
 
         self._client: Optional[httpx.AsyncClient] = None
         self._last_request_time = 0.0
@@ -104,6 +94,9 @@ class HTTPClient:
 
     async def _rate_limit(self) -> None:
         """Guarantee a min delay between requests."""
+        if self.rate_limit_delay < 0:
+            return
+
         now = time.time()
         elapsed = now - self._last_request_time
 
@@ -193,9 +186,12 @@ class HTTPClient:
         self,
         url: str,
         *,
-        use_cache: bool = True,
+        use_cache: Optional[bool] = None,
         **kwargs: Any,
     ) -> httpx.Response:
+        # Default to client's caching setting
+        if use_cache is None:
+            use_cache = self.enable_caching
 
         # ETag check
         if use_cache and url in self._etag_cache:
@@ -235,7 +231,7 @@ class HTTPClient:
         self,
         url: str,
         *,
-        use_cache: bool = True,
+        use_cache: Optional[bool] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
 
@@ -253,32 +249,15 @@ class HTTPClient:
         self,
         urls: List[str],
         *,
-        use_cache: bool = True,
-        show_progress: bool = False,
+        use_cache: Optional[bool] = None,
+        progress_callback: Optional[callable] = None,
     ) -> Dict[str, Dict[str, Any]]:
 
         results: Dict[str, Dict[str, Any]] = {}
+        completed = 0
+        total = len(urls)
 
-        if show_progress:
-            from rich.progress import Progress
-            from rich.console import Console
-
-            console = Console()
-            with Progress(console=console) as progress:
-                task = progress.add_task("Fetching...", total=len(urls))
-
-                for url in urls:
-                    try:
-                        results[url] = await self.get_json(url, use_cache=use_cache)
-                    except Exception as exc:
-                        logger.error(f"Failed: {url} — {exc}")
-                        results[url] = {}
-                    finally:
-                        progress.advance(task)
-
-            return results
-
-        # No progress bar → concurrency
+        # Concurrent fetching
         tasks = [self.get_json(url, use_cache=use_cache) for url in urls]
         responses = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -288,6 +267,10 @@ class HTTPClient:
                 results[url] = {}
             else:
                 results[url] = resp
+
+            completed = completed + 1
+            if progress_callback:
+                progress_callback(completed, total)
 
         return results
 
