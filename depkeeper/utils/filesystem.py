@@ -212,7 +212,6 @@ def restore_backup(
     if target_path:
         target = Path(target_path)
     else:
-        # Remove only the final `.backup` or `.timestamp.backup`
         name = str(backup)
         if ".backup" not in name:
             raise FileOperationError(
@@ -220,7 +219,12 @@ def restore_backup(
                 file_path=str(backup),
                 operation="restore",
             )
-        target = Path(name[: name.rfind(".backup")])
+        name_without_backup = name[: name.rfind(".backup")]
+        parts = name_without_backup.rsplit(".", 1)
+        if len(parts) == 2 and len(parts[1]) == 15 and "_" in parts[1]:
+            target = Path(parts[0])
+        else:
+            target = Path(name_without_backup)
 
     _restore_backup_internal(backup, target)
 
