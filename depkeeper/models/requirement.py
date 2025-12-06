@@ -38,18 +38,6 @@ class Requirement:
     raw_line: Optional[str] = None
 
     # ------------------------------------------------------------
-    # Normalization
-    # ------------------------------------------------------------
-    def __post_init__(self) -> None:
-        """Normalize the package name according to PEP 503 rules."""
-        self.name = self._normalize_name(self.name)
-
-    @staticmethod
-    def _normalize_name(name: str) -> str:
-        """Normalize package name per PEP 503."""
-        return name.lower().replace("_", "-")
-
-    # ------------------------------------------------------------
     # Serialization
     # ------------------------------------------------------------
     def to_string(

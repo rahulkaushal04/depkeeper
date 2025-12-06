@@ -693,11 +693,13 @@ class RequirementsParser:
         if requirement_line == "." or requirement_line.startswith(".#"):
             is_local_path = True
         # Check for relative paths (Unix and Windows)
-        elif requirement_line.startswith(("./", "../", ".\\", ":\\")):
+        elif requirement_line.startswith(("./", "../", ".\\", "..\\")):
             is_local_path = True
         # Check for absolute paths (Unix and Windows)
         elif requirement_line.startswith("/") or (
-            len(requirement_line) > 3 and requirement_line[1:3] == ":\\"
+            len(requirement_line) >= 3
+            and requirement_line[1] == ":"
+            and requirement_line[2] == "\\"
         ):
             is_local_path = True
 
