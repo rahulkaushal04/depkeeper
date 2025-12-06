@@ -4,7 +4,7 @@ import time
 import httpx
 import random
 import asyncio
-from typing import Any, Optional, Dict, Tuple, List
+from typing import Any, Optional, Dict, Tuple, List, Callable
 
 from depkeeper.utils.logger import get_logger
 from depkeeper.__version__ import __version__
@@ -239,7 +239,8 @@ class HTTPClient:
         resp = await self.get(url, use_cache=use_cache, **kwargs)
 
         try:
-            return resp.json()
+            data: Dict[str, Any] = resp.json()
+            return data
         except Exception as exc:
             raise NetworkError(
                 f"Invalid JSON response from {url}",
@@ -251,7 +252,7 @@ class HTTPClient:
         urls: List[str],
         *,
         use_cache: Optional[bool] = None,
-        progress_callback: Optional[callable] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
     ) -> Dict[str, Dict[str, Any]]:
 
         results: Dict[str, Dict[str, Any]] = {}
@@ -267,7 +268,7 @@ class HTTPClient:
                 logger.error(f"Failed: {url} — {resp}")
                 results[url] = {}
             else:
-                results[url] = resp
+                results[url] = resp  # type: ignore[assignment]
 
             completed = completed + 1
             if progress_callback:

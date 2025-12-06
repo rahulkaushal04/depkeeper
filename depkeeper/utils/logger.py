@@ -26,7 +26,7 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
     else:
         logger = logging.getLogger(f"depkeeper.{name}")
 
-    if not logger.handlers and not logger.parent.handlers:
+    if not logger.handlers and (not logger.parent or not logger.parent.handlers):
         logger.addHandler(logging.NullHandler())
 
     return logger

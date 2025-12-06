@@ -128,7 +128,7 @@ def safe_read_file(
     path = _validated_file(Path(file_path))
 
     size = path.stat().st_size
-    if size > max_size:
+    if max_size is not None and size > max_size:
         raise FileOperationError(
             f"File too large: {size} bytes (max {max_size})",
             file_path=str(path),

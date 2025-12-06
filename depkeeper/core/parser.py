@@ -228,9 +228,10 @@ class RequirementsParser:
         if requirement_spec.startswith(
             (CONSTRAINT_DIRECTIVE, CONSTRAINT_DIRECTIVE_LONG)
         ):
-            return self._handle_constraint_directive(
+            self._handle_constraint_directive(
                 requirement_spec, line_number, source_file_path, _current_directory_path
             )
+            return None
 
         # Remove surrounding quotes if present
         requirement_spec = self._remove_surrounding_quotes(requirement_spec)
@@ -381,7 +382,7 @@ class RequirementsParser:
             self.logger.warning(
                 f"Line {line_number}: Constraint directive missing file path"
             )
-            return None
+            return
 
         constraint_file_path = line_parts[1].strip()
 
@@ -389,7 +390,7 @@ class RequirementsParser:
             self.logger.warning(
                 f"Line {line_number}: Cannot resolve constraint path without base file"
             )
-            return None
+            return
 
         try:
             self.parse_file(
@@ -404,8 +405,6 @@ class RequirementsParser:
                 line_content=directive_line,
                 file_path=source_file_path,
             ) from exc
-
-        return None
 
     # ----------------------------------------------------------------------
     # Requirement builders
