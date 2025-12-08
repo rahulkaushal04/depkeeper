@@ -26,8 +26,6 @@ USER_AGENT_TEMPLATE: Final[str] = (
 # =============================================================================
 
 PYPI_JSON_API: Final[str] = "https://pypi.org/pypi/{package}/json"
-PYPI_SIMPLE_API: Final[str] = "https://pypi.org/simple/{package}/"
-PYPI_BASE_URL: Final[str] = "https://pypi.org"
 
 # =============================================================================
 # HTTP Configuration
@@ -36,18 +34,6 @@ PYPI_BASE_URL: Final[str] = "https://pypi.org"
 DEFAULT_TIMEOUT: Final[int] = 30  # seconds
 DEFAULT_MAX_RETRIES: Final[int] = 3
 
-# =============================================================================
-# Supported Python Versions
-# =============================================================================
-
-SUPPORTED_PYTHON_VERSIONS: Final[Tuple[str, ...]] = (
-    "3.8",
-    "3.9",
-    "3.10",
-    "3.11",
-    "3.12",
-    "3.13",
-)
 
 # =============================================================================
 # File Patterns & Directives
@@ -93,48 +79,6 @@ class UpdateStrategy(str, Enum):
 
 
 # =============================================================================
-# Version Operators (PEP 440)
-# =============================================================================
-
-
-class VersionOperator(str, Enum):
-    """PEP 440 version comparison operators."""
-
-    EQUAL = "=="
-    NOT_EQUAL = "!="
-    LESS_THAN = "<"
-    LESS_THAN_EQUAL = "<="
-    GREATER_THAN = ">"
-    GREATER_THAN_EQUAL = ">="
-    COMPATIBLE = "~="
-    ARBITRARY_EQUAL = "==="
-
-    def __str__(self) -> str:
-        return self.value
-
-
-# =============================================================================
-# Exit Codes
-# =============================================================================
-
-
-class ExitCode(int, Enum):
-    """Standard CLI exit codes."""
-
-    SUCCESS = 0
-    GENERAL_ERROR = 1
-    PARSE_ERROR = 2
-    NETWORK_ERROR = 3
-    VALIDATION_ERROR = 4
-    CONFLICT_ERROR = 5
-    FILE_ERROR = 6
-    SECURITY_VULNERABILITY = 10
-
-    def __int__(self) -> int:
-        return self.value
-
-
-# =============================================================================
 # Versioning Patterns
 # =============================================================================
 
@@ -149,29 +93,18 @@ CALVER_PATTERNS: Final[List[str]] = [
     r"^\d{2}\.\d{1,2}",  # YY.MM
 ]
 
+
 # =============================================================================
 # Security Constraints
 # =============================================================================
 
 MAX_FILE_SIZE: Final[int] = 10 * 1024 * 1024  # 10 MB
 
-ALLOWED_URL_SCHEMES: Final[Tuple[str, ...]] = (
-    "http",
-    "https",
-    "git+https",
-    "git+ssh",
-)
 
 # =============================================================================
-# Progress Display
+# Logging Configuration
 # =============================================================================
 
-PROGRESS_UPDATE_INTERVAL: Final[float] = 0.1  # seconds
-PROGRESS_BAR_WIDTH: Final[int] = 40
-
-# =============================================================================
-# PEP 503 Package Normalization
-# =============================================================================
-
-PACKAGE_NAME_NORMALIZE_PATTERN: Final[str] = r"[-_.]+"
-PACKAGE_NAME_NORMALIZE_REPLACEMENT: Final[str] = "-"
+LOG_DATE_FORMAT: Final[str] = "%Y-%m-%d %H:%M:%S"
+LOG_DEFAULT_FORMAT: Final[str] = "%(levelname)s: %(message)s"
+LOG_VERBOSE_FORMAT: Final[str] = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Protocol
+from typing import List, Protocol, Optional
 
 from depkeeper.models.version import VersionInfo
 
@@ -121,7 +121,7 @@ class BaseStrategy(ABC):
         self,
         versions: List[VersionInfo],
         current: VersionInfo,
-    ) -> VersionInfo | None:
+    ) -> Optional[VersionInfo]:
         """
         Get the latest acceptable version for update.
 

@@ -2,7 +2,7 @@ import httpx
 import pytest
 import asyncio
 
-from depkeeper.utils.http import HTTPClient, handle_errors
+from depkeeper.utils.http import HTTPClient
 from depkeeper.exceptions import NetworkError, PyPIError
 from depkeeper.constants import DEFAULT_TIMEOUT, DEFAULT_MAX_RETRIES
 
@@ -592,82 +592,6 @@ class TestHTTPClientBatchRequests:
             await client.batch_get_json(urls, use_cache=True)
 
             assert len(client._etag_cache) == 1
-
-
-class TestHandleErrors:
-    """Tests for standalone handle_errors function."""
-
-    def test_handle_errors_success_response(self):
-        """Test handle_errors with successful response."""
-        response = httpx.Response(
-            200, request=httpx.Request("GET", "https://example.com")
-        )
-
-        # Should not raise
-        handle_errors(response)
-
-    def test_handle_errors_404_raises_network_error(self):
-        """Test handle_errors raises NetworkError for 404."""
-        response = httpx.Response(
-            404, request=httpx.Request("GET", "https://example.com")
-        )
-
-        with pytest.raises(NetworkError) as exc_info:
-            handle_errors(response)
-
-        assert exc_info.value.status_code == 404
-        assert "not found" in str(exc_info.value).lower()
-
-    def test_handle_errors_429_raises_network_error(self):
-        """Test handle_errors raises NetworkError for 429."""
-        response = httpx.Response(
-            429, request=httpx.Request("GET", "https://example.com")
-        )
-
-        with pytest.raises(NetworkError) as exc_info:
-            handle_errors(response)
-
-        assert exc_info.value.status_code == 429
-        assert "rate limit" in str(exc_info.value).lower()
-
-    def test_handle_errors_500_raises_network_error(self):
-        """Test handle_errors raises NetworkError for server errors."""
-        response = httpx.Response(
-            500, request=httpx.Request("GET", "https://example.com")
-        )
-
-        with pytest.raises(NetworkError) as exc_info:
-            handle_errors(response)
-
-        assert exc_info.value.status_code == 500
-        assert "server error" in str(exc_info.value).lower()
-
-    def test_handle_errors_400_raises_network_error(self):
-        """Test handle_errors raises NetworkError for 400."""
-        response = httpx.Response(
-            400, request=httpx.Request("GET", "https://example.com")
-        )
-
-        with pytest.raises(NetworkError) as exc_info:
-            handle_errors(response)
-
-        assert exc_info.value.status_code == 400
-
-    def test_handle_errors_no_error_on_2xx(self):
-        """Test handle_errors doesn't raise on 2xx responses."""
-        for code in [200, 201, 204]:
-            response = httpx.Response(
-                code, request=httpx.Request("GET", "https://example.com")
-            )
-            handle_errors(response)  # Should not raise
-
-    def test_handle_errors_no_error_on_3xx(self):
-        """Test handle_errors doesn't raise on 3xx responses."""
-        for code in [301, 302, 304]:
-            response = httpx.Response(
-                code, request=httpx.Request("GET", "https://example.com")
-            )
-            handle_errors(response)  # Should not raise
 
 
 @pytest.mark.asyncio

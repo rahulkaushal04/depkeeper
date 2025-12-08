@@ -35,10 +35,11 @@ import logging
 import threading
 from typing import IO, Optional, Any
 
-# Module Constants
-DATE_FORMAT: str = "%Y-%m-%d %H:%M:%S"
-DEFAULT_FORMAT: str = "%(levelname)s: %(message)s"
-VERBOSE_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+from depkeeper.constants import (
+    LOG_DATE_FORMAT,
+    LOG_DEFAULT_FORMAT,
+    LOG_VERBOSE_FORMAT,
+)
 
 # Module state - tracks if logging has been configured
 _logging_configured: bool = False
@@ -193,9 +194,9 @@ def setup_logging(
         handler.setLevel(level)
 
         # Set format with color support
-        fmt = VERBOSE_FORMAT if verbose else DEFAULT_FORMAT
+        fmt = LOG_VERBOSE_FORMAT if verbose else LOG_DEFAULT_FORMAT
         use_color = not os.environ.get("NO_COLOR") and hasattr(sys.stderr, "isatty")
-        formatter = ColoredFormatter(fmt, datefmt=DATE_FORMAT, use_color=use_color)
+        formatter = ColoredFormatter(fmt, datefmt=LOG_DATE_FORMAT, use_color=use_color)
         handler.setFormatter(formatter)
 
         # Add handler
