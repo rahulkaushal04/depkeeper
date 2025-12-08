@@ -16,7 +16,6 @@ from depkeeper.utils.logger import (
 )
 from depkeeper.utils.console import (
     confirm,
-    create_progress_bar,
     get_raw_console,
     print_dim,
     print_error,
@@ -26,6 +25,11 @@ from depkeeper.utils.console import (
     print_table,
     print_warning,
     reconfigure_console,
+)
+from depkeeper.utils.progress import (
+    ProgressTracker,
+    create_spinner,
+    create_progress,
 )
 
 __all__ = [
@@ -53,4 +57,8 @@ __all__ = [
     "restore_backup",
     "find_requirements_files",
     "validate_path",
+    # Progress
+    "ProgressTracker",
+    "create_spinner",
+    "create_progress",
 ]

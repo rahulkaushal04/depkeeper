@@ -35,12 +35,12 @@ User confirmation prompts:
 
 Progress tracking:
 
-    >>> from depkeeper.utils.console import create_progress_bar
-    >>> with create_progress_bar() as progress:
-    ...     task = progress.add_task("Processing...", total=100)
+    >>> from depkeeper.utils.progress import ProgressTracker
+    >>> with ProgressTracker() as tracker:
+    ...     task = tracker.add_task("Processing...", total=100)
     ...     for i in range(100):
     ...         # Do work
-    ...         progress.update(task, advance=1)
+    ...         tracker.update(task, advance=1)
 
 Notes
 -----
@@ -63,16 +63,10 @@ import sys
 import threading
 from typing import Any, Optional, List, Dict
 
-from rich.console import Console
-from rich.table import Table
-from rich.progress import (
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    BarColumn,
-    TaskProgressColumn,
-)
 from rich.theme import Theme
+from rich.table import Table
+from rich.console import Console
+
 
 from depkeeper.utils.logger import get_logger
 
@@ -478,7 +472,7 @@ def print_table(
 
     See Also
     --------
-    create_progress_bar : For progress tracking
+    depkeeper.utils.progress.ProgressTracker : For progress tracking
     """
     if not data:
         logger.debug("No data to display in table")
@@ -502,58 +496,6 @@ def print_table(
 
     # Print table
     _get_console().print(table)
-
-
-def create_progress_bar(transient: bool = True) -> Progress:
-    """Create a Rich progress bar for tracking operations.
-
-    Returns a configured Progress instance with spinner, description, bar,
-    and percentage columns. Designed for use with context manager pattern.
-
-    Parameters
-    ----------
-    transient : bool, optional
-        If True, the progress bar disappears after completion. If False,
-        the final progress state remains visible. Default is True.
-
-    Returns
-    -------
-    Progress
-        Rich Progress instance ready for tracking tasks.
-
-    Examples
-    --------
-    Basic progress tracking:
-
-    >>> from depkeeper.utils.console import create_progress_bar
-    >>> with create_progress_bar() as progress:
-    ...     task = progress.add_task("Checking packages...", total=10)
-    ...     for i in range(10):
-    ...         progress.update(task, advance=1)
-
-    Multiple tasks:
-
-    >>> with create_progress_bar() as progress:
-    ...     task1 = progress.add_task("Downloading...", total=100)
-    ...     task2 = progress.add_task("Processing...", total=50)
-
-    Notes
-    -----
-    The progress bar includes spinner, description, bar, and percentage.
-    Respects color settings and adapts to NO_COLOR environments.
-
-    See Also
-    --------
-    print_table : For displaying results after progress
-    """
-    return Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        console=_get_console(),
-        transient=transient,
-    )
 
 
 def confirm(message: str, default: bool = False) -> bool:
