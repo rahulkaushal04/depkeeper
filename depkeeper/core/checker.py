@@ -117,7 +117,6 @@ class VersionChecker:
     async def check_multiple(
         self,
         requirements: List[Requirement],
-        show_progress: bool = False,
     ) -> List[Package]:
         """
         Check multiple packages concurrently.
@@ -126,8 +125,6 @@ class VersionChecker:
         ----------
         requirements : List[Requirement]
             List of requirements to check.
-        show_progress : bool, optional
-            Whether to display a progress bar. Default is False.
 
         Returns
         -------
@@ -135,45 +132,7 @@ class VersionChecker:
             List of packages with version information. If a package check
             fails, an empty Package object is returned for that package.
         """
-        if show_progress:
-            return await self._check_multiple_with_progress(requirements)
-        else:
-            return await self._check_multiple_concurrent(requirements)
-
-    async def _check_multiple_with_progress(
-        self, requirements: List[Requirement]
-    ) -> List[Package]:
-        """Check multiple packages with progress bar display."""
-        try:
-            from rich.console import Console
-            from rich.progress import Progress
-        except ImportError:
-            logger.warning("rich not installed; falling back to no progress bar")
-            return await self._check_multiple_concurrent(requirements)
-
-        console = Console()
-        packages: List[Package] = []
-
-        with Progress(console=console) as progress:
-            task = progress.add_task(
-                "[cyan]Checking packages...",
-                total=len(requirements),
-            )
-
-            for req in requirements:
-                current = self._extract_current_version(req)
-                try:
-                    package = await self.check_package(req.name, current)
-                    packages.append(package)
-
-                except Exception as exc:
-                    logger.error(f"Failed to check {req.name}: {exc}")
-                    packages.append(self._create_error_package(req.name, current))
-
-                finally:
-                    progress.advance(task)
-
-        return packages
+        return await self._check_multiple_concurrent(requirements)
 
     async def _check_multiple_concurrent(
         self, requirements: List[Requirement]
@@ -351,7 +310,7 @@ class VersionChecker:
         except Exception as exc:
             raise PyPIError(
                 f"Failed to fetch PyPI metadata for {name}: {exc}",
-                package=name,
+                package_name=name,
             ) from exc
 
     # ----------------------------------------------------------------------
