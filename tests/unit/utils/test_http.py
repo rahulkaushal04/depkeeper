@@ -19,7 +19,6 @@ class TestHTTPClientInitialization:
         assert client.rate_limit_delay == 0.0
         assert client.verify_ssl is True
         assert client.max_concurrency == 10
-        assert client.enable_caching is False
         assert "depkeeper" in client.user_agent
 
     def test_client_custom_initialization(self):
@@ -31,7 +30,6 @@ class TestHTTPClientInitialization:
             verify_ssl=False,
             user_agent="CustomAgent/1.0",
             max_concurrency=20,
-            enable_caching=True,
         )
 
         assert client.timeout == 60
@@ -40,19 +38,12 @@ class TestHTTPClientInitialization:
         assert client.verify_ssl is False
         assert client.user_agent == "CustomAgent/1.0"
         assert client.max_concurrency == 20
-        assert client.enable_caching is True
 
     def test_client_starts_with_no_active_client(self):
         """Test that client starts without an active httpx client."""
         client = HTTPClient()
 
         assert client._client is None
-
-    def test_client_initializes_empty_cache(self):
-        """Test that client starts with empty cache."""
-        client = HTTPClient(enable_caching=True)
-
-        assert client._etag_cache == {}
 
     def test_client_initializes_semaphore(self):
         """Test that client initializes concurrency semaphore."""
@@ -341,94 +332,6 @@ class TestHTTPClientErrorHandling:
 
 
 @pytest.mark.asyncio
-class TestHTTPClientCaching:
-    """Tests for ETag caching functionality."""
-
-    async def test_caching_disabled_by_default(self, httpx_mock):
-        """Test that caching is disabled by default."""
-        httpx_mock.add_response(
-            json={"data": "test"},
-            headers={"ETag": "abc123"},
-        )
-
-        async with HTTPClient() as client:
-            await client.get("https://example.com/api")
-
-            assert len(client._etag_cache) == 0
-
-    async def test_caching_stores_etag_when_enabled(self, httpx_mock):
-        """Test that ETag is stored when caching is enabled."""
-        httpx_mock.add_response(
-            json={"data": "test"},
-            headers={"ETag": "abc123"},
-        )
-
-        async with HTTPClient(enable_caching=True) as client:
-            await client.get("https://example.com/api")
-
-            assert "https://example.com/api" in client._etag_cache
-            etag, _ = client._etag_cache["https://example.com/api"]
-            assert etag == "abc123"
-
-    async def test_cached_request_sends_if_none_match(self, httpx_mock):
-        """Test that cached requests send If-None-Match header."""
-        httpx_mock.add_response(
-            json={"data": "test"},
-            headers={"ETag": "abc123"},
-        )
-        httpx_mock.add_response(status_code=304)
-
-        async with HTTPClient(enable_caching=True) as client:
-            # First request
-            await client.get("https://example.com/api")
-
-            # Second request
-            await client.get("https://example.com/api")
-
-            requests = httpx_mock.get_requests()
-            assert len(requests) == 2
-            assert "If-None-Match" in requests[1].headers
-            assert requests[1].headers["If-None-Match"] == "abc123"
-
-    async def test_304_returns_cached_response(self, httpx_mock):
-        """Test that 304 response returns cached data."""
-        httpx_mock.add_response(
-            json={"data": "original"},
-            headers={"ETag": "abc123"},
-        )
-        httpx_mock.add_response(status_code=304)
-
-        async with HTTPClient(enable_caching=True) as client:
-            response1 = await client.get("https://example.com/api")
-            response2 = await client.get("https://example.com/api")
-
-            assert response1.json() == {"data": "original"}
-            assert response2.json() == {"data": "original"}
-
-    async def test_caching_per_request_override(self, httpx_mock):
-        """Test that caching can be overridden per request."""
-        httpx_mock.add_response(
-            json={"data": "test"},
-            headers={"ETag": "abc123"},
-        )
-
-        async with HTTPClient(enable_caching=False) as client:
-            # Enable caching for this request
-            await client.get("https://example.com/api", use_cache=True)
-
-            assert len(client._etag_cache) == 1
-
-    async def test_no_etag_header_not_cached(self, httpx_mock):
-        """Test that responses without ETag are not cached."""
-        httpx_mock.add_response(json={"data": "test"})
-
-        async with HTTPClient(enable_caching=True) as client:
-            await client.get("https://example.com/api")
-
-            assert len(client._etag_cache) == 0
-
-
-@pytest.mark.asyncio
 class TestHTTPClientRateLimiting:
     """Tests for rate limiting functionality."""
 
@@ -579,20 +482,6 @@ class TestHTTPClientBatchRequests:
 
             assert results == {}
 
-    async def test_batch_get_json_with_caching(self, httpx_mock):
-        """Test batch_get_json respects caching."""
-        httpx_mock.add_response(
-            url="https://example.com/api/1",
-            json={"id": 1},
-            headers={"ETag": "abc123"},
-        )
-
-        async with HTTPClient(enable_caching=True) as client:
-            urls = ["https://example.com/api/1"]
-            await client.batch_get_json(urls, use_cache=True)
-
-            assert len(client._etag_cache) == 1
-
 
 @pytest.mark.asyncio
 class TestHTTPClientIntegration:
@@ -625,26 +514,6 @@ class TestHTTPClientIntegration:
             response = await client.get_json("https://example.com/api")
 
             assert response == {"status": "ok"}
-
-    async def test_cached_requests_reduce_network_calls(self, httpx_mock):
-        """Test that caching reduces network requests."""
-        httpx_mock.add_response(
-            json={"data": "cached"},
-            headers={"ETag": "version1"},
-        )
-        httpx_mock.add_response(status_code=304)
-        httpx_mock.add_response(status_code=304)
-
-        async with HTTPClient(enable_caching=True) as client:
-            # First request
-            data1 = await client.get_json("https://example.com/api")
-            # Second and third requests (should use cache)
-            data2 = await client.get_json("https://example.com/api")
-            data3 = await client.get_json("https://example.com/api")
-
-            assert data1 == data2 == data3 == {"data": "cached"}
-            # Should make 3 network requests (initial + 2 conditional)
-            assert len(httpx_mock.get_requests()) == 3
 
     async def test_concurrent_batch_processing(self, httpx_mock):
         """Test processing multiple URLs concurrently."""

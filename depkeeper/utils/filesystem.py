@@ -560,26 +560,82 @@ def create_backup(file_path: Union[str, Path]) -> Path:
 
 def restore_backup(
     backup_path: Union[str, Path],
-    target_path: Union[str, Path],
+    target_path: Optional[Union[str, Path]] = None,
 ) -> None:
-    """
-    Restore a file from a backup.
+    """Restore a file from a backup.
 
-    Args:
-        backup_path: Path to the backup file.
-        target_path: Path where the file should be restored.
+    Restores a file from a backup copy. If target_path is not provided,
+    the function attempts to infer the original file path from the backup
+    filename by removing the timestamp and .backup suffix.
 
-    Raises:
-        FileOperationError: If backup doesn't exist or restore fails.
+    Parameters
+    ----------
+    backup_path : str or Path
+        Path to the backup file. The backup file must exist.
+    target_path : str or Path, optional
+        Path where the file should be restored. If None, the target is
+        inferred from the backup filename by removing the timestamp and
+        .backup suffix. For example:
+        - requirements.txt.20231208_143022_123456.backup → requirements.txt
+        Default is None.
 
-    Example:
-        >>> restore_backup(
-        ...     "requirements.txt.20231208_143022.backup",
-        ...     "requirements.txt"
-        ... )
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    FileOperationError
+        If any of the following conditions occur:
+        - The backup file doesn't exist
+        - target_path is None and the target cannot be inferred (e.g.,
+          backup filename doesn't end with .backup)
+        - The restore operation fails (permission denied, disk full, etc.)
+
+    Examples
+    --------
+    Restore to inferred original location:
+
+    >>> from depkeeper.utils.filesystem import restore_backup
+    >>> restore_backup("requirements.txt.20231208_143022_123456.backup")
+    # Restores to requirements.txt
+
+    Restore to custom location:
+
+    >>> restore_backup(
+    ...     "requirements.txt.20231208_143022_123456.backup",
+    ...     "requirements_restored.txt"
+    ... )
+
+    Restore with string paths:
+
+    >>> restore_backup("config.backup", "config.toml")
+
+    Handle errors gracefully:
+
+    >>> from depkeeper.exceptions import FileOperationError
+    >>> try:
+    ...     restore_backup("missing.backup")
+    ... except FileOperationError as e:
+    ...     print(f"Restore failed: {e}")
+
+    Notes
+    -----
+    The function preserves file metadata including modification times
+    and permissions using shutil.copy2().
+
+    When inferring the target path, the function expects backup files
+    to follow the format: {original}.{timestamp}.backup
+    If the backup filename doesn't match this pattern, you must provide
+    target_path explicitly.
+
+    See Also
+    --------
+    create_backup : Create a backup of a file
+    safe_write_file : Write file with automatic backup
+    list_backups : List all backups for a file
     """
     backup = Path(backup_path)
-    target = Path(target_path)
 
     if not backup.exists():
         raise FileOperationError(
@@ -587,6 +643,39 @@ def restore_backup(
             file_path=str(backup),
             operation="restore",
         )
+
+    # Infer target path if not provided
+    if target_path is None:
+        backup_name = backup.name
+        if not backup_name.endswith(".backup"):
+            raise FileOperationError(
+                f"Cannot infer target path: backup filename must end with .backup: {backup}",
+                file_path=str(backup),
+                operation="restore",
+            )
+
+        # Remove .backup suffix
+        without_backup_suffix = backup_name[:-7]  # Remove '.backup'
+
+        # Remove timestamp (format: .YYYYMMDD_HHMMSS_ffffff)
+        # Find the last occurrence of a pattern like .20231208_143022_123456
+        parts = without_backup_suffix.rsplit(".", 1)
+        if len(parts) == 2:
+            # Check if the last part looks like a timestamp
+            timestamp_part = parts[1]
+            if len(timestamp_part) >= 15 and "_" in timestamp_part:
+                # Looks like a timestamp, remove it
+                target_name = parts[0]
+            else:
+                # Not a timestamp, keep as is
+                target_name = without_backup_suffix
+        else:
+            # No extension before .backup
+            target_name = without_backup_suffix
+
+        target = backup.parent / target_name
+    else:
+        target = Path(target_path)
 
     logger.info(f"Restoring {target} from backup {backup}")
     _restore_backup_internal(backup, target)
@@ -684,20 +773,66 @@ def find_requirements_files(
 
 
 def list_backups(file_path: Union[str, Path]) -> List[Path]:
-    """
-    List all backup files for a given file.
+    """List all backup files for a given file.
 
-    Args:
-        file_path: Original file path to find backups for.
+    Finds and returns all backup files associated with a specific file,
+    sorted by modification time (newest first). Backup files are identified
+    by the naming pattern: {filename}.*.backup in the same directory.
 
-    Returns:
-        Sorted list of backup file paths (newest first).
+    Parameters
+    ----------
+    file_path : str or Path
+        Original file path to find backups for. The file itself doesn't
+        need to exist; backups are identified by naming pattern in the
+        same directory.
 
-    Example:
-        >>> backups = list_backups("requirements.txt")
-        >>> print(backups)
-        [Path('requirements.txt.20231208_143022.backup'),
-         Path('requirements.txt.20231207_120000.backup')]
+    Returns
+    -------
+    list[Path]
+        Sorted list of backup file paths, ordered by modification time
+        with newest backups first. Returns empty list if no backups found.
+
+    Examples
+    --------
+    List all backups for a file:
+
+    >>> from depkeeper.utils.filesystem import list_backups
+    >>> backups = list_backups("requirements.txt")
+    >>> for backup in backups:
+    ...     print(backup)
+    requirements.txt.20231208_143022_123456.backup
+    requirements.txt.20231207_120000_654321.backup
+
+    Check if any backups exist:
+
+    >>> backups = list_backups("config.toml")
+    >>> if backups:
+    ...     print(f"Found {len(backups)} backup(s)")
+    ...     print(f"Most recent: {backups[0]}")
+
+    List backups for non-existent file:
+
+    >>> backups = list_backups("deleted_file.txt")
+    >>> print(backups)  # Returns empty list
+    []
+
+    Notes
+    -----
+    The function searches for files matching the pattern:
+    {filename}.*.backup in the parent directory of the specified file.
+
+    Backups are sorted by file modification time (st_mtime), not by the
+    timestamp in the filename. This ensures accuracy even if file times
+    are modified.
+
+    The original file doesn't need to exist; backups are found based on
+    the naming pattern alone.
+
+    See Also
+    --------
+    create_backup : Create a new backup
+    clean_old_backups : Remove old backup files
+    restore_backup : Restore from a backup
     """
     path = Path(file_path)
     # Check in same directory even if file doesn't exist
@@ -747,10 +882,19 @@ def clean_old_backups(
     Clean all backups (keep=0):
 
     >>> deleted = clean_old_backups("requirements.txt", keep=0)
+    >>> print(f"Deleted all {deleted} backups")
 
     Clean with default retention:
 
     >>> deleted = clean_old_backups("requirements.txt")  # Keeps 5
+
+    Automated cleanup after operations:
+
+    >>> from depkeeper.utils.filesystem import safe_write_file, clean_old_backups
+    >>> # Create backup and write
+    >>> safe_write_file("requirements.txt", new_content)
+    >>> # Clean up old backups
+    >>> clean_old_backups("requirements.txt", keep=3)
 
     Notes
     -----
@@ -764,10 +908,14 @@ def clean_old_backups(
     The function logs an info message if any backups were deleted, and
     debug messages for individual deletions.
 
+    The keep parameter can be 0 to delete all backups, which is useful
+    for cleanup operations or when disk space is critical.
+
     See Also
     --------
     list_backups : List all backups for a file
     create_backup : Create a new backup
+    safe_write_file : Write file with automatic backup creation
     """
     backups = list_backups(file_path)
     to_delete = backups[keep:]

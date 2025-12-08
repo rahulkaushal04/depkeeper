@@ -167,6 +167,7 @@ markers = [
     "integration: integration tests",
     "e2e: end-to-end tests",
     "network: tests requiring network",
+    "asyncio: asyncio tests",
 ]
 
 asyncio_mode = "auto"

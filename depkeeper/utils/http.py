@@ -427,6 +427,9 @@ class HTTPClient:
         await self._ensure_client()
         assert self._client is not None
 
+        # Strip surrounding quotes from URL if present
+        url = url.strip("\"'")
+
         last_exc: Optional[Exception] = None
         retry_429_count = 0  # Track 429 retries across all attempts
 
