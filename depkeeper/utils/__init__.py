@@ -14,8 +14,33 @@ from depkeeper.utils.logger import (
     disable_logging,
     is_logging_configured,
 )
+from depkeeper.utils.console import (
+    confirm,
+    create_progress_bar,
+    get_raw_console,
+    print_dim,
+    print_error,
+    print_highlight,
+    print_info,
+    print_success,
+    print_table,
+    print_warning,
+    reconfigure_console,
+)
 
 __all__ = [
+    # Console
+    "confirm",
+    "print_dim",
+    "print_info",
+    "print_error",
+    "print_table",
+    "print_success",
+    "print_warning",
+    "print_highlight",
+    "get_raw_console",
+    "create_progress_bar",
+    "reconfigure_console",
     # Logging
     "get_logger",
     "setup_logging",

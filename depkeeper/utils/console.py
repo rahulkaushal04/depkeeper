@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from typing import Any, Optional, List, Dict
 
 from rich.console import Console
@@ -125,13 +126,17 @@ def _should_use_color() -> bool:
 
     # Check if stdout is a terminal
     try:
-        return sys.stdout.isatty()
+        if not sys.stdout.isatty():
+            return False
     except (AttributeError, OSError):
         return False
+
+    return True
 
 
 # Global console instance (lazy-initialized)
 _console: Optional[Console] = None
+_console_lock = threading.Lock()
 
 
 def _get_console() -> Console:
@@ -165,12 +170,15 @@ def _get_console() -> Console:
     """
     global _console
     if _console is None:
-        use_color = _should_use_color()
-        _console = Console(
-            theme=DEPKEEPER_THEME,
-            no_color=not use_color,
-            highlight=use_color,
-        )
+        with _console_lock:  # Thread-safe initialization
+            # Double-check after acquiring lock
+            if _console is None:
+                use_color = _should_use_color()
+                _console = Console(
+                    theme=DEPKEEPER_THEME,
+                    no_color=not use_color,
+                    highlight=use_color,
+                )
     return _console
 
 
@@ -212,7 +220,8 @@ def reconfigure_console() -> None:
     _get_console : Internal function that creates the console
     """
     global _console
-    _console = None
+    with _console_lock:  # Thread-safe reconfiguration
+        _console = None
 
 
 def print_success(message: str, prefix: str = "✓") -> None:

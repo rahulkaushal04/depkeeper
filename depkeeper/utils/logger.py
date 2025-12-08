@@ -29,9 +29,11 @@ For testing (disable all output):
 
 from __future__ import annotations
 
+import os
 import sys
 import logging
-from typing import IO, Optional
+import threading
+from typing import IO, Optional, Any
 
 # Module Constants
 DATE_FORMAT: str = "%Y-%m-%d %H:%M:%S"
@@ -40,6 +42,55 @@ VERBOSE_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
 # Module state - tracks if logging has been configured
 _logging_configured: bool = False
+_lock = threading.Lock()
+
+
+class ColoredFormatter(logging.Formatter):
+    """Formatter that adds colors to log levels if supported.
+
+    Respects NO_COLOR environment variable and terminal capabilities.
+    Colors are only applied when:
+    - NO_COLOR is not set
+    - Output is to a TTY
+    - Not running in CI environment
+    """
+
+    COLORS = {
+        "DEBUG": "\033[36m",  # Cyan
+        "INFO": "\033[32m",  # Green
+        "WARNING": "\033[33m",  # Yellow
+        "ERROR": "\033[31m",  # Red
+        "CRITICAL": "\033[35m",  # Magenta
+    }
+    RESET = "\033[0m"
+
+    def __init__(self, *args: Any, use_color: bool = True, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.use_color = use_color
+
+    def format(self, record: logging.LogRecord) -> str:
+        """Format the log record with optional color."""
+        if self.use_color and self._should_use_color():
+            levelname = record.levelname
+            if levelname in self.COLORS:
+                record.levelname = f"{self.COLORS[levelname]}{levelname}{self.RESET}"
+        return super().format(record)
+
+    def _should_use_color(self) -> bool:
+        """Check if color output should be used."""
+        # NO_COLOR environment variable disables color
+        if os.environ.get("NO_COLOR"):
+            return False
+
+        # Check if running in CI
+        if os.environ.get("CI"):
+            return False
+
+        # Check if stderr is a terminal
+        try:
+            return sys.stderr.isatty()
+        except (AttributeError, OSError):
+            return False
 
 
 def setup_logging(
@@ -128,30 +179,32 @@ def setup_logging(
     """
     global _logging_configured
 
-    root_logger = logging.getLogger("depkeeper")
+    with _lock:  # Thread-safe configuration
+        root_logger = logging.getLogger("depkeeper")
 
-    # Remove existing handlers to avoid duplicates
-    root_logger.handlers.clear()
+        # Remove existing handlers to avoid duplicates
+        root_logger.handlers.clear()
 
-    # Set level
-    root_logger.setLevel(level)
+        # Set level
+        root_logger.setLevel(level)
 
-    # Create console handler
-    handler = logging.StreamHandler(stream or sys.stderr)
-    handler.setLevel(level)
+        # Create console handler
+        handler = logging.StreamHandler(stream or sys.stderr)
+        handler.setLevel(level)
 
-    # Set format
-    fmt = VERBOSE_FORMAT if verbose else DEFAULT_FORMAT
-    formatter = logging.Formatter(fmt, datefmt=DATE_FORMAT)
-    handler.setFormatter(formatter)
+        # Set format with color support
+        fmt = VERBOSE_FORMAT if verbose else DEFAULT_FORMAT
+        use_color = not os.environ.get("NO_COLOR") and hasattr(sys.stderr, "isatty")
+        formatter = ColoredFormatter(fmt, datefmt=DATE_FORMAT, use_color=use_color)
+        handler.setFormatter(formatter)
 
-    # Add handler
-    root_logger.addHandler(handler)
+        # Add handler
+        root_logger.addHandler(handler)
 
-    # Prevent propagation to root logger
-    root_logger.propagate = False
+        # Prevent propagation to root logger
+        root_logger.propagate = False
 
-    _logging_configured = True
+        _logging_configured = True
 
 
 def get_logger(name: Optional[str] = None) -> logging.Logger:
@@ -170,12 +223,15 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
     Parameters
     ----------
     name : str, optional
-        Submodule or component name for the logger. Common values include:
-        - "parser": Requirements file parsing operations
-        - "checker": Version checking and PyPI queries
-        - "updater": Update application logic
-        - "resolver": Dependency resolution
-        - "cli": Command-line interface operations
+        Submodule or component name for the logger. Best practice is to pass
+        __name__ to get proper module hierarchy. Common patterns:
+        - get_logger(__name__): Automatic module path (recommended)
+        - get_logger("parser"): Custom component name
+        - get_logger(): Root depkeeper logger
+
+        For module 'depkeeper.core.parser', using __name__ creates logger
+        'depkeeper.core.parser' automatically.
+
         If None or "depkeeper", returns the root depkeeper logger.
 
     Returns
@@ -187,10 +243,16 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
 
     Examples
     --------
-    Get a logger for a specific module:
+    Recommended: Use __name__ for automatic module path:
 
+    >>> # In depkeeper/core/parser.py
     >>> from depkeeper.utils.logger import get_logger
-    >>> logger = get_logger("parser")
+    >>> logger = get_logger(__name__)  # Creates 'depkeeper.core.parser'
+    >>> logger.info("Parsing requirements.txt")
+
+    Custom component name:
+
+    >>> logger = get_logger("parser")  # Creates 'depkeeper.parser'
     >>> logger.info("Parsing requirements.txt")
 
     Get the root depkeeper logger:
@@ -198,11 +260,11 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
     >>> root_logger = get_logger()  # Same as get_logger("depkeeper")
     >>> root_logger.warning("Configuration file not found")
 
-    Use in a module:
+    Use in a module (best practice):
 
     >>> # In depkeeper/core/checker.py
     >>> from depkeeper.utils.logger import get_logger
-    >>> logger = get_logger("checker")
+    >>> logger = get_logger(__name__)  # Recommended
     >>>
     >>> def check_version(package: str) -> None:
     ...     logger.debug(f"Checking version for {package}")
@@ -235,7 +297,12 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
     if not name or name == "depkeeper":
         logger = logging.getLogger("depkeeper")
     else:
-        logger = logging.getLogger(f"depkeeper.{name}")
+        # If name already starts with 'depkeeper', use it as-is (for __name__ usage)
+        # Otherwise, prepend 'depkeeper.' (for custom names)
+        if name.startswith("depkeeper."):
+            logger = logging.getLogger(name)
+        else:
+            logger = logging.getLogger(f"depkeeper.{name}")
 
     # Add NullHandler if no handlers configured (library best practice)
     if not logger.handlers and (not logger.parent or not logger.parent.handlers):
@@ -357,9 +424,10 @@ def disable_logging() -> None:
     """
     global _logging_configured
 
-    root_logger = logging.getLogger("depkeeper")
-    root_logger.handlers.clear()
-    root_logger.addHandler(logging.NullHandler())
-    root_logger.setLevel(logging.NOTSET)
+    with _lock:
+        root_logger = logging.getLogger("depkeeper")
+        root_logger.handlers.clear()
+        root_logger.addHandler(logging.NullHandler())
+        root_logger.setLevel(logging.NOTSET)
 
-    _logging_configured = False
+        _logging_configured = False
