@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import sys
 import logging
-from typing import IO
+from typing import IO, Optional
 
 # Module Constants
 DATE_FORMAT: str = "%Y-%m-%d %H:%M:%S"
@@ -45,7 +45,7 @@ _logging_configured: bool = False
 def setup_logging(
     level: int = logging.INFO,
     verbose: bool = False,
-    stream: IO[str] | None = None,
+    stream: Optional[IO[str]] = None,
 ) -> None:
     """Configure logging for depkeeper CLI and applications.
 
@@ -154,7 +154,7 @@ def setup_logging(
     _logging_configured = True
 
 
-def get_logger(name: str | None = None) -> logging.Logger:
+def get_logger(name: Optional[str] = None) -> logging.Logger:
     """Get a logger from the depkeeper hierarchy.
 
     This is the primary interface for obtaining loggers throughout the

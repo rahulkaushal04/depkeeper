@@ -1,17 +1,66 @@
-"""
-Console output helpers using rich library.
+"""Console output utilities for depkeeper.
 
-Provides consistent, styled console output with support for:
-- Colored messages (success, error, warning, info)
-- Tables with proper formatting
-- Progress bars and spinners
-- NO_COLOR environment variable support
+This module provides a centralized console interface using the Rich library
+for styled terminal output. It supports colored messages, formatted tables,
+progress bars, and respects the NO_COLOR environment variable standard.
+
+All console output is lazy-initialized and respects user preferences for
+color output, making it suitable for both interactive CLI usage and CI/CD
+environments.
+
+Examples
+--------
+Basic message printing:
+
+    >>> from depkeeper.utils.console import print_success, print_error
+    >>> print_success("Package updated successfully")
+    ✓ Package updated successfully
+    >>> print_error("Failed to connect to PyPI")
+    ✗ Failed to connect to PyPI
+
+Display data in tables:
+
+    >>> from depkeeper.utils.console import print_table
+    >>> data = [
+    ...     {"Package": "requests", "Current": "2.28.0", "Latest": "2.31.0"},
+    ...     {"Package": "click", "Current": "8.0.0", "Latest": "8.1.7"},
+    ... ]
+    >>> print_table(data, title="Outdated Packages")
+
+User confirmation prompts:
+
+    >>> from depkeeper.utils.console import confirm
+    >>> if confirm("Update all packages?", default=True):
+    ...     print("Updating...")
+
+Progress tracking:
+
+    >>> from depkeeper.utils.console import create_progress_bar
+    >>> with create_progress_bar() as progress:
+    ...     task = progress.add_task("Processing...", total=100)
+    ...     for i in range(100):
+    ...         # Do work
+    ...         progress.update(task, advance=1)
+
+Notes
+-----
+The console respects the NO_COLOR environment variable (https://no-color.org/)
+and automatically disables color output in CI environments or when output is
+not directed to a terminal.
+
+To force reconfiguration (e.g., after changing NO_COLOR at runtime):
+
+    >>> from depkeeper.utils.console import reconfigure_console
+    >>> import os
+    >>> os.environ["NO_COLOR"] = "1"
+    >>> reconfigure_console()  # Apply changes
 """
 
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional, Union
+import sys
+from typing import Any, Optional, List, Dict
 
 from rich.console import Console
 from rich.table import Table
@@ -29,10 +78,7 @@ from depkeeper.utils.logger import get_logger
 logger = get_logger("console")
 
 
-# ============================================================================
 # Color Theme
-# ============================================================================
-
 DEPKEEPER_THEME = Theme(
     {
         "success": "bold green",
@@ -45,179 +91,328 @@ DEPKEEPER_THEME = Theme(
 )
 
 
-# ============================================================================
-# Console Instance
-# ============================================================================
-
-
 def _should_use_color() -> bool:
-    """
-    Check if color output should be used.
+    """Check if color output should be used.
 
-    Respects NO_COLOR environment variable (https://no-color.org/).
+    This function respects multiple environment indicators to determine
+    whether colored output is appropriate. It checks for the NO_COLOR
+    environment variable, CI environment detection, and whether stdout
+    is connected to a terminal.
 
     Returns
     -------
     bool
-        True if color should be used, False otherwise.
+        True if color output should be enabled, False otherwise.
+
+    Notes
+    -----
+    Color output is disabled when:
+
+    - NO_COLOR environment variable is set (any value)
+    - CI environment variable is set (running in CI/CD)
+    - stdout is not a TTY (output redirected to file/pipe)
+    - stdout.isatty() raises an exception (broken terminal)
+
+    This follows the NO_COLOR standard: https://no-color.org/
     """
     # NO_COLOR environment variable disables color
     if os.environ.get("NO_COLOR"):
         return False
 
     # Check if running in CI or non-interactive environment
-    if os.environ.get("CI") or not os.isatty(1):
+    if os.environ.get("CI"):
         return False
 
-    return True
+    # Check if stdout is a terminal
+    try:
+        return sys.stdout.isatty()
+    except (AttributeError, OSError):
+        return False
 
 
-def get_console(force_terminal: Optional[bool] = None) -> Console:
-    """
-    Get configured console instance.
+# Global console instance (lazy-initialized)
+_console: Optional[Console] = None
 
-    Parameters
-    ----------
-    force_terminal : bool, optional
-        Force terminal mode regardless of environment detection.
+
+def _get_console() -> Console:
+    """Get or create the global console instance.
+
+    This function implements lazy initialization for the Rich Console
+    instance. The console is created on first access and reused for
+    all subsequent calls, ensuring consistent output styling and
+    performance.
 
     Returns
     -------
     Console
-        Configured rich Console instance.
+        The global Rich Console instance configured with depkeeper's
+        theme and color settings.
+
+    Notes
+    -----
+    The console is initialized with:
+
+    - Custom depkeeper theme (success/error/warning/info colors)
+    - Color output based on environment detection
+    - Syntax highlighting enabled when colors are available
+
+    Call `reconfigure_console()` to force re-initialization if
+    environment settings change at runtime.
+
+    See Also
+    --------
+    reconfigure_console : Force console re-initialization
     """
-    use_color = _should_use_color()
-
-    return Console(
-        theme=DEPKEEPER_THEME,
-        force_terminal=force_terminal,
-        no_color=not use_color,
-        highlight=use_color,
-    )
-
-
-# Global console instance
-_console = get_console()
+    global _console
+    if _console is None:
+        use_color = _should_use_color()
+        _console = Console(
+            theme=DEPKEEPER_THEME,
+            no_color=not use_color,
+            highlight=use_color,
+        )
+    return _console
 
 
-# ============================================================================
-# Message Printing Functions
-# ============================================================================
+def reconfigure_console() -> None:
+    """Reconfigure the console instance.
+
+    Forces recreation of the console instance on next use. This is useful
+    when environment variables (like NO_COLOR or CI) have been modified at
+    runtime and you want the console to reflect the new settings.
+
+    Returns
+    -------
+    None
+
+    Examples
+    --------
+    Change color settings at runtime:
+
+    >>> import os
+    >>> from depkeeper.utils.console import reconfigure_console, print_info
+    >>> print_info("This has color")  # Color enabled
+    >>> os.environ["NO_COLOR"] = "1"
+    >>> reconfigure_console()  # Apply change
+    >>> print_info("This has no color")  # Color disabled
+
+    Re-enable colors:
+
+    >>> del os.environ["NO_COLOR"]
+    >>> reconfigure_console()
+    >>> print_info("Color is back")  # Color enabled again
+
+    Notes
+    -----
+    This function only resets the console instance. The actual
+    reconfiguration happens lazily on the next console access.
+
+    See Also
+    --------
+    _get_console : Internal function that creates the console
+    """
+    global _console
+    _console = None
 
 
 def print_success(message: str, prefix: str = "✓") -> None:
-    """
-    Print success message in green.
+    """Print a success message in green.
+
+    Displays a styled success message with a checkmark prefix. The message
+    is rendered in bold green when color output is enabled.
 
     Parameters
     ----------
     message : str
-        The message to print.
+        The success message to display.
     prefix : str, optional
-        Prefix symbol. Default is "✓".
+        Prefix symbol to prepend to the message. Default is "✓" (checkmark).
+        Can be customized or set to empty string for no prefix.
+
+    Returns
+    -------
+    None
 
     Examples
     --------
+    Standard success message:
+
+    >>> from depkeeper.utils.console import print_success
     >>> print_success("Package updated successfully")
     ✓ Package updated successfully
+
+    Custom prefix:
+
+    >>> print_success("All tests passed", prefix="[OK]")
+    [OK] All tests passed
+
+    Notes
+    -----
+    The message uses the 'success' style from the depkeeper theme, which
+    renders as bold green text when color output is enabled.
+
+    See Also
+    --------
+    print_error : Print error messages in red
+    print_warning : Print warning messages in yellow
+    print_info : Print informational messages in cyan
     """
-    _console.print(f"{prefix} {message}", style="success")
+    _get_console().print(f"{prefix} {message}", style="success")
 
 
 def print_error(message: str, prefix: str = "✗") -> None:
-    """
-    Print error message in red.
+    """Print an error message in red.
+
+    Displays a styled error message with an X mark prefix. The message
+    is rendered in bold red when color output is enabled.
 
     Parameters
     ----------
     message : str
-        The message to print.
+        The error message to display.
     prefix : str, optional
-        Prefix symbol. Default is "✗".
+        Prefix symbol to prepend to the message. Default is "✗" (X mark).
+
+    Returns
+    -------
+    None
 
     Examples
     --------
+    >>> from depkeeper.utils.console import print_error
     >>> print_error("Failed to parse requirements file")
     ✗ Failed to parse requirements file
+
+    >>> errors = ["Package not found", "Invalid version"]
+    >>> for error in errors:
+    ...     print_error(error)
+
+    See Also
+    --------
+    print_success : Print success messages in green
+    print_warning : Print warning messages in yellow
     """
-    _console.print(f"{prefix} {message}", style="error")
+    _get_console().print(f"{prefix} {message}", style="error")
 
 
 def print_warning(message: str, prefix: str = "⚠") -> None:
-    """
-    Print warning message in yellow.
+    """Print a warning message in yellow.
+
+    Displays a styled warning message with a warning symbol prefix. The
+    message is rendered in bold yellow when color output is enabled.
 
     Parameters
     ----------
     message : str
-        The message to print.
+        The warning message to display.
     prefix : str, optional
-        Prefix symbol. Default is "⚠".
+        Prefix symbol to prepend to the message. Default is "⚠" (warning sign).
+
+    Returns
+    -------
+    None
 
     Examples
     --------
+    >>> from depkeeper.utils.console import print_warning
     >>> print_warning("Package not found on PyPI")
     ⚠ Package not found on PyPI
+
+    See Also
+    --------
+    print_error : Print error messages in red
+    print_info : Print informational messages
     """
-    _console.print(f"{prefix} {message}", style="warning")
+    _get_console().print(f"{prefix} {message}", style="warning")
 
 
 def print_info(message: str, prefix: str = "ℹ") -> None:
-    """
-    Print info message in cyan.
+    """Print an informational message in cyan.
+
+    Displays a styled informational message with an info symbol prefix.
+    The message is rendered in bold cyan when color output is enabled.
 
     Parameters
     ----------
     message : str
-        The message to print.
+        The informational message to display.
     prefix : str, optional
-        Prefix symbol. Default is "ℹ".
+        Prefix symbol to prepend to the message. Default is "ℹ" (info symbol).
+
+    Returns
+    -------
+    None
 
     Examples
     --------
+    >>> from depkeeper.utils.console import print_info
     >>> print_info("Checking 5 packages...")
     ℹ Checking 5 packages...
+
+    See Also
+    --------
+    print_success : Print success messages
+    print_warning : Print warning messages
     """
-    _console.print(f"{prefix} {message}", style="info")
+    _get_console().print(f"{prefix} {message}", style="info")
 
 
 def print_dim(message: str) -> None:
-    """
-    Print dimmed message (less emphasis).
+    """Print a dimmed message with reduced emphasis.
+
+    Displays a message in dimmed style, useful for supplementary information
+    that should be visible but not prominent.
 
     Parameters
     ----------
     message : str
-        The message to print.
+        The message to display in dimmed style.
+
+    Returns
+    -------
+    None
 
     Examples
     --------
+    >>> from depkeeper.utils.console import print_dim
     >>> print_dim("Using cache from /tmp/cache")
     Using cache from /tmp/cache
+
+    Notes
+    -----
+    Dimmed text appears in a lighter/grayed color when color output is
+    enabled, making it visually distinct from primary messages.
     """
-    _console.print(message, style="dim")
+    _get_console().print(message, style="dim")
 
 
 def print_highlight(message: str) -> None:
-    """
-    Print highlighted message (strong emphasis).
+    """Print a highlighted message with strong emphasis.
+
+    Displays a message in bold magenta style, useful for drawing attention
+    to important information that requires immediate notice.
 
     Parameters
     ----------
     message : str
-        The message to print.
+        The message to display with highlighting.
+
+    Returns
+    -------
+    None
 
     Examples
     --------
+    >>> from depkeeper.utils.console import print_highlight
     >>> print_highlight("5 packages need updates")
     5 packages need updates
+
+    Notes
+    -----
+    Highlighted text appears in bold magenta when color output is enabled,
+    making it stand out significantly from other message types.
     """
-    _console.print(message, style="highlight")
-
-
-# ============================================================================
-# Table Printing
-# ============================================================================
+    _get_console().print(message, style="highlight")
 
 
 def print_table(
@@ -226,27 +421,55 @@ def print_table(
     title: Optional[str] = None,
     caption: Optional[str] = None,
 ) -> None:
-    """
-    Print data as a formatted table.
+    """Print data as a formatted Rich table.
+
+    Displays tabular data with automatic column width adjustment, optional
+    title and caption, and consistent styling. Empty data lists are handled
+    gracefully with a debug log message.
 
     Parameters
     ----------
-    data : List[Dict[str, Any]]
-        List of dictionaries where keys are column names and values are cell values.
-    headers : List[str], optional
-        Column headers. If not provided, uses keys from first data row.
+    data : list[dict[str, Any]]
+        List of dictionaries where each dictionary represents a row. Keys
+        are column names and values are cell contents. All values are
+        converted to strings for display.
+    headers : list[str], optional
+        Column headers to display. If None, uses the keys from the first
+        data row. Allows customizing column order or display names.
     title : str, optional
-        Table title displayed above the table.
+        Table title displayed above the table with styling.
     caption : str, optional
         Table caption displayed below the table.
 
+    Returns
+    -------
+    None
+
     Examples
     --------
+    Basic table:
+
+    >>> from depkeeper.utils.console import print_table
     >>> data = [
     ...     {"Package": "requests", "Current": "2.28.0", "Latest": "2.31.0"},
     ...     {"Package": "click", "Current": "8.0.0", "Latest": "8.1.7"},
     ... ]
     >>> print_table(data, title="Outdated Packages")
+
+    Custom column order:
+
+    >>> print_table(data, headers=["Package", "Latest", "Current"])
+
+    Notes
+    -----
+    - Empty data lists are silently skipped
+    - Missing dictionary keys result in empty cells
+    - All values are converted to strings
+    - Long content wraps automatically
+
+    See Also
+    --------
+    create_progress_bar : For progress tracking
     """
     if not data:
         logger.debug("No data to display in table")
@@ -269,79 +492,109 @@ def print_table(
         table.add_row(*values)
 
     # Print table
-    _console.print(table)
-
-
-# ============================================================================
-# Progress Bar
-# ============================================================================
+    _get_console().print(table)
 
 
 def create_progress_bar(transient: bool = True) -> Progress:
-    """
-    Create a rich progress bar for tracking operations.
+    """Create a Rich progress bar for tracking operations.
+
+    Returns a configured Progress instance with spinner, description, bar,
+    and percentage columns. Designed for use with context manager pattern.
 
     Parameters
     ----------
     transient : bool, optional
-        If True, progress bar disappears when complete. Default is True.
+        If True, the progress bar disappears after completion. If False,
+        the final progress state remains visible. Default is True.
 
     Returns
     -------
     Progress
-        Rich Progress instance for tracking tasks.
+        Rich Progress instance ready for tracking tasks.
 
     Examples
     --------
+    Basic progress tracking:
+
+    >>> from depkeeper.utils.console import create_progress_bar
     >>> with create_progress_bar() as progress:
     ...     task = progress.add_task("Checking packages...", total=10)
     ...     for i in range(10):
-    ...         # Do work
     ...         progress.update(task, advance=1)
+
+    Multiple tasks:
+
+    >>> with create_progress_bar() as progress:
+    ...     task1 = progress.add_task("Downloading...", total=100)
+    ...     task2 = progress.add_task("Processing...", total=50)
+
+    Notes
+    -----
+    The progress bar includes spinner, description, bar, and percentage.
+    Respects color settings and adapts to NO_COLOR environments.
+
+    See Also
+    --------
+    print_table : For displaying results after progress
     """
     return Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         TaskProgressColumn(),
-        console=_console,
+        console=_get_console(),
         transient=transient,
     )
 
 
-# ============================================================================
-# Confirmation Prompts
-# ============================================================================
-
-
 def confirm(message: str, default: bool = False) -> bool:
-    """
-    Prompt user for yes/no confirmation.
+    """Prompt user for yes/no confirmation.
+
+    Displays an interactive prompt asking the user to confirm an action.
+    Accepts 'y', 'yes', 'n', 'no' (case-insensitive). Empty input uses
+    the default value. Handles interrupts gracefully.
 
     Parameters
     ----------
     message : str
-        The confirmation message to display.
+        The confirmation question to display to the user.
     default : bool, optional
-        Default value if user just presses Enter. Default is False.
+        Default response if user presses Enter without input. If True,
+        shows [Y/n] prompt. If False, shows [y/N] prompt. Default is False.
 
     Returns
     -------
     bool
-        True if user confirmed, False otherwise.
+        True if user confirmed (answered yes), False if user declined
+        or interrupted the prompt.
 
     Examples
     --------
+    >>> from depkeeper.utils.console import confirm
     >>> if confirm("Update requirements.txt?"):
     ...     print("Updating...")
+
+    >>> if confirm("Continue?", default=True):
+    ...     print("Proceeding...")
+
+    Notes
+    -----
+    Accepted responses: 'y', 'yes', 'n', 'no' (case-insensitive)
+    Empty response uses the default value
+    Keyboard interrupt (Ctrl+C) returns False
+
+    See Also
+    --------
+    print_warning : Warn before destructive operations
     """
+    console = _get_console()
     suffix = " [Y/n]: " if default else " [y/N]: "
-    _console.print(f"{message}{suffix}", end="", style="info")
+    console.print(f"{message}{suffix}", end="", style="info")
 
     try:
         response = input().strip().lower()
     except (KeyboardInterrupt, EOFError):
-        _console.print()  # New line
+        console.print()  # New line
         return False
 
     if not response:
@@ -350,18 +603,39 @@ def confirm(message: str, default: bool = False) -> bool:
     return response in ("y", "yes")
 
 
-# ============================================================================
-# Console Direct Access
-# ============================================================================
-
-
 def get_raw_console() -> Console:
-    """
-    Get the underlying rich Console instance for advanced usage.
+    """Get the underlying Rich Console instance for advanced usage.
+
+    Provides direct access to the global Rich Console instance for advanced
+    use cases not covered by the high-level printing functions.
 
     Returns
     -------
     Console
-        The global console instance.
+        The global Rich Console instance configured with depkeeper's theme.
+
+    Examples
+    --------
+    Use Rich's advanced features:
+
+    >>> from depkeeper.utils.console import get_raw_console
+    >>> console = get_raw_console()
+    >>> console.print("[bold red]Custom[/] [green]styled[/] text")
+
+    Access console properties:
+
+    >>> console = get_raw_console()
+    >>> width = console.width
+    >>> is_terminal = console.is_terminal
+
+    Notes
+    -----
+    For most use cases, the high-level functions (print_success, print_error)
+    are recommended. Use this only when you need Rich's advanced features.
+
+    See Also
+    --------
+    reconfigure_console : Force console reconfiguration
+    print_table : High-level table printing
     """
-    return _console
+    return _get_console()
