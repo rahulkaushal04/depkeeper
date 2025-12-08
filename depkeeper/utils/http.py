@@ -696,17 +696,6 @@ class HTTPClient:
                 url=url,
                 response_body=response.text if hasattr(response, "text") else None,
             ) from exc
-        response = await self.get(url, **kwargs)
-
-        try:
-            data: Dict[str, Any] = response.json()
-            return data
-        except Exception as exc:
-            raise NetworkError(
-                f"Invalid JSON response from {url}",
-                url=url,
-                response_body=response.text if hasattr(response, "text") else None,
-            ) from exc
 
     async def batch_get_json(
         self,

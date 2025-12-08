@@ -31,6 +31,9 @@ from depkeeper.utils.progress import (
     create_spinner,
     create_progress,
 )
+from depkeeper.utils.http import (
+    HTTPClient,
+)
 
 __all__ = [
     # Console
@@ -57,6 +60,8 @@ __all__ = [
     "restore_backup",
     "find_requirements_files",
     "validate_path",
+    # HTTP
+    "HTTPClient",
     # Progress
     "ProgressTracker",
     "create_spinner",
