@@ -10,11 +10,17 @@ from depkeeper.utils.filesystem import (
 )
 from depkeeper.utils.logger import (
     get_logger,
+    setup_logging,
+    disable_logging,
+    is_logging_configured,
 )
 
 __all__ = [
     # Logging
     "get_logger",
+    "setup_logging",
+    "disable_logging",
+    "is_logging_configured",
     # Filesystem
     "safe_read_file",
     "safe_write_file",
