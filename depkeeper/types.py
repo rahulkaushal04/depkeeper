@@ -199,17 +199,6 @@ class ParseResult(TypedDict):
     file_path: str
 
 
-class UpdateResult(TypedDict):
-    """Result of an update operation."""
-
-    success: bool
-    updated_packages: Dict[PackageName, Tuple[Version, Version]]
-    failed_packages: Dict[PackageName, str]
-    conflicts: List[Dict[str, Any]]
-    backup_path: Optional[str]
-    duration: float
-
-
 class CheckResult(TypedDict):
     """Version check result."""
 
