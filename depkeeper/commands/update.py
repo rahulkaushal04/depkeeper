@@ -17,7 +17,6 @@ from depkeeper.cli import pass_context, DepKeeperContext
 from depkeeper.core.parser import RequirementsParser
 from depkeeper.core.checker import VersionChecker
 from depkeeper.core.updater import RequirementsUpdater
-from depkeeper.strategies import get_strategy
 from depkeeper.constants import UpdateStrategy as UpdateStrategyEnum
 from depkeeper.utils.console import (
     print_success,
@@ -281,7 +280,6 @@ def _get_strategy(strategy_name: str):
     if not strategy_enum:
         raise DepKeeperError(f"Unknown strategy: {strategy_name}")
 
-    return get_strategy(strategy_enum)
 
 
 def _apply_updates(file: Path, version_updates: Dict[str, str]) -> None:
