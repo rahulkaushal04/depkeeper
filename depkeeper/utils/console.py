@@ -61,7 +61,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
-from typing import Any, Optional, List, Dict
+from typing import Any, Optional, List, Dict, Literal, Callable
 
 from rich.theme import Theme
 from rich.table import Table
@@ -214,7 +214,7 @@ def reconfigure_console() -> None:
     _get_console : Internal function that creates the console
     """
     global _console
-    with _console_lock:  # Thread-safe reconfiguration
+    with _console_lock:
         _console = None
 
 
@@ -423,19 +423,22 @@ def print_table(
     headers: Optional[List[str]] = None,
     title: Optional[str] = None,
     caption: Optional[str] = None,
+    column_styles: Optional[Dict[str, Dict[str, Any]]] = None,
+    row_styler: Optional[Callable[[Dict[str, Any]], Optional[str]]] = None,
 ) -> None:
-    """Print data as a formatted Rich table.
+    """Print data as a formatted Rich table with advanced styling support.
 
     Displays tabular data with automatic column width adjustment, optional
-    title and caption, and consistent styling. Empty data lists are handled
+    title and caption, and consistent styling. Supports Rich markup in cell
+    values and dynamic row styling via callbacks. Empty data lists are handled
     gracefully with a debug log message.
 
     Parameters
     ----------
     data : list[dict[str, Any]]
         List of dictionaries where each dictionary represents a row. Keys
-        are column names and values are cell contents. All values are
-        converted to strings for display.
+        are column names and values are cell contents. Values can include
+        Rich markup (e.g., "[red]error[/red]") for inline styling.
     headers : list[str], optional
         Column headers to display. If None, uses the keys from the first
         data row. Allows customizing column order or display names.
@@ -443,6 +446,13 @@ def print_table(
         Table title displayed above the table with styling.
     caption : str, optional
         Table caption displayed below the table.
+    column_styles : dict[str, dict[str, Any]], optional
+        Dictionary mapping column names to style configurations. Each config
+        can include 'style', 'justify', 'no_wrap', 'width', etc.
+        Example: {"Status": {"justify": "center", "width": 8}}
+    row_styler : callable, optional
+        Function that takes a row dict and returns a style string or None.
+        Applied to entire row for conditional formatting.
 
     Returns
     -------
@@ -459,16 +469,22 @@ def print_table(
     ... ]
     >>> print_table(data, title="Outdated Packages")
 
-    Custom column order:
+    Table with Rich markup and custom column styles:
 
-    >>> print_table(data, headers=["Package", "Latest", "Current"])
+    >>> data = [
+    ...     {"Status": "[green]✓[/green]", "Package": "requests"},
+    ...     {"Status": "[red]✗[/red]", "Package": "click"},
+    ... ]
+    >>> column_styles = {"Status": {"justify": "center", "width": 8}}
+    >>> print_table(data, column_styles=column_styles)
 
     Notes
     -----
     - Empty data lists are silently skipped
     - Missing dictionary keys result in empty cells
-    - All values are converted to strings
-    - Long content wraps automatically
+    - Values can include Rich markup for inline styling
+    - Column styles allow fine-grained control over appearance
+    - Row styler enables conditional row highlighting
 
     See Also
     --------
@@ -485,14 +501,29 @@ def print_table(
     # Create table
     table = Table(title=title, caption=caption, show_header=True, header_style="bold")
 
-    # Add columns
+    # Add columns with custom styles
+    column_styles = column_styles or {}
     for header in headers:
-        table.add_column(header, overflow="fold")
+        col_config = column_styles.get(header, {})
+
+        # Extract justify with proper type - default to "default" if not specified
+        justify_value = col_config.get("justify", "default")
+
+        table.add_column(
+            header,
+            style=col_config.get("style"),
+            justify=justify_value,
+            no_wrap=col_config.get("no_wrap", False),
+            width=col_config.get("width"),
+            overflow=col_config.get("overflow", "fold"),
+        )
 
     # Add rows
     for row in data:
         values = [str(row.get(h, "")) for h in headers]
-        table.add_row(*values)
+        # Apply row styling if provided
+        row_style = row_styler(row) if row_styler else None
+        table.add_row(*values, style=row_style)
 
     # Print table
     _get_console().print(table)

@@ -6,17 +6,20 @@ Checks requirements file for available updates and displays results.
 
 from __future__ import annotations
 
-import asyncio
 import sys
-from pathlib import Path
-from typing import Any, Dict, List, Optional
-
+import json
 import click
+import asyncio
+from typing import List, Dict, Any
+from pathlib import Path
 
-from depkeeper.context import pass_context, DepKeeperContext
-from depkeeper.core.parser import RequirementsParser
-from depkeeper.core.checker import VersionChecker
 from depkeeper.models.package import Package
+from depkeeper.utils.logger import get_logger
+from depkeeper.exceptions import DepKeeperError
+from depkeeper.core.checker import VersionChecker
+from depkeeper.utils.progress import ProgressTracker
+from depkeeper.core.parser import RequirementsParser
+from depkeeper.context import pass_context, DepKeeperContext
 from depkeeper.utils.console import (
     print_success,
     print_error,
@@ -24,9 +27,6 @@ from depkeeper.utils.console import (
     print_info,
     print_table,
 )
-from depkeeper.utils.progress import ProgressTracker
-from depkeeper.utils.logger import get_logger
-from depkeeper.exceptions import DepKeeperError
 
 logger = get_logger("commands.check")
 
@@ -54,12 +54,18 @@ logger = get_logger("commands.check")
     default="table",
     help="Output format.",
 )
+@click.option(
+    "--no-extract-ranges",
+    is_flag=True,
+    help="Disable extracting baseline versions from range constraints (>=, >, ~=).",
+)
 @pass_context
 def check(
     ctx: DepKeeperContext,
     file: Path,
     outdated_only: bool,
     format: str,
+    no_extract_ranges: bool,
 ) -> None:
     """
     Check requirements file for available updates.
@@ -84,7 +90,9 @@ def check(
     """
     try:
         # Run async check
-        has_updates = asyncio.run(_check_async(ctx, file, outdated_only, format))
+        has_updates = asyncio.run(
+            _check_async(ctx, file, outdated_only, format, not no_extract_ranges)
+        )
 
         # Exit with appropriate code
         sys.exit(1 if has_updates else 0)
@@ -108,6 +116,7 @@ async def _check_async(
     file: Path,
     outdated_only: bool,
     format: str,
+    extract_from_ranges: bool,
 ) -> bool:
     """
     Async implementation of check command.
@@ -122,6 +131,8 @@ async def _check_async(
         Whether to show only outdated packages.
     format : str
         Output format.
+    extract_from_ranges : bool
+        Whether to extract baseline versions from range constraints.
 
     Returns
     -------
@@ -135,20 +146,23 @@ async def _check_async(
     try:
         requirements = parser.parse_file(file)
     except Exception as e:
-        raise DepKeeperError(f"Failed to parse {file}: {e}")
+        raise DepKeeperError(f"Failed to parse {file}: {e}") from e
 
+    # Early return if no requirements found
     if not requirements:
-        print_warning(f"No requirements found in {file}")
+        print_warning("No packages found in requirements file")
         return False
 
     print_info(f"Found {len(requirements)} package(s)")
 
     # Check versions with progress tracking
-    packages = await _check_packages_with_progress(requirements, ctx.verbose > 0)
+    packages = await _check_packages_with_progress(
+        requirements, ctx.verbose > 0, extract_from_ranges
+    )
 
     # Filter outdated if requested
     if outdated_only:
-        packages = [p for p in packages if p.has_update]
+        packages = [p for p in packages if p.has_update()]
 
     # Display results
     if not packages:
@@ -159,7 +173,7 @@ async def _check_async(
         return False
 
     # Count updates
-    outdated_count = sum(1 for p in packages if p.has_update)
+    outdated_count = sum(1 for p in packages if p.has_update())
 
     # Display based on format
     if format == "table":
@@ -181,9 +195,9 @@ async def _check_async(
 async def _check_packages_with_progress(
     requirements: list,
     show_progress: bool,
+    extract_from_ranges: bool,
 ) -> List[Package]:
-    """
-    Check packages with optional progress display.
+    """Check packages with optional progress display.
 
     Parameters
     ----------
@@ -191,44 +205,71 @@ async def _check_packages_with_progress(
         List of requirements to check.
     show_progress : bool
         Whether to show progress bar.
+    extract_from_ranges : bool
+        Whether to extract baseline versions from range constraints.
 
     Returns
     -------
     List[Package]
         List of checked packages.
     """
-    async with VersionChecker() as checker:
+    async with VersionChecker(extract_from_ranges=extract_from_ranges) as checker:
         if show_progress:
-            # Use progress tracker
-            tracker = ProgressTracker(transient=True)
-            tracker.start()
-            task = tracker.add_task(
-                "Checking packages...",
-                total=len(requirements),
-            )
-
-            packages = []
-            for req in requirements:
-                try:
-                    package = await checker.check_package(
-                        req.name,
-                        current_version=str(req.specifier) if req.specifier else None,
-                    )
-                    packages.append(package)
-                except Exception as e:
-                    logger.error(f"Failed to check {req.name}: {e}")
-                    # Create error package
-                    from depkeeper.models.package import Package
-
-                    packages.append(Package(name=req.name))
-
-                tracker.update(task, advance=1)
-
-            tracker.stop()
-            return packages
+            return await _check_with_progress(checker, requirements)
         else:
-            # No progress display
             return await checker.check_multiple(requirements)
+
+
+async def _check_with_progress(
+    checker: VersionChecker,
+    requirements: list,
+) -> List[Package]:
+    """Check packages with progress tracking."""
+    tracker = ProgressTracker(transient=True)
+    tracker.start()
+    task = tracker.add_task(
+        "Checking packages...",
+        total=len(requirements),
+    )
+
+    packages = []
+    for req in requirements:
+        tracker.update(task, description=f"Checking {req.name}...")
+
+        try:
+            # Build version string from specs for display
+            current_version = _build_version_string(req.specs) if req.specs else None
+
+            package = await checker.check_package(
+                req.name,
+                current_version=current_version,
+            )
+            packages.append(package)
+        except Exception as e:
+            logger.error(f"Failed to check {req.name}: {e}")
+            # Create error package for failed checks
+            packages.append(Package(name=req.name))
+
+        tracker.update(task, advance=1)
+
+    tracker.stop()
+    return packages
+
+
+def _build_version_string(specs: List[tuple]) -> str:
+    """Build version string from requirement specs.
+
+    Parameters
+    ----------
+    specs : List[tuple]
+        List of (operator, version) tuples.
+
+    Returns
+    -------
+    str
+        Formatted version string (e.g., \">=8.1.0,<9.0.0\").
+    """
+    return ",".join(f"{op}{ver}" for op, ver in specs)
 
 
 # ============================================================================
@@ -237,48 +278,159 @@ async def _check_packages_with_progress(
 
 
 def _display_table(packages: List[Package]) -> None:
-    """Display packages as a formatted table."""
-    data = []
-    for pkg in packages:
-        status = "��" if pkg.has_update else "��"
-        data.append(
-            {
-                "Status": status,
-                "Package": pkg.name,
-                "Current": pkg.current_version or "-",
-                "Latest": pkg.latest_version or "-",
-                "Type": _get_update_type(pkg),
-            }
-        )
+    """Display packages as a formatted table with color-coded status."""
+    # Prepare data with Rich markup for styling
+    data = [_create_table_row(pkg) for pkg in packages]
 
-    print_table(data, title="Package Status")
+    # Define column styles
+    column_styles = {
+        "Status": {"justify": "center", "no_wrap": True, "width": 8},
+        "Package": {"style": "cyan", "no_wrap": True},
+        "Current": {"justify": "center"},
+        "Latest": {"justify": "center"},
+        "Type": {"justify": "center"},
+    }
+
+    # Use enhanced print_table utility
+    print_table(data, title="Package Status", column_styles=column_styles)
+
+
+def _create_table_row(pkg: Package) -> Dict[str, str]:
+    """Create a table row dict for a package with Rich markup.
+
+    Parameters
+    ----------
+    pkg : Package
+        Package to create row for.
+
+    Returns
+    -------
+    Dict[str, str]
+        Dictionary with Status, Package, Current, Latest, and Type keys.
+    """
+    if not pkg.latest_version:
+        # Error case - package not found or failed to fetch
+        return {
+            "Status": "[red]ERROR[/red]",
+            "Package": pkg.name,
+            "Current": pkg.current_version or "[dim]-[/dim]",
+            "Latest": "[red]error[/red]",
+            "Type": "[dim]-[/dim]",
+        }
+
+    if pkg.has_update():
+        # Outdated - needs update
+        update_type = _get_update_type(pkg)
+        colored_type = _colorize_update_type(update_type)
+
+        return {
+            "Status": "[yellow]UPDATE[/yellow]",
+            "Package": pkg.name,
+            "Current": pkg.current_version or "[dim]-[/dim]",
+            "Latest": pkg.latest_version,
+            "Type": colored_type,
+        }
+
+    # Up to date
+    return {
+        "Status": "[green]OK[/green]",
+        "Package": pkg.name,
+        "Current": pkg.current_version or "[dim]-[/dim]",
+        "Latest": pkg.latest_version or "[dim]-[/dim]",
+        "Type": "[dim]-[/dim]",
+    }
+
+
+def _colorize_update_type(update_type: str) -> str:
+    """Apply color coding to update type.
+
+    Parameters
+    ----------
+    update_type : str
+        Update type (major, minor, patch, etc.).
+
+    Returns
+    -------
+    str
+        Color-coded update type with Rich markup.
+    """
+    color_map = {
+        "major": "red",
+        "minor": "yellow",
+        "patch": "green",
+    }
+
+    color = color_map.get(update_type)
+    if color:
+        return f"[{color}]{update_type}[/{color}]"
+    return update_type
 
 
 def _display_simple(packages: List[Package]) -> None:
     """Display packages in simple text format."""
+    from depkeeper.utils.console import get_raw_console
+
+    console = get_raw_console()
+
     for pkg in packages:
-        status = "UPDATE" if pkg.has_update else "OK"
-        current = pkg.current_version or "unknown"
-        latest = pkg.latest_version or "unknown"
-        print(f"[{status}] {pkg.name}: {current} -> {latest}")
+        status, current, latest = _get_simple_status(pkg)
+        console.print(f"[{status}] {pkg.name}: {current} -> {latest}")
+
+
+def _get_simple_status(pkg: Package) -> tuple[str, str, str]:
+    """Get simple status tuple for package.
+
+    Parameters
+    ----------
+    pkg : Package
+        Package to get status for.
+
+    Returns
+    -------
+    tuple[str, str, str]
+        (status, current_version, latest_version) tuple.
+    """
+    if not pkg.latest_version:
+        return "ERROR", pkg.current_version or "unknown", "not found"
+
+    if pkg.has_update():
+        return "UPDATE", pkg.current_version or "unknown", pkg.latest_version
+
+    return "OK", pkg.current_version or "unknown", pkg.latest_version or "unknown"
 
 
 def _display_json(packages: List[Package]) -> None:
     """Display packages as JSON."""
-    import json
-
-    data = [
-        {
-            "name": pkg.name,
-            "current_version": pkg.current_version,
-            "latest_version": pkg.latest_version,
-            "has_update": pkg.has_update,
-            "update_type": _get_update_type(pkg),
-        }
-        for pkg in packages
-    ]
-
+    data = [_create_json_entry(pkg) for pkg in packages]
     print(json.dumps(data, indent=2))
+
+
+def _create_json_entry(pkg: Package) -> Dict[str, Any]:
+    """Create JSON entry for a package.
+
+    Parameters
+    ----------
+    pkg : Package
+        Package to create entry for.
+
+    Returns
+    -------
+    Dict[str, Any]
+        JSON-serializable dictionary with package information.
+    """
+    entry = {
+        "name": pkg.name,
+        "current_version": pkg.current_version,
+        "latest_version": pkg.latest_version,
+        "has_update": pkg.has_update(),
+        "update_type": _get_update_type(pkg),
+    }
+
+    # Add error field if package fetch failed
+    if not pkg.latest_version:
+        entry["error"] = "Package not found or failed to fetch from PyPI"
+
+    return entry
 
 
 def _get_update_type(pkg: Package) -> str:
