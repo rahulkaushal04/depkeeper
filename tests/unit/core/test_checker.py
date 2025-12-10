@@ -263,11 +263,6 @@ class TestCheckPackage:
         assert package.name == "requests"
         assert package.current_version == "2.28.0"
         assert package.latest_version == "2.31.0"
-        assert len(package.available_versions) == 5
-        assert "2.28.0" in package.available_versions
-        assert "2.31.0" in package.available_versions
-        assert package.metadata["summary"] == "Python HTTP for Humans."
-        assert package.metadata["maintainer"] == "Kenneth Reitz"
 
     @pytest.mark.asyncio
     async def test_check_package_without_current_version(
@@ -338,23 +333,8 @@ class TestCheckPackage:
         package = await checker.check_package("requests")
 
         assert package.metadata["requires_python"] == ">=3.7"
-        assert package.metadata["license"] == "Apache 2.0"
-        assert package.metadata["homepage_url"] == "https://requests.readthedocs.io"
         assert len(package.metadata["dependencies"]) == 4
         assert "charset-normalizer (<4,>=2)" in package.metadata["dependencies"]
-
-    @pytest.mark.asyncio
-    async def test_check_package_last_updated(
-        self, mock_http_client, sample_pypi_response
-    ):
-        """Test that last_updated timestamp is set."""
-        mock_http_client.get_json = AsyncMock(return_value=sample_pypi_response)
-        checker = VersionChecker(http_client=mock_http_client)
-
-        package = await checker.check_package("requests")
-
-        assert package.last_updated is not None
-        assert isinstance(package.last_updated, datetime)
 
 
 # ============================================================================
@@ -518,8 +498,6 @@ class TestParsePackageData:
         assert package.name == "requests"
         assert package.current_version == "2.28.0"
         assert package.latest_version == "2.31.0"
-        assert len(package.available_versions) == 5
-        assert package.metadata["maintainer"] == "Kenneth Reitz"
 
     def test_parse_package_data_without_current_version(self, sample_pypi_response):
         """Test parsing package data without current version."""
@@ -537,10 +515,7 @@ class TestParsePackageData:
 
         package = checker._parse_package_data("requests", sample_pypi_response)
 
-        assert package.metadata["summary"] == "Python HTTP for Humans."
         assert package.metadata["requires_python"] == ">=3.7"
-        assert package.metadata["license"] == "Apache 2.0"
-        assert package.metadata["homepage_url"] == "https://requests.readthedocs.io"
         assert len(package.metadata["dependencies"]) == 4
 
     def test_parse_package_data_missing_info(self):
@@ -552,7 +527,6 @@ class TestParsePackageData:
 
         assert package.name == "testpkg"
         assert package.latest_version is None
-        assert package.metadata["maintainer"] is None
 
     def test_parse_package_data_empty_releases(
         self, sample_pypi_response_empty_releases
@@ -567,155 +541,10 @@ class TestParsePackageData:
         assert package.name == "emptypackage"
         assert len(package.available_versions) == 0
 
-    def test_parse_package_data_last_updated(self, sample_pypi_response):
-        """Test that last_updated is correctly parsed."""
-        checker = VersionChecker()
-
-        package = checker._parse_package_data("requests", sample_pypi_response)
-
-        assert package.last_updated is not None
-        assert isinstance(package.last_updated, datetime)
-
-
-# ============================================================================
-# Test Version Parsing
-# ============================================================================
-
-
-class TestParseVersions:
-    """Tests for parsing version lists from releases."""
-
-    def test_parse_versions_valid(self):
-        """Test parsing valid versions."""
-        checker = VersionChecker()
-        releases = {
-            "1.0.0": [{"filename": "test-1.0.0.whl"}],
-            "1.1.0": [{"filename": "test-1.1.0.whl"}],
-            "2.0.0": [{"filename": "test-2.0.0.whl"}],
-        }
-
-        versions = checker._parse_versions(releases)
-
-        assert len(versions) == 3
-        assert "1.0.0" in versions
-        assert "2.0.0" in versions
-
-    def test_parse_versions_sorted(self):
-        """Test that versions are sorted."""
-        checker = VersionChecker()
-        releases = {
-            "2.0.0": [{"filename": "test.whl"}],
-            "1.0.0": [{"filename": "test.whl"}],
-            "1.5.0": [{"filename": "test.whl"}],
-        }
-
-        versions = checker._parse_versions(releases)
-
-        assert versions == ["1.0.0", "1.5.0", "2.0.0"]
-
-    def test_parse_versions_skips_empty_releases(self):
-        """Test that releases with no files are skipped."""
-        checker = VersionChecker()
-        releases = {
-            "1.0.0": [{"filename": "test.whl"}],
-            "1.1.0": [],  # No files
-            "1.2.0": [{"filename": "test.whl"}],
-        }
-
-        versions = checker._parse_versions(releases)
-
-        assert len(versions) == 2
-        assert "1.1.0" not in versions
-
-    def test_parse_versions_skips_invalid(self):
-        """Test that invalid version strings are skipped."""
-        checker = VersionChecker()
-        releases = {
-            "1.0.0": [{"filename": "test.whl"}],
-            "invalid": [{"filename": "test.whl"}],
-            "1.1.0": [{"filename": "test.whl"}],
-        }
-
-        versions = checker._parse_versions(releases)
-
-        assert len(versions) == 2
-        assert "invalid" not in versions
-
-    def test_parse_versions_empty_releases(self):
-        """Test parsing empty releases dictionary."""
-        checker = VersionChecker()
-
-        versions = checker._parse_versions({})
-
-        assert versions == []
-
-    def test_parse_versions_with_prerelease(self):
-        """Test parsing versions including pre-releases."""
-        checker = VersionChecker()
-        releases = {
-            "1.0.0": [{"filename": "test.whl"}],
-            "1.1.0a1": [{"filename": "test.whl"}],
-            "1.1.0b1": [{"filename": "test.whl"}],
-            "1.1.0": [{"filename": "test.whl"}],
-        }
-
-        versions = checker._parse_versions(releases)
-
-        assert len(versions) == 4
-        assert "1.1.0a1" in versions
-        assert "1.1.0b1" in versions
-
 
 # ============================================================================
 # Test Metadata Helpers
 # ============================================================================
-
-
-class TestGetUploadDate:
-    """Tests for getting upload date from releases."""
-
-    def test_get_upload_date_success(self):
-        """Test getting upload date successfully."""
-        checker = VersionChecker()
-        releases = {
-            "1.0.0": [
-                {
-                    "filename": "test-1.0.0.whl",
-                    "upload_time_iso_8601": "2023-01-15T10:30:00Z",
-                }
-            ]
-        }
-
-        upload_date = checker._get_upload_date(releases, "1.0.0")
-
-        assert upload_date == "2023-01-15T10:30:00Z"
-
-    def test_get_upload_date_version_not_found(self):
-        """Test getting upload date for non-existent version."""
-        checker = VersionChecker()
-        releases = {"1.0.0": [{"filename": "test.whl"}]}
-
-        upload_date = checker._get_upload_date(releases, "2.0.0")
-
-        assert upload_date is None
-
-    def test_get_upload_date_no_version(self):
-        """Test getting upload date with None version."""
-        checker = VersionChecker()
-        releases = {"1.0.0": [{"filename": "test.whl"}]}
-
-        upload_date = checker._get_upload_date(releases, None)
-
-        assert upload_date is None
-
-    def test_get_upload_date_empty_files(self):
-        """Test getting upload date with empty files list."""
-        checker = VersionChecker()
-        releases = {"1.0.0": []}
-
-        upload_date = checker._get_upload_date(releases, "1.0.0")
-
-        assert upload_date is None
 
 
 class TestGetDependencies:
@@ -1055,8 +884,6 @@ class TestEdgeCases:
         package = await checker.check_package("testpkg")
 
         assert package.name == "testpkg"
-        assert "中文" in package.metadata["summary"]
-        assert "Tëst Authör" in package.metadata["maintainer"]
 
     @pytest.mark.asyncio
     async def test_very_large_version_list(self, mock_http_client):
@@ -1079,7 +906,7 @@ class TestEdgeCases:
 
         package = await checker.check_package("testpkg")
 
-        assert len(package.available_versions) == 100
+        assert package.latest_version == "1.0.99"
 
     @pytest.mark.asyncio
     async def test_package_name_normalization(
@@ -1159,7 +986,7 @@ class TestIntegrationScenarios:
             package = await checker.check_package("requests", "2.28.0")
             assert package.name == "requests"
             assert package.current_version == "2.28.0"
-            assert len(package.available_versions) > 0
+            assert package.latest_version == "2.31.0"
 
     @pytest.mark.asyncio
     async def test_multiple_packages_workflow(

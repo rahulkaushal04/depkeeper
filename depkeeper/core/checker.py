@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
-from packaging.version import parse
 from typing import Any, Dict, List, Optional
 
 from depkeeper.exceptions import PyPIError
@@ -232,119 +230,28 @@ class VersionChecker:
             Parsed package object with metadata.
         """
         info = data.get("info", {})
-        releases = data.get("releases", {})
 
-        # Parse versions
-        available_versions = self._parse_versions(releases)
-
-        # Get latest version
+        # Get latest version from info (most reliable source)
         latest_version = info.get("version")
 
-        # Get metadata
+        # Get metadata (minimal for Phase 1)
         metadata = {
-            "upload_date": self._get_upload_date(releases, latest_version),
-            "maintainer": info.get("author") or info.get("maintainer"),
             "requires_python": info.get("requires_python"),
             "dependencies": self._get_dependencies(info),
-            "homepage_url": (
-                info.get("home_page")
-                or info.get("project_url")
-                or info.get("package_url")
-            ),
-            "summary": info.get("summary"),
-            "license": info.get("license"),
         }
-
-        # Get last updated date
-        last_updated = None
-        if latest_version and latest_version in releases:
-            release_files = releases[latest_version]
-            if release_files:
-                upload_time = release_files[0].get("upload_time_iso_8601")
-                if upload_time:
-                    try:
-                        last_updated = datetime.fromisoformat(
-                            upload_time.replace("Z", "+00:00")
-                        )
-                    except Exception:
-                        pass
 
         return Package(
             name=name,
             current_version=current_version,
             latest_version=latest_version,
-            available_versions=available_versions,
+            available_versions=[],  # Not needed for Phase 1
             metadata=metadata,
-            last_updated=last_updated,
+            last_updated=None,  # Not needed for Phase 1
         )
-
-    def _parse_versions(self, releases: Dict[str, List]) -> List[str]:
-        """
-        Extract and sort version list from releases.
-
-        Parameters
-        ----------
-        releases : Dict[str, List]
-            Releases dictionary from PyPI.
-
-        Returns
-        -------
-        List[str]
-            Sorted list of valid version strings (oldest to newest).
-        """
-        versions: List[str] = []
-
-        for version_str, files in releases.items():
-            # Skip versions with no files
-            if not files:
-                continue
-
-            try:
-                # Validate version string
-                parse(version_str)
-                versions.append(version_str)
-            except Exception:
-                logger.warning(f"Invalid version string: {version_str}")
-                continue
-
-        # Sort versions
-        try:
-            versions.sort(key=lambda v: parse(v))
-        except Exception as exc:
-            logger.warning(f"Failed to sort versions: {exc}")
-
-        return versions
 
     # ----------------------------------------------------------------------
     # Metadata Helpers
     # ----------------------------------------------------------------------
-
-    def _get_upload_date(
-        self, releases: Dict[str, List], version: Optional[str]
-    ) -> Optional[str]:
-        """
-        Get upload date for a specific version.
-
-        Parameters
-        ----------
-        releases : Dict[str, List]
-            Releases dictionary from PyPI.
-        version : str, optional
-            Version string to get upload date for.
-
-        Returns
-        -------
-        str | None
-            Upload date string (ISO 8601) or None if not found.
-        """
-        if not version or version not in releases:
-            return None
-
-        files = releases[version]
-        if not files:
-            return None
-
-        return files[0].get("upload_time_iso_8601")
 
     def _get_dependencies(self, info: Dict[str, Any]) -> List[str]:
         """
