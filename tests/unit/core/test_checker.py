@@ -18,12 +18,10 @@ import pytest
 import asyncio
 from datetime import datetime
 from typing import Dict, Any, List
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 from depkeeper.utils.http import HTTPClient
 from depkeeper.models.package import Package
-from depkeeper.constants import UpdateStrategy
-from depkeeper.models.version import VersionInfo
 from depkeeper.core.checker import VersionChecker
 from depkeeper.models.requirement import Requirement
 from depkeeper.exceptions import PyPIError, NetworkError
@@ -91,60 +89,6 @@ def sample_pypi_response() -> Dict[str, Any]:
                 {
                     "filename": "requests-2.31.0-py3-none-any.whl",
                     "upload_time_iso_8601": "2023-05-22T16:00:00Z",
-                }
-            ],
-        },
-    }
-
-
-@pytest.fixture
-def sample_pypi_response_with_prerelease() -> Dict[str, Any]:
-    """Sample PyPI response with pre-release versions."""
-    return {
-        "info": {
-            "name": "django",
-            "version": "5.0.0",
-            "author": "Django Software Foundation",
-            "summary": "A high-level Python web framework.",
-            "home_page": "https://www.djangoproject.com/",
-            "requires_python": ">=3.10",
-            "license": "BSD",
-        },
-        "releases": {
-            "4.2.0": [
-                {
-                    "filename": "Django-4.2.0-py3-none-any.whl",
-                    "upload_time_iso_8601": "2023-04-03T10:00:00Z",
-                }
-            ],
-            "4.2.1": [
-                {
-                    "filename": "Django-4.2.1-py3-none-any.whl",
-                    "upload_time_iso_8601": "2023-05-01T12:00:00Z",
-                }
-            ],
-            "5.0a1": [
-                {
-                    "filename": "Django-5.0a1-py3-none-any.whl",
-                    "upload_time_iso_8601": "2023-06-01T08:00:00Z",
-                }
-            ],
-            "5.0b1": [
-                {
-                    "filename": "Django-5.0b1-py3-none-any.whl",
-                    "upload_time_iso_8601": "2023-08-01T09:00:00Z",
-                }
-            ],
-            "5.0rc1": [
-                {
-                    "filename": "Django-5.0rc1-py3-none-any.whl",
-                    "upload_time_iso_8601": "2023-11-01T10:00:00Z",
-                }
-            ],
-            "5.0.0": [
-                {
-                    "filename": "Django-5.0.0-py3-none-any.whl",
-                    "upload_time_iso_8601": "2023-12-04T14:00:00Z",
                 }
             ],
         },
@@ -488,302 +432,6 @@ class TestCheckMultiple:
 
         # If concurrent, should take ~0.1s, not 0.3s
         assert end_time - start_time < 0.3
-
-
-# ============================================================================
-# Test Version Queries
-# ============================================================================
-
-
-class TestGetLatestVersion:
-    """Tests for getting latest version of a package."""
-
-    @pytest.mark.asyncio
-    async def test_get_latest_version_success(
-        self, mock_http_client, sample_pypi_response
-    ):
-        """Test getting latest version successfully."""
-        mock_http_client.get_json = AsyncMock(return_value=sample_pypi_response)
-        checker = VersionChecker(http_client=mock_http_client)
-
-        version = await checker.get_latest_version("requests")
-
-        assert version is not None
-        assert str(version) == "2.31.0"
-        assert isinstance(version, VersionInfo)
-
-    @pytest.mark.asyncio
-    async def test_get_latest_version_with_prerelease(
-        self, mock_http_client, sample_pypi_response_with_prerelease
-    ):
-        """Test getting latest version including pre-releases."""
-        mock_http_client.get_json = AsyncMock(
-            return_value=sample_pypi_response_with_prerelease
-        )
-        checker = VersionChecker(http_client=mock_http_client)
-
-        # Without pre-releases
-        version_stable = await checker.get_latest_version(
-            "django", include_pre_release=False
-        )
-        assert str(version_stable) == "5.0.0"
-
-        # With pre-releases - should still return 5.0.0 as it's the latest
-        version_pre = await checker.get_latest_version(
-            "django", include_pre_release=True
-        )
-        assert str(version_pre) == "5.0.0"
-
-    @pytest.mark.asyncio
-    async def test_get_latest_version_only_prerelease(self, mock_http_client):
-        """Test getting latest version when only pre-releases exist."""
-        response = {
-            "info": {"name": "testpkg", "version": "1.0a1"},
-            "releases": {
-                "1.0a1": [
-                    {
-                        "filename": "test.whl",
-                        "upload_time_iso_8601": "2023-01-01T00:00:00Z",
-                    }
-                ],
-                "1.0b1": [
-                    {
-                        "filename": "test.whl",
-                        "upload_time_iso_8601": "2023-02-01T00:00:00Z",
-                    }
-                ],
-            },
-        }
-        mock_http_client.get_json = AsyncMock(return_value=response)
-        checker = VersionChecker(http_client=mock_http_client)
-
-        # Without pre-releases, should return None
-        version_stable = await checker.get_latest_version(
-            "testpkg", include_pre_release=False
-        )
-        assert version_stable is None
-
-        # With pre-releases, should return latest pre-release
-        version_pre = await checker.get_latest_version(
-            "testpkg", include_pre_release=True
-        )
-        assert version_pre is not None
-        assert str(version_pre) == "1.0b1"
-
-    @pytest.mark.asyncio
-    async def test_get_latest_version_no_versions(
-        self, mock_http_client, sample_pypi_response_empty_releases
-    ):
-        """Test getting latest version when no versions exist."""
-        mock_http_client.get_json = AsyncMock(
-            return_value=sample_pypi_response_empty_releases
-        )
-        checker = VersionChecker(http_client=mock_http_client)
-
-        version = await checker.get_latest_version("emptypackage")
-
-        assert version is None
-
-    @pytest.mark.asyncio
-    async def test_get_latest_version_error(self, mock_http_client):
-        """Test getting latest version with error."""
-        mock_http_client.get_json = AsyncMock(
-            side_effect=PyPIError("Package not found")
-        )
-        checker = VersionChecker(http_client=mock_http_client)
-
-        version = await checker.get_latest_version("nonexistent")
-
-        assert version is None
-
-
-class TestGetAllVersions:
-    """Tests for getting all versions of a package."""
-
-    @pytest.mark.asyncio
-    async def test_get_all_versions_success(
-        self, mock_http_client, sample_pypi_response
-    ):
-        """Test getting all versions successfully."""
-        mock_http_client.get_json = AsyncMock(return_value=sample_pypi_response)
-        checker = VersionChecker(http_client=mock_http_client)
-
-        versions = await checker.get_all_versions("requests")
-
-        assert len(versions) == 5
-        assert all(isinstance(v, VersionInfo) for v in versions)
-        assert str(versions[0]) == "2.28.0"
-        assert str(versions[-1]) == "2.31.0"
-
-    @pytest.mark.asyncio
-    async def test_get_all_versions_with_prerelease(
-        self, mock_http_client, sample_pypi_response_with_prerelease
-    ):
-        """Test getting all versions including pre-releases."""
-        mock_http_client.get_json = AsyncMock(
-            return_value=sample_pypi_response_with_prerelease
-        )
-        checker = VersionChecker(http_client=mock_http_client)
-
-        versions = await checker.get_all_versions("django")
-
-        assert len(versions) == 6
-        # Should include pre-releases
-        version_strs = [str(v) for v in versions]
-        assert "5.0a1" in version_strs
-        assert "5.0b1" in version_strs
-        assert "5.0rc1" in version_strs
-
-    @pytest.mark.asyncio
-    async def test_get_all_versions_empty(
-        self, mock_http_client, sample_pypi_response_empty_releases
-    ):
-        """Test getting all versions when none exist."""
-        mock_http_client.get_json = AsyncMock(
-            return_value=sample_pypi_response_empty_releases
-        )
-        checker = VersionChecker(http_client=mock_http_client)
-
-        versions = await checker.get_all_versions("emptypackage")
-
-        assert versions == []
-
-    @pytest.mark.asyncio
-    async def test_get_all_versions_error(self, mock_http_client):
-        """Test getting all versions with error."""
-        mock_http_client.get_json = AsyncMock(side_effect=PyPIError("Error"))
-        checker = VersionChecker(http_client=mock_http_client)
-
-        versions = await checker.get_all_versions("nonexistent")
-
-        assert versions == []
-
-
-# ============================================================================
-# Test Version Filtering
-# ============================================================================
-
-
-class TestFilterVersions:
-    """Tests for version filtering with different strategies."""
-
-    @pytest.fixture
-    def version_list(self) -> List[VersionInfo]:
-        """Sample version list for filtering tests."""
-        return [
-            VersionInfo("1.0.0"),
-            VersionInfo("1.0.1"),
-            VersionInfo("1.1.0"),
-            VersionInfo("1.2.0"),
-            VersionInfo("2.0.0"),
-            VersionInfo("2.1.0"),
-            VersionInfo("3.0.0"),
-        ]
-
-    def test_filter_conservative(self, version_list):
-        """Test conservative filtering (patch updates only)."""
-        checker = VersionChecker()
-        current = VersionInfo("1.0.0")
-
-        filtered = checker.filter_versions(
-            version_list, current, UpdateStrategy.CONSERVATIVE
-        )
-
-        assert len(filtered) == 1
-        assert str(filtered[0]) == "1.0.1"
-
-    def test_filter_moderate(self, version_list):
-        """Test moderate filtering (minor and patch updates)."""
-        checker = VersionChecker()
-        current = VersionInfo("1.0.0")
-
-        filtered = checker.filter_versions(
-            version_list, current, UpdateStrategy.MODERATE
-        )
-
-        assert len(filtered) == 3
-        version_strs = [str(v) for v in filtered]
-        assert "1.0.1" in version_strs
-        assert "1.1.0" in version_strs
-        assert "1.2.0" in version_strs
-        assert "2.0.0" not in version_strs
-
-    def test_filter_aggressive(self, version_list):
-        """Test aggressive filtering (all updates)."""
-        checker = VersionChecker()
-        current = VersionInfo("1.0.0")
-
-        filtered = checker.filter_versions(
-            version_list, current, UpdateStrategy.AGGRESSIVE
-        )
-
-        assert len(filtered) == 6  # All versions after 1.0.0
-        assert str(filtered[-1]) == "3.0.0"
-
-    def test_filter_custom_falls_back_to_aggressive(self, version_list):
-        """Test custom strategy falls back to aggressive."""
-        checker = VersionChecker()
-        current = VersionInfo("1.0.0")
-
-        filtered = checker.filter_versions(version_list, current, UpdateStrategy.CUSTOM)
-
-        # Should behave same as aggressive
-        assert len(filtered) == 6
-
-    def test_filter_with_current_at_latest(self, version_list):
-        """Test filtering when current version is already latest."""
-        checker = VersionChecker()
-        current = VersionInfo("3.0.0")
-
-        filtered = checker.filter_versions(
-            version_list, current, UpdateStrategy.AGGRESSIVE
-        )
-
-        assert len(filtered) == 0
-
-    def test_filter_conservative_different_minor(self, version_list):
-        """Test conservative filtering with different minor version."""
-        checker = VersionChecker()
-        current = VersionInfo("1.1.0")
-
-        filtered = checker.filter_versions(
-            version_list, current, UpdateStrategy.CONSERVATIVE
-        )
-
-        assert len(filtered) == 0  # No patch updates for 1.1.x
-
-    def test_filter_moderate_major_boundary(self, version_list):
-        """Test moderate filtering respects major version boundary."""
-        checker = VersionChecker()
-        current = VersionInfo("1.2.0")
-
-        filtered = checker.filter_versions(
-            version_list, current, UpdateStrategy.MODERATE
-        )
-
-        assert len(filtered) == 0  # No minor updates left in v1
-
-    def test_filter_empty_version_list(self):
-        """Test filtering with empty version list."""
-        checker = VersionChecker()
-        current = VersionInfo("1.0.0")
-
-        filtered = checker.filter_versions([], current, UpdateStrategy.AGGRESSIVE)
-
-        assert filtered == []
-
-    def test_filter_preserves_order(self, version_list):
-        """Test that filtering preserves version order."""
-        checker = VersionChecker()
-        current = VersionInfo("1.0.0")
-
-        filtered = checker.filter_versions(
-            version_list, current, UpdateStrategy.MODERATE
-        )
-
-        # Should be in ascending order
-        for i in range(len(filtered) - 1):
-            assert filtered[i] < filtered[i + 1]
 
 
 # ============================================================================
@@ -1165,8 +813,30 @@ class TestExtractCurrentVersion:
         assert version == "2.28.0"
 
     def test_extract_current_version_unpinned(self):
-        """Test extracting version from unpinned requirement."""
+        """Test extracting version from unpinned requirement with default behavior."""
+        # Default: extract_from_ranges=True, should extract baseline version
         checker = VersionChecker()
+        req = Requirement(
+            name="requests",
+            specs=[(">=", "2.28.0")],
+            extras=[],
+            markers=None,
+            url=None,
+            editable=False,
+            hashes=[],
+            comment=None,
+            line_number=1,
+            raw_line="requests>=2.28.0",
+        )
+
+        version = checker._extract_current_version(req)
+
+        assert version == "2.28.0"
+
+    def test_extract_current_version_unpinned_strict_mode(self):
+        """Test extracting version from unpinned requirement with strict mode."""
+        # Strict mode: extract_from_ranges=False, should return None for unpinned
+        checker = VersionChecker(extract_from_ranges=False)
         req = Requirement(
             name="requests",
             specs=[(">=", "2.28.0")],
@@ -1205,7 +875,8 @@ class TestExtractCurrentVersion:
         assert version is None
 
     def test_extract_current_version_multiple_specs(self):
-        """Test extracting version from requirement with multiple specs."""
+        """Test extracting version from requirement with multiple specs with default behavior."""
+        # Default: extract_from_ranges=True, should extract lower bound
         checker = VersionChecker()
         req = Requirement(
             name="django",
@@ -1222,7 +893,68 @@ class TestExtractCurrentVersion:
 
         version = checker._extract_current_version(req)
 
+        assert version == "4.0"
+
+    def test_extract_current_version_multiple_specs_strict_mode(self):
+        """Test extracting version from requirement with multiple specs in strict mode."""
+        # Strict mode: extract_from_ranges=False, should return None for ranges
+        checker = VersionChecker(extract_from_ranges=False)
+        req = Requirement(
+            name="django",
+            specs=[(">=", "4.0"), ("<", "5.0")],
+            extras=[],
+            markers=None,
+            url=None,
+            editable=False,
+            hashes=[],
+            comment=None,
+            line_number=1,
+            raw_line="django>=4.0,<5.0",
+        )
+
+        version = checker._extract_current_version(req)
+
         assert version is None
+
+    def test_extract_current_version_greater_than(self):
+        """Test extracting version from > operator."""
+        checker = VersionChecker()
+        req = Requirement(
+            name="flask",
+            specs=[(">", "2.0.0")],
+            extras=[],
+            markers=None,
+            url=None,
+            editable=False,
+            hashes=[],
+            comment=None,
+            line_number=1,
+            raw_line="flask>2.0.0",
+        )
+
+        version = checker._extract_current_version(req)
+
+        assert version == "2.0.0"
+
+    def test_extract_current_version_compatible(self):
+        """Test extracting version from ~= operator."""
+        checker = VersionChecker()
+        req = Requirement(
+            name="click",
+            specs=[("~=", "8.0")],
+            extras=[],
+            markers=None,
+            url=None,
+            editable=False,
+            hashes=[],
+            comment=None,
+            line_number=1,
+            raw_line="click~=8.0",
+        )
+
+        version = checker._extract_current_version(req)
+
+        assert version == "8.0"
 
 
 class TestCreateErrorPackage:
@@ -1366,22 +1098,6 @@ class TestEdgeCases:
         assert package2.name == "requests"
         assert package3.name == "requests"
 
-    def test_version_filtering_with_equal_version(self):
-        """Test filtering when current version equals a version in list."""
-        checker = VersionChecker()
-        versions = [
-            VersionInfo("1.0.0"),
-            VersionInfo("1.1.0"),
-            VersionInfo("2.0.0"),
-        ]
-        current = VersionInfo("1.1.0")
-
-        filtered = checker.filter_versions(versions, current, UpdateStrategy.AGGRESSIVE)
-
-        # Should only include versions > current
-        assert len(filtered) == 1
-        assert str(filtered[0]) == "2.0.0"
-
     @pytest.mark.asyncio
     async def test_concurrent_limit_respected(
         self, mock_http_client, sample_pypi_response
@@ -1442,20 +1158,8 @@ class TestIntegrationScenarios:
             # Check single package
             package = await checker.check_package("requests", "2.28.0")
             assert package.name == "requests"
-
-            # Get latest version
-            latest = await checker.get_latest_version("requests")
-            assert latest is not None
-
-            # Get all versions
-            versions = await checker.get_all_versions("requests")
-            assert len(versions) > 0
-
-            # Filter versions
-            filtered = checker.filter_versions(
-                versions, VersionInfo("2.28.0"), UpdateStrategy.MODERATE
-            )
-            assert len(filtered) > 0
+            assert package.current_version == "2.28.0"
+            assert len(package.available_versions) > 0
 
     @pytest.mark.asyncio
     async def test_multiple_packages_workflow(

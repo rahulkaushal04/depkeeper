@@ -9,9 +9,8 @@ from depkeeper.exceptions import PyPIError
 from depkeeper.utils.http import HTTPClient
 from depkeeper.models.package import Package
 from depkeeper.utils.logger import get_logger
-from depkeeper.models.version import VersionInfo
+from depkeeper.constants import PYPI_JSON_API
 from depkeeper.models.requirement import Requirement
-from depkeeper.constants import PYPI_JSON_API, UpdateStrategy
 
 logger = get_logger("checker")
 
@@ -40,6 +39,7 @@ class VersionChecker:
         self,
         http_client: Optional[HTTPClient] = None,
         concurrent_limit: int = 10,
+        extract_from_ranges: bool = True,
     ) -> None:
         """
         Initialize version checker.
@@ -51,9 +51,14 @@ class VersionChecker:
             will be created and managed internally.
         concurrent_limit : int, optional
             Maximum concurrent requests. Default is 10.
+        extract_from_ranges : bool, optional
+            Whether to extract baseline versions from range constraints (>=, >, ~=).
+            If True (default), extracts baseline from constraints like >=1.0.0.
+            If False, only extracts from pinned versions (==1.0.0).
         """
         self.http_client = http_client
         self.concurrent_limit = concurrent_limit
+        self.extract_from_ranges = extract_from_ranges
         self._semaphore = asyncio.Semaphore(concurrent_limit)
 
         # Track if we own the HTTP client (for cleanup)
@@ -155,120 +160,6 @@ class VersionChecker:
                 packages.append(result)
 
         return packages
-
-    # ----------------------------------------------------------------------
-    # Version Queries
-    # ----------------------------------------------------------------------
-
-    async def get_latest_version(
-        self,
-        name: str,
-        include_pre_release: bool = False,
-    ) -> Optional[VersionInfo]:
-        """
-        Get latest stable version of a package.
-
-        Parameters
-        ----------
-        name : str
-            Package name.
-        include_pre_release : bool, optional
-            Whether to include pre-release versions. Default is False.
-
-        Returns
-        -------
-        VersionInfo | None
-            Latest version or None if not found.
-        """
-        try:
-            package = await self.check_package(name)
-
-            if not package.available_versions:
-                return None
-
-            # Parse and filter versions
-            versions = [VersionInfo(v) for v in package.available_versions]
-
-            if not include_pre_release:
-                versions = [v for v in versions if v.is_stable]
-
-            if not versions:
-                return None
-
-            return max(versions)
-
-        except Exception as exc:
-            logger.error(f"Failed to get latest version for {name}: {exc}")
-            return None
-
-    async def get_all_versions(self, name: str) -> List[VersionInfo]:
-        """
-        Get all available versions of a package.
-
-        Parameters
-        ----------
-        name : str
-            Package name.
-
-        Returns
-        -------
-        List[VersionInfo]
-            List of all published versions, sorted oldest to newest.
-        """
-        try:
-            package = await self.check_package(name)
-            return [VersionInfo(v) for v in package.available_versions]
-
-        except Exception as exc:
-            logger.error(f"Failed to get versions for {name}: {exc}")
-            return []
-
-    # ----------------------------------------------------------------------
-    # Version Filtering
-    # ----------------------------------------------------------------------
-
-    def filter_versions(
-        self,
-        versions: List[VersionInfo],
-        current: VersionInfo,
-        strategy: UpdateStrategy = UpdateStrategy.MODERATE,
-    ) -> List[VersionInfo]:
-        """
-        Filter versions based on update strategy.
-
-        Parameters
-        ----------
-        versions : List[VersionInfo]
-            List of available versions to filter.
-        current : VersionInfo
-            Current version as baseline for comparison.
-        strategy : UpdateStrategy, optional
-            Update strategy to apply. Default is MODERATE.
-
-        Returns
-        -------
-        List[VersionInfo]
-            Filtered list of versions matching the strategy.
-        """
-        if strategy == UpdateStrategy.CONSERVATIVE:
-            # Only patch updates (same major.minor)
-            return [
-                v
-                for v in versions
-                if v > current and v.major == current.major and v.minor == current.minor
-            ]
-
-        elif strategy == UpdateStrategy.MODERATE:
-            # Minor and patch updates (same major)
-            return [v for v in versions if v > current and v.major == current.major]
-
-        elif strategy == UpdateStrategy.AGGRESSIVE:
-            # All newer versions including major updates
-            return [v for v in versions if v > current]
-
-        else:  # CUSTOM or unknown
-            # Return all newer versions (same as AGGRESSIVE)
-            return [v for v in versions if v > current]
 
     # ----------------------------------------------------------------------
     # PyPI Metadata Fetching
@@ -491,6 +382,10 @@ class VersionChecker:
         """
         Extract current version from a requirement.
 
+        For pinned versions (==), always returns the exact version.
+        For range constraints (>=, >, ~=), returns baseline version only if
+        extract_from_ranges is True.
+
         Parameters
         ----------
         req : Requirement
@@ -499,10 +394,32 @@ class VersionChecker:
         Returns
         -------
         str | None
-            Current version if pinned, otherwise None.
+            Current/baseline version if determinable, otherwise None.
         """
-        if req.specs and len(req.specs) == 1 and req.specs[0][0] == "==":
+        if not req.specs:
+            return None
+
+        # Exact pin: ==1.0.0 (always extract)
+        if len(req.specs) == 1 and req.specs[0][0] == "==":
             return req.specs[0][1]
+
+        # Only extract from range constraints if enabled
+        if not self.extract_from_ranges:
+            return None
+
+        # For >= or > operators, use as baseline/minimum
+        # This helps users understand what version constraint exists
+        if len(req.specs) == 1:
+            operator, version = req.specs[0]
+            if operator in (">=", ">", "~="):
+                return version
+
+        # For complex specs like ">=1.0,<2.0", try to extract lower bound
+        for operator, version in req.specs:
+            if operator in (">=", ">", "~="):
+                # Return the first lower bound found
+                return version
+
         return None
 
     def _create_error_package(
