@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 import click
 
-from depkeeper.cli import pass_context, DepKeeperContext
+from depkeeper.context import pass_context, DepKeeperContext
 from depkeeper.core.parser import RequirementsParser
 from depkeeper.core.checker import VersionChecker
 from depkeeper.models.package import Package
