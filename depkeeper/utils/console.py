@@ -14,9 +14,9 @@ Basic message printing:
 
     >>> from depkeeper.utils.console import print_success, print_error
     >>> print_success("Package updated successfully")
-    ✓ Package updated successfully
+    [OK] Package updated successfully
     >>> print_error("Failed to connect to PyPI")
-    ✗ Failed to connect to PyPI
+    [ERROR] Failed to connect to PyPI
 
 Display data in tables:
 
@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import os
 import sys
+import logging
 import threading
 from typing import Any, Optional, List, Dict, Literal, Callable
 
@@ -218,10 +219,10 @@ def reconfigure_console() -> None:
         _console = None
 
 
-def print_success(message: str, prefix: str = "✓") -> None:
+def print_success(message: str, prefix: str = "[OK]") -> None:
     """Print a success message in green.
 
-    Displays a styled success message with a checkmark prefix. The message
+    Displays a styled success message with a success prefix. The message
     is rendered in bold green when color output is enabled.
 
     Parameters
@@ -229,7 +230,7 @@ def print_success(message: str, prefix: str = "✓") -> None:
     message : str
         The success message to display.
     prefix : str, optional
-        Prefix symbol to prepend to the message. Default is "✓" (checkmark).
+        Prefix symbol to prepend to the message. Default is "[OK]".
         Can be customized or set to empty string for no prefix.
 
     Returns
@@ -242,12 +243,12 @@ def print_success(message: str, prefix: str = "✓") -> None:
 
     >>> from depkeeper.utils.console import print_success
     >>> print_success("Package updated successfully")
-    ✓ Package updated successfully
+    [OK] Package updated successfully
 
     Custom prefix:
 
-    >>> print_success("All tests passed", prefix="[OK]")
-    [OK] All tests passed
+    >>> print_success("All tests passed", prefix="✓")
+    ✓ All tests passed
 
     Notes
     -----
@@ -263,10 +264,10 @@ def print_success(message: str, prefix: str = "✓") -> None:
     _get_console().print(f"{prefix} {message}", style="success")
 
 
-def print_error(message: str, prefix: str = "✗") -> None:
+def print_error(message: str, prefix: str = "[ERROR]") -> None:
     """Print an error message in red.
 
-    Displays a styled error message with an X mark prefix. The message
+    Displays a styled error message with an error prefix. The message
     is rendered in bold red when color output is enabled.
 
     Parameters
@@ -274,7 +275,7 @@ def print_error(message: str, prefix: str = "✗") -> None:
     message : str
         The error message to display.
     prefix : str, optional
-        Prefix symbol to prepend to the message. Default is "✗" (X mark).
+        Prefix symbol to prepend to the message. Default is "[ERROR]".
 
     Returns
     -------
@@ -284,11 +285,15 @@ def print_error(message: str, prefix: str = "✗") -> None:
     --------
     >>> from depkeeper.utils.console import print_error
     >>> print_error("Failed to parse requirements file")
-    ✗ Failed to parse requirements file
+    [ERROR] Failed to parse requirements file
 
     >>> errors = ["Package not found", "Invalid version"]
     >>> for error in errors:
     ...     print_error(error)
+
+    Custom prefix:
+    >>> print_error("Connection failed", prefix="✗")
+    ✗ Connection failed
 
     See Also
     --------
@@ -298,10 +303,10 @@ def print_error(message: str, prefix: str = "✗") -> None:
     _get_console().print(f"{prefix} {message}", style="error")
 
 
-def print_warning(message: str, prefix: str = "⚠") -> None:
+def print_warning(message: str, prefix: str = "[WARNING]") -> None:
     """Print a warning message in yellow.
 
-    Displays a styled warning message with a warning symbol prefix. The
+    Displays a styled warning message with a warning prefix. The
     message is rendered in bold yellow when color output is enabled.
 
     Parameters
@@ -309,7 +314,7 @@ def print_warning(message: str, prefix: str = "⚠") -> None:
     message : str
         The warning message to display.
     prefix : str, optional
-        Prefix symbol to prepend to the message. Default is "⚠" (warning sign).
+        Prefix symbol to prepend to the message. Default is "[WARNING]".
 
     Returns
     -------
@@ -319,7 +324,11 @@ def print_warning(message: str, prefix: str = "⚠") -> None:
     --------
     >>> from depkeeper.utils.console import print_warning
     >>> print_warning("Package not found on PyPI")
-    ⚠ Package not found on PyPI
+    [WARNING] Package not found on PyPI
+
+    Custom prefix:
+    >>> print_warning("Deprecated feature", prefix="⚠")
+    ⚠ Deprecated feature
 
     See Also
     --------
@@ -329,18 +338,22 @@ def print_warning(message: str, prefix: str = "⚠") -> None:
     _get_console().print(f"{prefix} {message}", style="warning")
 
 
-def print_info(message: str, prefix: str = "ℹ") -> None:
+def print_info(message: str, prefix: str = "[INFO]") -> None:
     """Print an informational message in cyan.
 
-    Displays a styled informational message with an info symbol prefix.
+    Displays a styled informational message with an info prefix.
     The message is rendered in bold cyan when color output is enabled.
+
+    This function respects the logging level: messages are only printed
+    when the depkeeper logger is set to INFO or DEBUG level (i.e., when
+    the user runs with -v or -vv flags).
 
     Parameters
     ----------
     message : str
         The informational message to display.
     prefix : str, optional
-        Prefix symbol to prepend to the message. Default is "ℹ" (info symbol).
+        Prefix symbol to prepend to the message. Default is "[INFO]".
 
     Returns
     -------
@@ -350,14 +363,21 @@ def print_info(message: str, prefix: str = "ℹ") -> None:
     --------
     >>> from depkeeper.utils.console import print_info
     >>> print_info("Checking 5 packages...")
-    ℹ Checking 5 packages...
+    [INFO] Checking 5 packages...
+
+    Notes
+    -----
+    Info messages are only shown when verbosity is enabled (e.g., -v flag).
+    This prevents cluttering output during normal operation.
 
     See Also
     --------
     print_success : Print success messages
     print_warning : Print warning messages
     """
-    _get_console().print(f"{prefix} {message}", style="info")
+    # Only print if logger is at INFO level or lower (more verbose)
+    if logging.getLogger("depkeeper").getEffectiveLevel() <= logging.INFO:
+        _get_console().print(f"{prefix} {message}", style="info")
 
 
 def print_dim(message: str) -> None:

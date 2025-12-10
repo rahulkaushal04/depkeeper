@@ -487,7 +487,6 @@ class ProgressTracker:
         if task_id:
             self._tasks[task_id] = rich_task_id
 
-        logger.debug(f"Added task: {description} (total={total})")
         return rich_task_id
 
     def update(

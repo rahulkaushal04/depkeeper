@@ -225,7 +225,7 @@ async def _check_with_progress(
     requirements: list,
 ) -> List[Package]:
     """Check packages with progress tracking."""
-    tracker = ProgressTracker(transient=True)
+    tracker = ProgressTracker(transient=False)
     tracker.start()
     task = tracker.add_task(
         "Checking packages...",
@@ -233,43 +233,42 @@ async def _check_with_progress(
     )
 
     packages = []
-    for req in requirements:
-        tracker.update(task, description=f"Checking {req.name}...")
+    results_log = []
 
+    for i, req in enumerate(requirements):
         try:
-            # Build version string from specs for display
-            current_version = _build_version_string(req.specs) if req.specs else None
+            current_version = checker._extract_current_version(req)
+            tracker.update(task, description=f"Checking {req.name}...", completed=i)
 
             package = await checker.check_package(
                 req.name,
                 current_version=current_version,
             )
+
+            if package.has_update():
+                results_log.append(
+                    f"[{i+1}/{len(requirements)}] {req.name}: {package.current_version} -> {package.latest_version}"
+                )
+            else:
+                results_log.append(
+                    f"[{i+1}/{len(requirements)}] {req.name}: {package.current_version} (up-to-date)"
+                )
+
             packages.append(package)
         except Exception as e:
-            logger.error(f"Failed to check {req.name}: {e}")
-            # Create error package for failed checks
-            packages.append(Package(name=req.name))
+            results_log.append(f"[{i+1}/{len(requirements)}] {req.name}: ERROR - {e}")
+            current_version = checker._extract_current_version(req)
+            packages.append(Package(name=req.name, current_version=current_version))
 
         tracker.update(task, advance=1)
 
+    tracker.update(task, description=f"Checked {len(requirements)} package(s)")
     tracker.stop()
+
+    for result in results_log:
+        logger.debug(result)
+
     return packages
-
-
-def _build_version_string(specs: List[tuple]) -> str:
-    """Build version string from requirement specs.
-
-    Parameters
-    ----------
-    specs : List[tuple]
-        List of (operator, version) tuples.
-
-    Returns
-    -------
-    str
-        Formatted version string (e.g., \">=8.1.0,<9.0.0\").
-    """
-    return ",".join(f"{op}{ver}" for op, ver in specs)
 
 
 # ============================================================================
