@@ -23,7 +23,6 @@ All commands inherit these global options:
 
 - **--config, -c**: Path to configuration file (or DEPKEEPER_CONFIG env var)
 - **--verbose, -v**: Increase verbosity (-v for INFO, -vv for DEBUG)
-- **--no-cache**: Disable PyPI response caching (or DEPKEEPER_NO_CACHE env var)
 - **--color/--no-color**: Enable/disable colored output (or DEPKEEPER_COLOR env var)
 - **--version**: Show version and exit
 - **--help, -h**: Show help message and exit
@@ -39,13 +38,12 @@ Basic command usage:
 With global options:
 
     $ depkeeper -v check
-    $ depkeeper -vv --no-cache update
+    $ depkeeper -vv update
     $ depkeeper --config /path/to/config.toml check
 
 Environment variables:
 
     $ export DEPKEEPER_CONFIG=/path/to/config.toml
-    $ export DEPKEEPER_NO_CACHE=1
     $ depkeeper check
 
 Notes
@@ -65,6 +63,7 @@ depkeeper.commands : Individual command implementations
 
 from __future__ import annotations
 
+import os
 import sys
 import logging
 from pathlib import Path
@@ -73,91 +72,12 @@ from typing import Optional
 import click
 
 from depkeeper.__version__ import __version__
+from depkeeper.context import DepKeeperContext
 from depkeeper.exceptions import DepKeeperError
-from depkeeper.utils.logger import get_logger, setup_logging
 from depkeeper.utils.console import print_error, print_info
+from depkeeper.utils.logger import get_logger, setup_logging
 
 logger = get_logger("cli")
-
-
-# ============================================================================
-# Global Options Context
-# ============================================================================
-
-
-class DepKeeperContext:
-    """Global context object for CLI commands.
-
-    This context object is created by the main CLI group and passed to all
-    subcommands via Click's context system. It stores global configuration
-    options that affect all commands, such as verbosity, caching preferences,
-    and output styling.
-
-    The context is accessible in subcommands through the @pass_context
-    decorator, allowing commands to adapt their behavior based on global
-    settings.
-
-    Attributes
-    ----------
-    config_path : Path, optional
-        Path to the configuration file (depkeeper.toml or pyproject.toml).
-        If None, default configuration locations will be checked.
-    verbose : int
-        Verbosity level controlling log output:
-        - 0: WARNING level (default, minimal output)
-        - 1: INFO level (shows progress and status)
-        - 2+: DEBUG level (detailed diagnostic information)
-    no_cache : bool
-        Whether to disable caching of PyPI API responses. When True, all
-        package information is fetched fresh from PyPI, which is slower but
-        ensures the most up-to-date data.
-    color : bool
-        Whether to enable colored terminal output. When False, NO_COLOR
-        environment variable is set and Rich library outputs plain text.
-
-    Examples
-    --------
-    Access context in a command:
-
-        >>> @click.command()
-        ... @pass_context
-        ... def my_command(ctx: DepKeeperContext) -> None:
-        ...     if ctx.verbose > 0:
-        ...         print(f"Config: {ctx.config_path}")
-        ...     if ctx.no_cache:
-        ...         print("Cache disabled")
-
-    Check verbosity level:
-
-        >>> ctx = DepKeeperContext()
-        >>> ctx.verbose = 2
-        >>> if ctx.verbose >= 2:
-        ...     print("Debug mode enabled")
-        Debug mode enabled
-
-    Notes
-    -----
-    This class is instantiated once per CLI invocation by the main cli()
-    function. It is stored in Click's context.obj and retrieved by commands
-    using the @pass_context decorator.
-
-    The context is read-only by convention; commands should not modify it.
-    Any command-specific state should be stored separately.
-
-    See Also
-    --------
-    pass_context : Decorator to access context in commands
-    cli : Main CLI function that creates the context
-    """
-
-    def __init__(self) -> None:
-        self.config_path: Optional[Path] = None
-        self.verbose: int = 0
-        self.no_cache: bool = False
-        self.color: bool = True
-
-
-pass_context = click.make_pass_decorator(DepKeeperContext, ensure=True)
 
 
 # ============================================================================
@@ -180,12 +100,6 @@ pass_context = click.make_pass_decorator(DepKeeperContext, ensure=True)
     help="Increase verbosity (can be repeated: -v, -vv).",
 )
 @click.option(
-    "--no-cache",
-    is_flag=True,
-    help="Disable caching of PyPI responses.",
-    envvar="DEPKEEPER_NO_CACHE",
-)
-@click.option(
     "--color/--no-color",
     default=True,
     help="Enable/disable colored output.",
@@ -201,7 +115,6 @@ def cli(
     ctx: click.Context,
     config: Optional[Path],
     verbose: int,
-    no_cache: bool,
     color: bool,
 ) -> None:
     """depkeeper - Modern Python dependency management for requirements.txt
@@ -211,44 +124,41 @@ def cli(
     scanning, and dependency resolution.
 
     \b
-    Common Commands:
+    Available Commands:
       depkeeper check              Check for available updates
       depkeeper update             Update packages to newer versions
-      depkeeper audit              Scan for security vulnerabilities
-      depkeeper lock               Generate a lock file
 
     \b
     Examples:
       depkeeper check                          # Check for updates
       depkeeper update --strategy minor        # Safe updates
       depkeeper -v check                       # Verbose output
-      depkeeper --no-cache update              # Fresh PyPI data
 
     For detailed help on any command, use: depkeeper COMMAND --help
     Documentation: https://docs.depkeeper.dev
     """
+    # Configure logging FIRST, before any other operations
+    _setup_logging(verbose)
+
     # Create context object
     depkeeper_ctx = DepKeeperContext()
     depkeeper_ctx.config_path = config
     depkeeper_ctx.verbose = verbose
-    depkeeper_ctx.no_cache = no_cache
     depkeeper_ctx.color = color
 
     # Store in Click context
     ctx.obj = depkeeper_ctx
 
-    # Configure logging based on verbosity
-    _setup_logging(verbose)
-
     # Set NO_COLOR environment variable if needed
-    if not color:
-        import os
-
+    # This affects Rich and other libraries that respect NO_COLOR
+    if color:
+        os.environ.pop("NO_COLOR", None)
+    else:
         os.environ["NO_COLOR"] = "1"
 
     logger.debug(f"depkeeper v{__version__}")
     logger.debug(f"Config: {config}")
-    logger.debug(f"Verbose: {verbose}, No-cache: {no_cache}, Color: {color}")
+    logger.debug(f"Verbose: {verbose}, Color: {color}")
 
 
 # ============================================================================
@@ -330,8 +240,10 @@ try:
     cli.add_command(check)
     cli.add_command(update)
 except ImportError as e:
-    # During development, commands might not be implemented yet
-    logger.warning(f"Failed to import commands: {e}")
+    # Command import failures should be fatal in production
+    # Write directly to stderr since logging may not be configured yet
+    sys.stderr.write(f"FATAL: Failed to import commands: {e}\n")
+    sys.exit(1)
 
 
 # ============================================================================
@@ -418,20 +330,27 @@ def main() -> int:
     try:
         cli(standalone_mode=False)
         return 0
+
     except click.ClickException as e:
-        # Click exceptions are already formatted nicely
         e.show()
         return e.exit_code
+
     except DepKeeperError as e:
-        # Our custom exceptions
-        print_error(f"{e}")
-        logger.debug(f"DepKeeperError details: {e.details}", exc_info=True)
+        print_error(str(e))
+        if e.details:
+            logger.debug(f"DepKeeperError details: {e.details}", exc_info=True)
+        else:
+            logger.debug(
+                "DepKeeperError occurred (no additional details)", exc_info=True
+            )
         return 1
+
     except KeyboardInterrupt:
         print_info("\nOperation cancelled by user")
-        return 130  # Standard exit code for SIGINT
+        return 130
+
     except Exception as e:
-        # Unexpected errors
+
         print_error(f"Unexpected error: {e}")
         logger.exception("Unexpected error in CLI")
         return 1

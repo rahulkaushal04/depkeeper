@@ -281,7 +281,6 @@ def _get_strategy(strategy_name: str):
         raise DepKeeperError(f"Unknown strategy: {strategy_name}")
 
 
-
 def _apply_updates(file: Path, version_updates: Dict[str, str]) -> None:
     """
     Apply updates to requirements file.
