@@ -14,6 +14,5 @@ from __future__ import annotations
 from depkeeper.models.package import Package
 from depkeeper.models.version import VersionInfo
 from depkeeper.models.requirement import Requirement
-from depkeeper.models.update_result import UpdateResult
 
-__all__ = ["Package", "Requirement", "VersionInfo", "UpdateResult"]
+__all__ = ["Package", "Requirement", "VersionInfo"]

@@ -13,11 +13,7 @@ they should be re-exported here to maintain a consistent public API.
 from __future__ import annotations
 
 from depkeeper.core.parser import RequirementsParser
-from depkeeper.core.validator import RequirementsValidator
-from depkeeper.core.updater import RequirementsUpdater
 
 __all__ = [
     "RequirementsParser",
-    "RequirementsUpdater",
-    "RequirementsValidator",
 ]
