@@ -49,8 +49,10 @@ depkeeper.models.requirement.Requirement : Requirement specification
 
 from __future__ import annotations
 
+import sys
 import asyncio
 from typing import Any, Dict, List, Optional
+from packaging.specifiers import SpecifierSet
 
 from depkeeper.exceptions import PyPIError
 from depkeeper.utils.http import HTTPClient
@@ -383,7 +385,7 @@ class VersionChecker:
         """
         tasks = []
         for req in requirements:
-            current = self._extract_current_version(req)
+            current = self.extract_current_version(req)
             tasks.append(self.check_package(req.name, current))
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -392,8 +394,8 @@ class VersionChecker:
         for req, result in zip(requirements, results):
             if isinstance(result, Exception):
                 logger.error(f"Failed to check {req.name}: {result}")
-                current = self._extract_current_version(req)
-                packages.append(self._create_error_package(req.name, current))
+                current = self.extract_current_version(req)
+                packages.append(self.create_error_package(req.name, current))
             else:
                 packages.append(result)
 
@@ -489,19 +491,180 @@ class VersionChecker:
         """
         info = data.get("info", {})
         latest_version = info.get("version")
+        latest_requires_python = info.get("requires_python")
+
+        # Base metadata
         metadata = {
-            "requires_python": info.get("requires_python"),
+            "requires_python": latest_requires_python,
             "dependencies": self._get_dependencies(info),
+            "latest_metadata": {
+                "requires_python": latest_requires_python,
+            },
         }
+
+        # Find compatible version if latest is incompatible
+        compatible_version = None
+        if latest_requires_python:
+            current_py = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+            try:
+                spec = SpecifierSet(latest_requires_python)
+                if current_py not in spec:
+                    # Latest is incompatible, find compatible version
+                    compatible_version = self._find_compatible_version(data, current_py)
+                    if compatible_version:
+                        # Get metadata for compatible version
+                        compatible_metadata = self._get_version_metadata(
+                            data, compatible_version
+                        )
+                        metadata["compatible_metadata"] = compatible_metadata
+            except Exception:
+                pass
+
+        # Get metadata for current version if available
+        if current_version:
+            current_metadata = self._get_version_metadata(data, current_version)
+            if current_metadata:
+                metadata["current_metadata"] = current_metadata
 
         return Package(
             name=name,
             current_version=current_version,
             latest_version=latest_version,
+            compatible_version=compatible_version,
             available_versions=[],
             metadata=metadata,
             last_updated=None,
         )
+
+    def _find_compatible_version(
+        self, data: Dict[str, Any], python_version: str
+    ) -> Optional[str]:
+        """Find the latest stable version compatible with the given Python version.
+
+        Searches through all available versions from newest to oldest to find
+        the most recent version that is compatible with the specified Python version.
+        Prioritizes stable releases over pre-releases.
+
+        Parameters
+        ----------
+        data : dict
+            Complete PyPI package data
+        python_version : str
+            Python version to check compatibility (e.g., '3.8.0')
+
+        Returns
+        -------
+        str or None
+            Latest compatible stable version, or None if not found
+        """
+        releases = data.get("releases", {})
+        if not releases:
+            return None
+
+        from packaging.version import parse, InvalidVersion
+
+        # Get all versions sorted from newest to oldest
+        try:
+            # Filter out empty releases and parse versions
+            valid_versions = []
+            for v in releases.keys():
+                if not v or not releases[v]:
+                    continue
+                try:
+                    parsed = parse(v)
+                    valid_versions.append((v, parsed))
+                except InvalidVersion:
+                    continue
+
+            # Sort by version, newest first
+            valid_versions.sort(key=lambda x: x[1], reverse=True)
+        except Exception:
+            return None
+
+        # First pass: Try to find latest stable (non-prerelease) compatible version
+        for version_str, parsed_version in valid_versions:
+            if parsed_version.is_prerelease:
+                continue  # Skip pre-releases in first pass
+
+            if self._is_version_compatible(releases[version_str], python_version):
+                logger.debug(f"Found latest compatible stable version: {version_str}")
+                return version_str
+
+        # Second pass: If no stable version found, try pre-releases
+        for version_str, parsed_version in valid_versions:
+            if self._is_version_compatible(releases[version_str], python_version):
+                logger.debug(
+                    f"Found latest compatible pre-release version: {version_str}"
+                )
+                return version_str
+
+        logger.debug(f"No compatible version found for Python {python_version}")
+        return None
+
+    def _is_version_compatible(
+        self, release_data: List[Dict[str, Any]], python_version: str
+    ) -> bool:
+        """Check if a version is compatible with the given Python version.
+
+        Parameters
+        ----------
+        release_data : list
+            List of release files for a specific version
+        python_version : str
+            Python version to check compatibility
+
+        Returns
+        -------
+        bool
+            True if compatible, False otherwise
+        """
+        if not release_data:
+            return False
+
+        # Check the first release file (usually the source distribution)
+        for release_file in release_data:
+            requires_python = release_file.get("requires_python")
+
+            if not requires_python:
+                # No requirement means compatible with all versions
+                return True
+
+            try:
+                spec = SpecifierSet(requires_python)
+                return python_version in spec
+            except Exception:
+                # If we can't parse the specifier, assume incompatible for safety
+                logger.debug(f"Failed to parse requires_python: {requires_python}")
+                return False
+
+        return False
+
+    def _get_version_metadata(
+        self, data: Dict[str, Any], version: str
+    ) -> Dict[str, Any]:
+        """Get metadata for a specific version.
+
+        Parameters
+        ----------
+        data : dict
+            Complete PyPI package data
+        version : str
+            Version to get metadata for
+
+        Returns
+        -------
+        dict
+            Metadata dictionary with requires_python
+        """
+        releases = data.get("releases", {})
+        release_data = releases.get(version, [])
+
+        if release_data:
+            for release_file in release_data:
+                requires_python = release_file.get("requires_python")
+                return {"requires_python": requires_python}
+
+        return {"requires_python": None}
 
     def _get_dependencies(self, info: Dict[str, Any]) -> List[str]:
         """Extract dependencies from package info.
@@ -553,7 +716,7 @@ class VersionChecker:
 
         return deps
 
-    def _extract_current_version(self, req: Requirement) -> Optional[str]:
+    def extract_current_version(self, req: Requirement) -> Optional[str]:
         """Extract current version from a requirement.
 
         Determines the current or baseline version from a requirement's
@@ -587,19 +750,19 @@ class VersionChecker:
 
         >>> req = Requirement(name="flask", specs=[(">=", "2.0.0")])
         >>> checker = VersionChecker(extract_from_ranges=True)
-        >>> checker._extract_current_version(req)
+        >>> checker.extract_current_version(req)
         '2.0.0'
 
         Range constraint with extraction disabled:
 
         >>> checker = VersionChecker(extract_from_ranges=False)
-        >>> checker._extract_current_version(req)
+        >>> checker.extract_current_version(req)
         None
 
         Complex constraint:
 
         >>> req = Requirement(name="click", specs=[(">=", "8.0"), ("<", "9.0")])
-        >>> checker._extract_current_version(req)
+        >>> checker.extract_current_version(req)
         '8.0'
 
         Notes
@@ -631,7 +794,7 @@ class VersionChecker:
 
         return None
 
-    def _create_error_package(
+    def create_error_package(
         self, name: str, current_version: Optional[str]
     ) -> Package:
         """Create an error Package object with empty data.
@@ -656,7 +819,7 @@ class VersionChecker:
         Examples
         --------
         >>> checker = VersionChecker()
-        >>> error_pkg = checker._create_error_package("nonexistent", "1.0.0")
+        >>> error_pkg = checker.create_error_package("nonexistent", "1.0.0")
         >>> error_pkg.latest_version is None
         True
         >>> error_pkg.metadata

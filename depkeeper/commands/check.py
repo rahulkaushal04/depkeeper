@@ -10,7 +10,7 @@ import sys
 import json
 import click
 import asyncio
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pathlib import Path
 
 from depkeeper.models.package import Package
@@ -237,7 +237,7 @@ async def _check_with_progress(
 
     for i, req in enumerate(requirements):
         try:
-            current_version = checker._extract_current_version(req)
+            current_version = checker.extract_current_version(req)
             tracker.update(task, description=f"Checking {req.name}...", completed=i)
 
             package = await checker.check_package(
@@ -257,8 +257,8 @@ async def _check_with_progress(
             packages.append(package)
         except Exception as e:
             results_log.append(f"[{i+1}/{len(requirements)}] {req.name}: ERROR - {e}")
-            current_version = checker._extract_current_version(req)
-            packages.append(Package(name=req.name, current_version=current_version))
+            current_version = checker.extract_current_version(req)
+            packages.append(checker.create_error_package(req.name, current_version))
 
         tracker.update(task, advance=1)
 
@@ -284,10 +284,12 @@ def _display_table(packages: List[Package]) -> None:
     # Define column styles
     column_styles = {
         "Status": {"justify": "center", "no_wrap": True, "width": 8},
-        "Package": {"style": "cyan", "no_wrap": True},
-        "Current": {"justify": "center"},
-        "Latest": {"justify": "center"},
+        "Package": {"style": "bold cyan", "no_wrap": True},
+        "Installed": {"justify": "center", "style": "dim"},
+        "Latest": {"justify": "center", "style": "bold"},
+        "Compatible": {"justify": "center", "style": "bright_cyan"},
         "Type": {"justify": "center"},
+        "Python": {"justify": "left", "no_wrap": False},
     }
 
     # Use enhanced print_table utility
@@ -305,38 +307,76 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
     Returns
     -------
     Dict[str, str]
-        Dictionary with Status, Package, Current, Latest, and Type keys.
+        Dictionary with Status, Package Name, Current, Available, Suggested, Update Type, and Python Req.
     """
+    # Get Python requirements for all versions
+    python_reqs = _get_detailed_python_reqs(pkg)
+
     if not pkg.latest_version:
         # Error case - package not found or failed to fetch
         return {
-            "Status": "[red]ERROR[/red]",
+            "Status": "[red]✗[/red]",
             "Package": pkg.name,
-            "Current": pkg.current_version or "[dim]-[/dim]",
+            "Installed": pkg.current_version or "[dim]-[/dim]",
             "Latest": "[red]error[/red]",
+            "Compatible": "[dim]-[/dim]",
             "Type": "[dim]-[/dim]",
+            "Python": "[dim]-[/dim]",
         }
 
-    if pkg.has_update():
-        # Outdated - needs update
-        update_type = _get_update_type(pkg)
+    # Determine the recommended version (compatible if exists, otherwise latest if compatible)
+    recommended_version = None
+    if pkg.has_compatible_version():
+        # Latest is incompatible, use compatible
+        recommended_version = pkg.compatible_version
+        suggested_display = f"[bright_cyan]{pkg.compatible_version}[/bright_cyan]"
+    elif not pkg.is_python_compatible():
+        # Latest is incompatible and no compatible version found
+        recommended_version = None
+        suggested_display = "[red]none found[/red]"
+    else:
+        # Latest is compatible, use it as recommendation
+        recommended_version = pkg.latest_version
+        suggested_display = f"[green]{pkg.latest_version}[/green]"
+
+    # Check if update is available based on recommended version
+    has_recommended_update = False
+    if recommended_version and pkg.current_version:
+        try:
+            from packaging.version import parse
+
+            has_recommended_update = parse(recommended_version) > parse(
+                pkg.current_version
+            )
+        except Exception:
+            has_recommended_update = recommended_version != pkg.current_version
+    elif recommended_version and not pkg.current_version:
+        has_recommended_update = True
+
+    if has_recommended_update:
+        # Update available to recommended version
+        update_type = _get_update_type_between(pkg.current_version, recommended_version)
         colored_type = _colorize_update_type(update_type)
 
         return {
-            "Status": "[yellow]UPDATE[/yellow]",
+            "Status": "[yellow]⬆[/yellow]",
             "Package": pkg.name,
-            "Current": pkg.current_version or "[dim]-[/dim]",
+            "Installed": pkg.current_version or "[dim]-[/dim]",
             "Latest": pkg.latest_version,
+            "Compatible": suggested_display,
             "Type": colored_type,
+            "Python": python_reqs,
         }
 
-    # Up to date
+    # Up to date with recommended version
     return {
-        "Status": "[green]OK[/green]",
+        "Status": "[green]✓[/green]",
         "Package": pkg.name,
-        "Current": pkg.current_version or "[dim]-[/dim]",
+        "Installed": pkg.current_version or "[dim]-[/dim]",
         "Latest": pkg.latest_version or "[dim]-[/dim]",
+        "Compatible": suggested_display if recommended_version else "[dim]-[/dim]",
         "Type": "[dim]-[/dim]",
+        "Python": python_reqs,
     }
 
 
@@ -365,6 +405,52 @@ def _colorize_update_type(update_type: str) -> str:
     return update_type
 
 
+def _get_detailed_python_reqs(pkg: Package) -> str:
+    """Get detailed Python requirements for current, available, and suggested versions.
+
+    Parameters
+    ----------
+    pkg : Package
+        Package to get requirements for.
+
+    Returns
+    -------
+    str
+        Formatted string with Python requirements for all versions.
+    """
+    parts = []
+
+    # Current version requirement
+    current_req = pkg.get_version_python_req("current")
+    if current_req:
+        parts.append(f"Installed: {current_req}")
+
+    # Available (latest) version requirement
+    latest_req = pkg.get_version_python_req("latest") or pkg.get_requires_python()
+    if latest_req:
+        is_compatible = pkg.is_python_compatible()
+        if is_compatible:
+            parts.append(f"[green]Latest: {latest_req}[/green]")
+        else:
+            parts.append(f"[red]Latest: {latest_req}[/red]")
+
+    # Compatible version requirement (if different from latest)
+    if pkg.has_compatible_version():
+        compatible_req = pkg.get_version_python_req("compatible")
+        if compatible_req:
+            parts.append(f"[bright_cyan]Max Compat: {compatible_req}[/bright_cyan]")
+        else:
+            parts.append(f"[bright_cyan]Max Compat: any[/bright_cyan]")
+    elif not pkg.is_python_compatible() and pkg.latest_version:
+        # Latest incompatible but no suggestion found
+        import sys
+
+        current_py = f"{sys.version_info.major}.{sys.version_info.minor}"
+        parts.append(f"[dim]No Py{current_py} version[/dim]")
+
+    return "\n".join(parts) if parts else "[dim]-[/dim]"
+
+
 def _display_simple(packages: List[Package]) -> None:
     """Display packages in simple text format."""
     from depkeeper.utils.console import get_raw_console
@@ -372,11 +458,28 @@ def _display_simple(packages: List[Package]) -> None:
     console = get_raw_console()
 
     for pkg in packages:
-        status, current, latest = _get_simple_status(pkg)
-        console.print(f"[{status}] {pkg.name}: {current} -> {latest}")
+        status, installed, latest, compatible = _get_simple_status(pkg)
+
+        # Show status with versions
+        if compatible and compatible != latest:
+            console.print(
+                f"[{status}] {pkg.name}: {installed} → {latest} (max compatible: {compatible})"
+            )
+        else:
+            console.print(f"[{status}] {pkg.name}: {installed} → {latest}")
+
+        # Add Python compatibility information if incompatible
+        if not pkg.is_python_compatible():
+            requires_python = pkg.get_requires_python()
+            if pkg.has_compatible_version():
+                console.print(f"  ⚠  Latest requires Python {requires_python}")
+                console.print(f"  ✓  Max compatible version: {pkg.compatible_version}")
+            else:
+                console.print(f"  ✗  Latest requires Python {requires_python}")
+                console.print(f"  ✗  No compatible version found")
 
 
-def _get_simple_status(pkg: Package) -> tuple[str, str, str]:
+def _get_simple_status(pkg: Package) -> tuple[str, str, str, str | None]:
     """Get simple status tuple for package.
 
     Parameters
@@ -386,16 +489,20 @@ def _get_simple_status(pkg: Package) -> tuple[str, str, str]:
 
     Returns
     -------
-    tuple[str, str, str]
-        (status, current_version, latest_version) tuple.
+    tuple[str, str, str, str | None]
+        (status, installed_version, latest_version, compatible_version) tuple.
     """
+    installed = pkg.current_version or "unknown"
+    latest = pkg.latest_version or "not found"
+    compatible = pkg.compatible_version if pkg.has_compatible_version() else None
+
     if not pkg.latest_version:
-        return "ERROR", pkg.current_version or "unknown", "not found"
+        return "✗", installed, "not found", None
 
     if pkg.has_update():
-        return "UPDATE", pkg.current_version or "unknown", pkg.latest_version
+        return "⬆", installed, latest, compatible
 
-    return "OK", pkg.current_version or "unknown", pkg.latest_version or "unknown"
+    return "✓", installed, latest, compatible
 
 
 def _display_json(packages: List[Package]) -> None:
@@ -418,12 +525,43 @@ def _create_json_entry(pkg: Package) -> Dict[str, Any]:
         JSON-serializable dictionary with package information.
     """
     entry = {
-        "name": pkg.name,
-        "current_version": pkg.current_version,
-        "latest_version": pkg.latest_version,
+        "package": pkg.name,
         "has_update": pkg.has_update(),
-        "update_type": _get_update_type(pkg),
+        "python_compatible": pkg.is_python_compatible(),
     }
+
+    # Add version fields only if they have values
+    if pkg.current_version:
+        entry["installed_version"] = pkg.current_version
+
+    if pkg.latest_version:
+        entry["latest_version"] = pkg.latest_version
+
+    if pkg.compatible_version:
+        entry["max_compatible_version"] = pkg.compatible_version
+
+    # Add update type if available
+    update_type = _get_update_type(pkg)
+    if update_type and update_type != "-":
+        entry["update_type"] = update_type
+
+    # Build python_requirements only with non-null values
+    python_reqs = {}
+    installed_req = pkg.get_version_python_req("current")
+    if installed_req:
+        python_reqs["installed"] = installed_req
+
+    latest_req = pkg.get_requires_python()
+    if latest_req:
+        python_reqs["latest"] = latest_req
+
+    if pkg.has_compatible_version():
+        max_compat_req = pkg.get_version_python_req("compatible")
+        if max_compat_req:
+            python_reqs["max_compatible"] = max_compat_req
+
+    if python_reqs:
+        entry["python_requirements"] = python_reqs
 
     # Add error field if package fetch failed
     if not pkg.latest_version:
@@ -433,8 +571,7 @@ def _create_json_entry(pkg: Package) -> Dict[str, Any]:
 
 
 def _get_update_type(pkg: Package) -> str:
-    """
-    Determine update type (major, minor, patch, etc.).
+    """Determine update type (major, minor, patch, etc.) between current and latest.
 
     Parameters
     ----------
@@ -452,26 +589,49 @@ def _get_update_type(pkg: Package) -> str:
     if not pkg.current_version or not pkg.latest_version:
         return "unknown"
 
+    return _get_update_type_between(pkg.current_version, pkg.latest_version)
+
+
+def _get_update_type_between(
+    from_version: Optional[str], to_version: Optional[str]
+) -> str:
+    """Determine update type between two specific versions.
+
+    Parameters
+    ----------
+    from_version : str or None
+        Starting version
+    to_version : str or None
+        Target version
+
+    Returns
+    -------
+    str
+        Update type: 'major', 'minor', 'patch', 'update', or 'unknown'
+    """
+    if not from_version or not to_version:
+        return "unknown"
+
     try:
         from packaging.version import parse
 
-        current = parse(pkg.current_version)
-        latest = parse(pkg.latest_version)
+        current = parse(from_version)
+        target = parse(to_version)
 
         # Check if versions have release segments
-        if hasattr(current, "release") and hasattr(latest, "release"):
+        if hasattr(current, "release") and hasattr(target, "release"):
             c_parts = current.release
-            l_parts = latest.release
+            t_parts = target.release
 
-            if len(c_parts) >= 1 and len(l_parts) >= 1:
-                if c_parts[0] != l_parts[0]:
+            if len(c_parts) >= 1 and len(t_parts) >= 1:
+                if c_parts[0] != t_parts[0]:
                     return "major"
                 elif (
-                    len(c_parts) >= 2 and len(l_parts) >= 2 and c_parts[1] != l_parts[1]
+                    len(c_parts) >= 2 and len(t_parts) >= 2 and c_parts[1] != t_parts[1]
                 ):
                     return "minor"
                 elif (
-                    len(c_parts) >= 3 and len(l_parts) >= 3 and c_parts[2] != l_parts[2]
+                    len(c_parts) >= 3 and len(t_parts) >= 3 and c_parts[2] != t_parts[2]
                 ):
                     return "patch"
                 else:

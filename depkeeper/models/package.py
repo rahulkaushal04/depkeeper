@@ -7,14 +7,13 @@ versions, available versions, metadata, and update detection utilities.
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version, InvalidVersion, parse
-
-from depkeeper.models.version import VersionInfo
 
 
 def _parse(version: Optional[str]) -> Optional[Version]:
@@ -36,6 +35,7 @@ class Package:
         name: Normalized package name.
         current_version: Installed or specified version.
         latest_version: Latest available version.
+        compatible_version: Maximum version compatible with current Python.
         available_versions: All published versions for the package.
         metadata: Optional metadata (summary, authors, requires_dist, etc.)
         last_updated: Timestamp of last fetch.
@@ -44,6 +44,7 @@ class Package:
     name: str
     current_version: Optional[str] = None
     latest_version: Optional[str] = None
+    compatible_version: Optional[str] = None
     available_versions: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
     last_updated: datetime = field(default_factory=datetime.now)
@@ -66,14 +67,6 @@ class Package:
     def latest(self) -> Optional[Version]:
         return _parse(self.latest_version)
 
-    @property
-    def version_info_current(self) -> Optional[VersionInfo]:
-        return VersionInfo(self.current_version) if self.current_version else None
-
-    @property
-    def version_info_latest(self) -> Optional[VersionInfo]:
-        return VersionInfo(self.latest_version) if self.latest_version else None
-
     # ----------------------------------------------------------------------
     # Update detection
     # ----------------------------------------------------------------------
@@ -85,95 +78,61 @@ class Package:
             return False
         return self.latest > self.current
 
-    def is_outdated(self) -> bool:
-        """Alias for has_update()."""
-        return self.has_update()
-
-    def get_update_type(self) -> Optional[str]:
-        """
-        Determine update type: major, minor, patch, or None.
-
-        Uses VersionInfo for correctness and simplicity.
-        """
-        if not self.has_update():
-            return None
-
-        curr = self.version_info_current
-        latest = self.version_info_latest
-
-        if curr is None or latest is None:
-            return None
-
-        if latest.major > curr.major:
-            return "major"
-        if latest.minor > curr.minor:
-            return "minor"
-        if latest.patch > curr.patch:
-            return "patch"
-        return "other"
-
     # ----------------------------------------------------------------------
-    # Version filtering
+    # Python version compatibility
     # ----------------------------------------------------------------------
-    def get_newer_versions(
-        self,
-        include_pre_release: bool = False,
-    ) -> List[str]:
+    def get_requires_python(self) -> Optional[str]:
+        """Get the requires_python specifier from metadata.
+
+        Returns:
+            The requires_python string (e.g., '>=3.8') or None.
         """
-        List versions newer than the current installed version.
+        return self.metadata.get("requires_python")
 
-        Sorted from newest → oldest.
+    def is_python_compatible(self, python_version: Optional[str] = None) -> bool:
+        """Check if package is compatible with specified Python version.
+
+        Parameters:
+            python_version: Python version string to check (e.g., '3.9.0').
+                          If None, uses current Python version.
+
+        Returns:
+            True if compatible, False if incompatible, True if no requirement specified.
         """
-        if self.current is None:
-            return []
+        requires_python = self.get_requires_python()
+        if not requires_python:
+            # No requirement specified, assume compatible
+            return True
 
-        newer: List[str] = []
-        for v in self.available_versions:
-            parsed = _parse(v)
-            if parsed is None:
-                continue
+        if python_version is None:
+            # Use current Python version
+            python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
 
-            if not include_pre_release and parsed.is_prerelease:
-                continue
+        try:
+            spec = SpecifierSet(requires_python)
+            return python_version in spec
+        except Exception:
+            # If we can't parse, assume compatible
+            return True
 
-            if parsed > self.current:
-                newer.append(v)
+    def get_version_python_req(self, version_key: str) -> Optional[str]:
+        """Get Python requirement for a specific version (current/latest/compatible).
 
-        newer.sort(key=lambda v: _parse(v) or Version("0"), reverse=True)
-        return newer
+        Parameters:
+            version_key: One of 'current', 'latest', or 'compatible'
 
-    def get_compatible_versions(self, specifier_set: SpecifierSet) -> List[str]:
+        Returns:
+            Python requirement string or None
         """
-        Return versions matching the provided SpecifierSet.
+        version_metadata = self.metadata.get(f"{version_key}_metadata", {})
+        return version_metadata.get("requires_python")
 
-        Sorted from newest → oldest.
-        """
-        compatible: List[str] = []
-        for v in self.available_versions:
-            parsed = _parse(v)
-            if parsed is None:
-                continue
-            if parsed in specifier_set:
-                compatible.append(v)
-
-        compatible.sort(key=lambda v: _parse(v) or Version("0"), reverse=True)
-        return compatible
-
-    # ----------------------------------------------------------------------
-    # Metadata helpers
-    # ----------------------------------------------------------------------
-    def get_metadata_field(self, field: str, default: Any = None) -> Any:
-        """Retrieve metadata value with fallback."""
-        return self.metadata.get(field, default)
-
-    def is_pre_release(self, version: Optional[str] = None) -> bool:
-        """
-        Check if a version (or current version) is a pre-release.
-        """
-        parsed = _parse(version or self.current_version)
-        if parsed is None:
-            return False
-        return parsed.is_prerelease
+    def has_compatible_version(self) -> bool:
+        """Check if a compatible version is available (different from latest)."""
+        return (
+            self.compatible_version is not None
+            and self.compatible_version != self.latest_version
+        )
 
     # ----------------------------------------------------------------------
     # Representations
