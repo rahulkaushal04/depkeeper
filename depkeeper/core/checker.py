@@ -502,23 +502,21 @@ class VersionChecker:
             },
         }
 
-        # Find compatible version if latest is incompatible
+        # Find max compatible version within the same major version
+        # This helps avoid breaking changes from major version upgrades
+        # AND ensures compatibility with current Python version
         compatible_version = None
-        if latest_requires_python:
+        if current_version and latest_version:
             current_py = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-            try:
-                spec = SpecifierSet(latest_requires_python)
-                if current_py not in spec:
-                    # Latest is incompatible, find compatible version
-                    compatible_version = self._find_compatible_version(data, current_py)
-                    if compatible_version:
-                        # Get metadata for compatible version
-                        compatible_metadata = self._get_version_metadata(
-                            data, compatible_version
-                        )
-                        metadata["compatible_metadata"] = compatible_metadata
-            except Exception:
-                pass
+            compatible_version = self._find_max_minor_version(
+                data, current_version, latest_version, current_py
+            )
+            if compatible_version:
+                # Get metadata for compatible version
+                compatible_metadata = self._get_version_metadata(
+                    data, compatible_version
+                )
+                metadata["compatible_metadata"] = compatible_metadata
 
         # Get metadata for current version if available
         if current_version:
@@ -535,6 +533,96 @@ class VersionChecker:
             metadata=metadata,
             last_updated=None,
         )
+
+    def _find_max_minor_version(
+        self,
+        data: Dict[str, Any],
+        current_version: str,
+        latest_version: str,
+        python_version: str,
+    ) -> Optional[str]:
+        """Find the maximum version within the same major version as current.
+
+        This helps identify safe upgrade paths that avoid breaking changes
+        from major version bumps AND ensures Python version compatibility.
+
+        Parameters
+        ----------
+        data : dict
+            Complete PyPI package data
+        current_version : str
+            Current installed version
+        latest_version : str
+            Latest available version
+        python_version : str
+            Current Python version to check compatibility (e.g., '3.8.0')
+
+        Returns
+        -------
+        str or None
+            Latest version with same major version as current that is compatible
+            with the Python version, or None if not found
+        """
+        from packaging.version import parse, InvalidVersion
+
+        try:
+            current_parsed = parse(current_version)
+            latest_parsed = parse(latest_version)
+        except InvalidVersion:
+            logger.debug(
+                f"Invalid version format: {current_version} or {latest_version}"
+            )
+            return None
+
+        # If latest is same major version, check if it's Python compatible
+        if hasattr(current_parsed, "release") and hasattr(latest_parsed, "release"):
+            if len(current_parsed.release) > 0 and len(latest_parsed.release) > 0:
+                if current_parsed.release[0] == latest_parsed.release[0]:
+                    # Same major version, check Python compatibility
+                    releases = data.get("releases", {})
+                    if latest_version in releases:
+                        if self._is_version_compatible(
+                            releases[latest_version], python_version
+                        ):
+                            return latest_version
+
+        # Otherwise, search for max version with same major AND Python compatible
+        releases = data.get("releases", {})
+        if not releases:
+            return None
+
+        try:
+            valid_versions = []
+            for v in releases.keys():
+                if not releases[v]:  # Skip empty releases
+                    continue
+                try:
+                    parsed = parse(v)
+                    # Only include non-prerelease versions with same major
+                    if (
+                        not parsed.is_prerelease
+                        and hasattr(parsed, "release")
+                        and len(parsed.release) > 0
+                        and hasattr(current_parsed, "release")
+                        and len(current_parsed.release) > 0
+                        and parsed.release[0] == current_parsed.release[0]
+                    ):
+                        # Check Python compatibility
+                        if self._is_version_compatible(releases[v], python_version):
+                            valid_versions.append((v, parsed))
+                except InvalidVersion:
+                    continue
+
+            if not valid_versions:
+                return None
+
+            # Sort by version, newest first
+            valid_versions.sort(key=lambda x: x[1], reverse=True)
+            return valid_versions[0][0]
+
+        except Exception as e:
+            logger.debug(f"Error finding max minor version: {e}")
+            return None
 
     def _find_compatible_version(
         self, data: Dict[str, Any], python_version: str

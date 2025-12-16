@@ -319,17 +319,17 @@ def _display_table(packages: List[Package]) -> None:
 
     # Define column styles
     column_styles = {
-        "Status": {"justify": "center", "no_wrap": True, "width": 8},
+        "Status": {"justify": "center", "no_wrap": True, "width": 10},
         "Package": {"style": "bold cyan", "no_wrap": True},
-        "Installed": {"justify": "center", "style": "dim"},
-        "Latest": {"justify": "center", "style": "bold"},
-        "Compatible": {"justify": "center", "style": "bright_cyan"},
-        "Type": {"justify": "center"},
-        "Python": {"justify": "left", "no_wrap": False},
+        "Current": {"justify": "center", "style": "dim"},
+        "Latest": {"justify": "center", "style": "bold green"},
+        "Safe Upgrade": {"justify": "center", "style": "bright_cyan"},
+        "Update": {"justify": "center"},
+        "Python Requires": {"justify": "left", "no_wrap": False},
     }
 
     # Use enhanced print_table utility
-    print_table(data, title="Package Status", column_styles=column_styles)
+    print_table(data, title="Dependency Status", column_styles=column_styles)
 
 
 def _create_table_row(pkg: Package) -> Dict[str, str]:
@@ -351,26 +351,27 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
     if not pkg.latest_version:
         # Error case - package not found or failed to fetch
         return {
-            "Status": "[red]ERROR[/red]",
+            "Status": "[red]✗ ERROR[/red]",
             "Package": pkg.name,
-            "Installed": pkg.current_version or "[dim]-[/dim]",
+            "Current": pkg.current_version or "[dim]-[/dim]",
             "Latest": "[red]error[/red]",
-            "Compatible": "[dim]-[/dim]",
-            "Type": "[dim]-[/dim]",
-            "Python": "[dim]-[/dim]",
+            "Safe Upgrade": "[dim]-[/dim]",
+            "Update": "[dim]-[/dim]",
+            "Python Requires": "[dim]-[/dim]",
         }
 
     # Determine the target version for comparison and display
+    # Compatible version now shows max version within same major version
     target_version = None
     compatible_display = "[dim]-[/dim]"
     needs_downgrade = False
 
     if pkg.has_compatible_version():
-        # There's a max compatible version (latest is incompatible)
+        # There's a max compatible version within same major version
         target_version = pkg.compatible_version
         compatible_display = f"[bright_cyan]{pkg.compatible_version}[/bright_cyan]"
 
-        # Check if current version is also incompatible (needs downgrade)
+        # Check if current version is newer than max compatible (needs downgrade)
         if pkg.current_version:
             try:
                 from packaging.version import parse
@@ -378,13 +379,8 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
                 needs_downgrade = parse(pkg.current_version) > parse(target_version)
             except Exception:
                 pass
-
-    elif not pkg.is_python_compatible():
-        # Latest is incompatible and no compatible version found
-        target_version = None
-        compatible_display = "[red]none found[/red]"
     else:
-        # Latest is compatible, use it as target
+        # No compatible version found within same major, use latest
         target_version = pkg.latest_version
         compatible_display = f"[green]{pkg.latest_version}[/green]"
 
@@ -403,13 +399,13 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
     if needs_downgrade:
         # Current version is incompatible, needs downgrade to compatible version
         return {
-            "Status": "[red]INCOMP[/red]",
+            "Status": "[red]⚠ INCOMP[/red]",
             "Package": pkg.name,
-            "Installed": pkg.current_version or "[dim]-[/dim]",
+            "Current": pkg.current_version or "[dim]-[/dim]",
             "Latest": pkg.latest_version,
-            "Compatible": compatible_display,
-            "Type": "[red]downgrade[/red]",
-            "Python": python_reqs,
+            "Safe Upgrade": compatible_display,
+            "Update": "[red]downgrade[/red]",
+            "Python Requires": python_reqs,
         }
 
     if has_update:
@@ -418,24 +414,24 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
         colored_type = _colorize_update_type(update_type)
 
         return {
-            "Status": "[yellow]UPDATE[/yellow]",
+            "Status": "[yellow]↑ UPDATE[/yellow]",
             "Package": pkg.name,
-            "Installed": pkg.current_version or "[dim]-[/dim]",
+            "Current": pkg.current_version or "[dim]-[/dim]",
             "Latest": pkg.latest_version,
-            "Compatible": compatible_display,
-            "Type": colored_type,
-            "Python": python_reqs,
+            "Safe Upgrade": compatible_display,
+            "Update": colored_type,
+            "Python Requires": python_reqs,
         }
 
     # Up to date - current >= target version
     return {
-        "Status": "[green]OK[/green]",
+        "Status": "[green]✓ OK[/green]",
         "Package": pkg.name,
-        "Installed": pkg.current_version or "[dim]-[/dim]",
+        "Current": pkg.current_version or "[dim]-[/dim]",
         "Latest": pkg.latest_version or "[dim]-[/dim]",
-        "Compatible": compatible_display,
-        "Type": "[dim]-[/dim]",
-        "Python": python_reqs,
+        "Safe Upgrade": compatible_display,
+        "Update": "[dim]-[/dim]",
+        "Python Requires": python_reqs,
     }
 
 
@@ -497,9 +493,9 @@ def _get_detailed_python_reqs(pkg: Package) -> str:
     if pkg.has_compatible_version():
         compatible_req = pkg.get_version_python_req("compatible")
         if compatible_req:
-            parts.append(f"[bright_cyan]Max Compat: {compatible_req}[/bright_cyan]")
+            parts.append(f"[bright_cyan]Safe Upgrade: {compatible_req}[/bright_cyan]")
         else:
-            parts.append(f"[bright_cyan]Max Compat: any[/bright_cyan]")
+            parts.append(f"[bright_cyan]Safe Upgrade: any[/bright_cyan]")
     elif not pkg.is_python_compatible() and pkg.latest_version:
         # Latest incompatible but no suggestion found
         import sys
@@ -522,22 +518,26 @@ def _display_simple(packages: List[Package]) -> None:
         # Show status with versions
         if compatible and compatible != latest:
             console.print(
-                f"[{status}] {pkg.name}: {installed} → {latest} (max compatible: {compatible})"
+                f"[{status}] {pkg.name:20} {installed:10} → {latest:10} (safe: {compatible})"
             )
         else:
-            console.print(f"[{status}] {pkg.name}: {installed} → {latest}")
+            console.print(f"[{status}] {pkg.name:20} {installed:10} → {latest:10}")
 
-        # Add Python compatibility information if incompatible
-        if not pkg.is_python_compatible():
-            requires_python = pkg.get_requires_python()
+        # Add Python compatibility information
+        current_req = pkg.get_version_python_req("current")
+        latest_req = pkg.get_requires_python()
+        if current_req or latest_req:
+            req_parts = []
+            if current_req:
+                req_parts.append(f"current: {current_req}")
+            if latest_req:
+                req_parts.append(f"latest: {latest_req}")
             if pkg.has_compatible_version():
-                console.print(f"  [WARN]  Latest requires Python {requires_python}")
-                console.print(
-                    f"  [OK]  Max compatible version: {pkg.compatible_version}"
-                )
-            else:
-                console.print(f"  [ERROR]  Latest requires Python {requires_python}")
-                console.print(f"  [ERROR]  No compatible version found")
+                safe_req = pkg.get_version_python_req("compatible")
+                if safe_req:
+                    req_parts.append(f"safe: {safe_req}")
+            if req_parts:
+                console.print(f"       Python: {', '.join(req_parts)}")
 
 
 def _get_simple_status(pkg: Package) -> tuple[str, str, str, str | None]:
@@ -553,17 +553,17 @@ def _get_simple_status(pkg: Package) -> tuple[str, str, str, str | None]:
     tuple[str, str, str, str | None]
         (status, installed_version, latest_version, compatible_version) tuple.
     """
-    installed = pkg.current_version or "unknown"
-    latest = pkg.latest_version or "not found"
+    installed = pkg.current_version or "none"
+    latest = pkg.latest_version or "error"
     compatible = pkg.compatible_version if pkg.has_compatible_version() else None
 
     if not pkg.latest_version:
-        return "ERROR", installed, "not found", None
+        return "✗", installed, "error", None
 
     if pkg.has_update():
-        return "UPDATE", installed, latest, compatible
+        return "↑", installed, latest, compatible
 
-    return "OK", installed, latest, compatible
+    return "✓", installed, latest, compatible
 
 
 def _display_json(packages: List[Package]) -> None:
@@ -585,48 +585,58 @@ def _create_json_entry(pkg: Package) -> Dict[str, Any]:
     Dict[str, Any]
         JSON-serializable dictionary with package information.
     """
+    # Determine status
+    if not pkg.latest_version:
+        status = "error"
+    elif pkg.has_update():
+        status = "update_available"
+    else:
+        status = "up_to_date"
+
     entry = {
-        "package": pkg.name,
-        "has_update": pkg.has_update(),
-        "python_compatible": pkg.is_python_compatible(),
+        "name": pkg.name,
+        "status": status,
     }
 
-    # Add version fields only if they have values
+    # Add version information
+    versions = {}
     if pkg.current_version:
-        entry["installed_version"] = pkg.current_version
-
+        versions["current"] = pkg.current_version
     if pkg.latest_version:
-        entry["latest_version"] = pkg.latest_version
-
+        versions["latest"] = pkg.latest_version
     if pkg.compatible_version:
-        entry["max_compatible_version"] = pkg.compatible_version
+        versions["safe_upgrade"] = pkg.compatible_version
+
+    if versions:
+        entry["versions"] = versions
 
     # Add update type if available
-    update_type = _get_update_type(pkg)
-    if update_type and update_type != "-":
-        entry["update_type"] = update_type
+    if pkg.has_update():
+        update_type = _get_update_type(pkg)
+        if update_type and update_type != "-":
+            entry["update_type"] = update_type
 
     # Build python_requirements only with non-null values
     python_reqs = {}
     installed_req = pkg.get_version_python_req("current")
     if installed_req:
-        python_reqs["installed"] = installed_req
+        python_reqs["current"] = installed_req
 
     latest_req = pkg.get_requires_python()
     if latest_req:
         python_reqs["latest"] = latest_req
 
     if pkg.has_compatible_version():
-        max_compat_req = pkg.get_version_python_req("compatible")
-        if max_compat_req:
-            python_reqs["max_compatible"] = max_compat_req
+        safe_req = pkg.get_version_python_req("compatible")
+        if safe_req:
+            python_reqs["safe_upgrade"] = safe_req
 
     if python_reqs:
-        entry["python_requirements"] = python_reqs
+        entry["python_requires"] = python_reqs
 
     # Add error field if package fetch failed
     if not pkg.latest_version:
-        entry["error"] = "Package not found or failed to fetch from PyPI"
+        entry["error"] = "Failed to fetch package information from PyPI"
 
     return entry
 
