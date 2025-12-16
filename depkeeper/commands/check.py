@@ -369,7 +369,14 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
     if pkg.has_compatible_version():
         # There's a max compatible version within same major version
         target_version = pkg.compatible_version
-        compatible_display = f"[bright_cyan]{pkg.compatible_version}[/bright_cyan]"
+
+        # Only show compatible version if it's different from current
+        # (i.e., there's actually an upgrade available)
+        if pkg.current_version and pkg.compatible_version != pkg.current_version:
+            compatible_display = f"[bright_cyan]{pkg.compatible_version}[/bright_cyan]"
+        else:
+            # Current == compatible, so no upgrade available - show as "-"
+            compatible_display = "[dim]-[/dim]"
 
         # Check if current version is newer than max compatible (needs downgrade)
         if pkg.current_version:
