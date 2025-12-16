@@ -235,8 +235,10 @@ def _setup_logging(verbose: int) -> None:
 # This must be done after the cli group is defined
 try:
     from depkeeper.commands.check import check
+    from depkeeper.commands.update import update
 
     cli.add_command(check)
+    cli.add_command(update)
 except ImportError as e:
     # Command import failures should be fatal in production
     # Write directly to stderr since logging may not be configured yet
