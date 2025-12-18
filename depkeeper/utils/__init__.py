@@ -38,13 +38,11 @@ from depkeeper.utils.http import (
 __all__ = [
     # Console
     "confirm",
-    "print_dim",
     "print_info",
     "print_error",
     "print_table",
     "print_success",
     "print_warning",
-    "print_highlight",
     "get_raw_console",
     "create_progress_bar",
     "reconfigure_console",

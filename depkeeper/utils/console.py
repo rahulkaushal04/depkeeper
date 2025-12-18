@@ -62,7 +62,7 @@ import os
 import sys
 import logging
 import threading
-from typing import Any, Optional, List, Dict, Literal, Callable
+from typing import Any, Optional, List, Dict, Callable
 
 from rich.theme import Theme
 from rich.table import Table
@@ -378,64 +378,6 @@ def print_info(message: str, prefix: str = "[INFO]") -> None:
     # Only print if logger is at INFO level or lower (more verbose)
     if logging.getLogger("depkeeper").getEffectiveLevel() <= logging.INFO:
         _get_console().print(f"{prefix} {message}", style="info")
-
-
-def print_dim(message: str) -> None:
-    """Print a dimmed message with reduced emphasis.
-
-    Displays a message in dimmed style, useful for supplementary information
-    that should be visible but not prominent.
-
-    Parameters
-    ----------
-    message : str
-        The message to display in dimmed style.
-
-    Returns
-    -------
-    None
-
-    Examples
-    --------
-    >>> from depkeeper.utils.console import print_dim
-    >>> print_dim("Using cache from /tmp/cache")
-    Using cache from /tmp/cache
-
-    Notes
-    -----
-    Dimmed text appears in a lighter/grayed color when color output is
-    enabled, making it visually distinct from primary messages.
-    """
-    _get_console().print(message, style="dim")
-
-
-def print_highlight(message: str) -> None:
-    """Print a highlighted message with strong emphasis.
-
-    Displays a message in bold magenta style, useful for drawing attention
-    to important information that requires immediate notice.
-
-    Parameters
-    ----------
-    message : str
-        The message to display with highlighting.
-
-    Returns
-    -------
-    None
-
-    Examples
-    --------
-    >>> from depkeeper.utils.console import print_highlight
-    >>> print_highlight("5 packages need updates")
-    5 packages need updates
-
-    Notes
-    -----
-    Highlighted text appears in bold magenta when color output is enabled,
-    making it stand out significantly from other message types.
-    """
-    _get_console().print(message, style="highlight")
 
 
 def print_table(
