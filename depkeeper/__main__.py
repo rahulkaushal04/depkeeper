@@ -18,7 +18,7 @@ Examples
 Run depkeeper as a module:
 
     $ python -m depkeeper check
-    $ python -m depkeeper update --strategy minor
+    $ python -m depkeeper update
     $ python -m depkeeper --version
 
 Notes

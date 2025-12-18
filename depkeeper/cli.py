@@ -4,9 +4,9 @@ This module provides the main CLI entry point using the Click framework.
 It defines the command structure, global options, context management, and
 command routing for all depkeeper operations.
 
-The CLI is organized as a Click group with multiple subcommands (check, update,
-audit, etc.) that share common global options like verbosity, caching, and
-color output preferences.
+The CLI is organized as a Click group with multiple subcommands (check, update)
+that share common global options like verbosity, caching, and color output
+preferences.
 
 Architecture
 ------------
@@ -14,7 +14,7 @@ The CLI follows a hierarchical structure:
 
 - **cli**: Main command group with global options
 - **DepKeeperContext**: Shared context object for all commands
-- **Subcommands**: Individual commands (check, update, audit, etc.)
+- **Subcommands**: Individual commands (check, update)
 - **Helper functions**: Logging setup and utilities
 
 Global Options
@@ -32,8 +32,7 @@ Examples
 Basic command usage:
 
     $ depkeeper check
-    $ depkeeper update --strategy minor
-    $ depkeeper audit --severity critical
+    $ depkeeper update
 
 With global options:
 
@@ -120,8 +119,8 @@ def cli(
     """depkeeper - Modern Python dependency management for requirements.txt
 
     Automatically check for updates, apply version constraints, and keep your
-    dependencies secure and up-to-date with intelligent updates, security
-    scanning, and dependency resolution.
+    dependencies secure and up-to-date with intelligent updates and
+    dependency resolution.
 
     \b
     Available Commands:
@@ -131,7 +130,7 @@ def cli(
     \b
     Examples:
       depkeeper check                          # Check for updates
-      depkeeper update --strategy minor        # Safe updates
+      depkeeper update                         # Update packages
       depkeeper -v check                       # Verbose output
 
     For detailed help on any command, use: depkeeper COMMAND --help
