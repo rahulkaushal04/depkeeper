@@ -17,9 +17,7 @@ from depkeeper.utils.logger import (
 from depkeeper.utils.console import (
     confirm,
     get_raw_console,
-    print_dim,
     print_error,
-    print_highlight,
     print_info,
     print_success,
     print_table,
@@ -44,7 +42,6 @@ __all__ = [
     "print_success",
     "print_warning",
     "get_raw_console",
-    "create_progress_bar",
     "reconfigure_console",
     # Logging
     "get_logger",

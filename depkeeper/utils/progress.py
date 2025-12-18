@@ -297,13 +297,6 @@ class ProgressTracker:
         -------
         None
 
-        Raises
-        ------
-        None
-            This method does not raise exceptions. If already started, logs
-            a warning and returns early. If disabled, logs debug message and
-            returns immediately.
-
         Examples
         --------
         Explicit start (manual control):

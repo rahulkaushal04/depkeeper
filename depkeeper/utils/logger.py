@@ -115,8 +115,8 @@ def setup_logging(
     level : int, optional
         Logging level constant from the logging module. Common values:
         - logging.DEBUG (10): Detailed information for diagnosing problems
-        - logging.INFO (20): Confirmation that things are working as expected
-        - logging.WARNING (30): Indication of potential issues (default)
+        - logging.INFO (20): Confirmation that things are working as expected (default)
+        - logging.WARNING (30): Indication of potential issues
         - logging.ERROR (40): Serious problems
         Default is logging.INFO.
     verbose : bool, optional
