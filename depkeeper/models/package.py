@@ -8,9 +8,8 @@ versions, available versions, metadata, and update detection utilities.
 from __future__ import annotations
 
 import sys
-from datetime import datetime
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version, InvalidVersion, parse
@@ -36,7 +35,6 @@ class Package:
         current_version: Installed or specified version.
         latest_version: Latest available version.
         compatible_version: Maximum version compatible with current Python.
-        available_versions: All published versions for the package.
         metadata: Optional metadata (summary, authors, requires_dist, etc.)
         last_updated: Timestamp of last fetch.
     """
@@ -45,9 +43,7 @@ class Package:
     current_version: Optional[str] = None
     latest_version: Optional[str] = None
     compatible_version: Optional[str] = None
-    available_versions: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
-    last_updated: datetime = field(default_factory=datetime.now)
 
     # ----------------------------------------------------------------------
     # Initialization
