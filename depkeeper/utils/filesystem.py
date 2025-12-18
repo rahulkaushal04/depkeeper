@@ -1032,3 +1032,97 @@ def validate_path(
             )
 
     return resolved
+
+
+def create_timestamped_backup(file_path: Union[str, Path]) -> Path:
+    """Create a timestamped backup of a file.
+
+    Creates a backup copy of the specified file with a timestamp in the
+    filename. The backup is created in the same directory as the original
+    file with the format: {stem}.{timestamp}.backup{suffix}
+
+    This is useful for creating backups before modifying files, allowing
+    easy restoration if needed. The timestamp ensures unique backup names
+    and provides chronological ordering.
+
+    Parameters
+    ----------
+    file_path : str or Path
+        Path to the file to backup.
+
+    Returns
+    -------
+    Path
+        Path to the created backup file.
+
+    Raises
+    ------
+    FileOperationError
+        If the source file doesn't exist or backup creation fails.
+
+    Examples
+    --------
+    Create a backup before modifying a file:
+
+    >>> from depkeeper.utils.filesystem import create_timestamped_backup
+    >>> backup = create_timestamped_backup("requirements.txt")
+    >>> print(backup)
+    requirements.20251218_143022.backup.txt
+
+    Use in update workflow:
+
+    >>> backup = create_timestamped_backup("requirements.txt")
+    >>> # Modify the original file
+    >>> # If something goes wrong:
+    >>> import shutil
+    >>> shutil.copy2(backup, "requirements.txt")  # Restore
+
+    Notes
+    -----
+    The timestamp format is YYYYMMDD_HHMMSS (e.g., 20251218_143022).
+    This format ensures:
+    - Lexicographic sorting matches chronological order
+    - Filename safety across all platforms
+    - Human readability
+
+    The backup is created using shutil.copy2 which preserves:
+    - File metadata (permissions, timestamps)
+    - File content exactly as-is
+
+    See Also
+    --------
+    safe_write_file : Atomic file writing with automatic backup
+    list_backups : Find all backups for a file
+    clean_old_backups : Remove old backup files
+    """
+    path = Path(file_path)
+
+    # Validate source file exists
+    if not path.exists():
+        raise FileOperationError(
+            f"Cannot backup non-existent file: {path}",
+            file_path=str(file_path),
+            operation="backup",
+        )
+
+    if not path.is_file():
+        raise FileOperationError(
+            f"Cannot backup non-file path: {path}",
+            file_path=str(file_path),
+            operation="backup",
+        )
+
+    # Generate timestamped backup path
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = path.parent / f"{path.stem}.{timestamp}.backup{path.suffix}"
+
+    try:
+        shutil.copy2(path, backup_path)
+        logger.debug(f"Created timestamped backup: {backup_path}")
+        return backup_path
+    except Exception as e:
+        raise FileOperationError(
+            f"Failed to create backup: {e}",
+            file_path=str(file_path),
+            operation="backup",
+        ) from e

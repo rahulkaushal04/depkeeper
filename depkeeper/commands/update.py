@@ -7,10 +7,9 @@ Updates packages in requirements file to safe upgrade versions.
 from __future__ import annotations
 
 import sys
-import asyncio
 import shutil
+import asyncio
 from pathlib import Path
-from datetime import datetime
 from typing import List, Tuple
 
 import click
@@ -21,13 +20,16 @@ from depkeeper.utils.logger import get_logger
 from depkeeper.exceptions import DepKeeperError
 from depkeeper.core.checker import VersionChecker
 from depkeeper.core.parser import RequirementsParser
+from depkeeper.utils.version_utils import get_update_type
 from depkeeper.context import pass_context, DepKeeperContext
+from depkeeper.utils.filesystem import create_timestamped_backup
 from depkeeper.utils.console import (
     print_success,
     print_error,
     print_warning,
     print_info,
     print_table,
+    colorize_update_type,
 )
 
 logger = get_logger("commands.update")
@@ -199,7 +201,7 @@ async def _update_async(
     # Create backup if requested
     backup_path = None
     if backup:
-        backup_path = _create_backup(file)
+        backup_path = create_timestamped_backup(file)
         print_info(f"Created backup: {backup_path}")
 
     # Apply updates
@@ -308,8 +310,8 @@ def _display_update_plan(
         old_version = pkg.current_version or "not specified"
 
         # Determine update type
-        update_type = _get_update_type(pkg.current_version, new_version)
-        colored_type = _colorize_update_type(update_type)
+        update_type = get_update_type(pkg.current_version, new_version)
+        colored_type = colorize_update_type(update_type)
 
         # Python requirements
         python_req = (
@@ -337,81 +339,6 @@ def _display_update_plan(
     print_table(data, title=title, column_styles=column_styles)
 
 
-def _get_update_type(current: str | None, new: str) -> str:
-    """Determine update type between versions.
-
-    Parameters
-    ----------
-    current : str or None
-        Current version.
-    new : str
-        New version.
-
-    Returns
-    -------
-    str
-        Update type: major, minor, patch, or downgrade.
-    """
-    if not current:
-        return "new"
-
-    try:
-        from packaging.version import parse
-
-        curr = parse(current)
-        new_v = parse(new)
-
-        if new_v < curr:
-            return "downgrade"
-
-        if hasattr(curr, "release") and hasattr(new_v, "release"):
-            c_parts = curr.release
-            n_parts = new_v.release
-
-            if len(c_parts) >= 1 and len(n_parts) >= 1:
-                if c_parts[0] != n_parts[0]:
-                    return "major"
-                elif (
-                    len(c_parts) >= 2 and len(n_parts) >= 2 and c_parts[1] != n_parts[1]
-                ):
-                    return "minor"
-                elif (
-                    len(c_parts) >= 3 and len(n_parts) >= 3 and c_parts[2] != n_parts[2]
-                ):
-                    return "patch"
-
-        return "update"
-
-    except Exception:
-        return "update"
-
-
-def _colorize_update_type(update_type: str) -> str:
-    """Apply color to update type.
-
-    Parameters
-    ----------
-    update_type : str
-        Update type.
-
-    Returns
-    -------
-    str
-        Color-coded update type.
-    """
-    color_map = {
-        "major": "red",
-        "minor": "yellow",
-        "patch": "green",
-        "new": "cyan",
-        "downgrade": "red",
-        "update": "yellow",
-    }
-
-    color = color_map.get(update_type, "white")
-    return f"[{color}]{update_type}[/{color}]"
-
-
 def _confirm_update(count: int) -> bool:
     """Prompt user to confirm update.
 
@@ -433,25 +360,6 @@ def _confirm_update(count: int) -> bool:
         show_choices=True,
     )
     return response.lower() == "y"
-
-
-def _create_backup(file: Path) -> Path:
-    """Create a backup of the requirements file.
-
-    Parameters
-    ----------
-    file : Path
-        Requirements file path.
-
-    Returns
-    -------
-    Path
-        Path to backup file.
-    """
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = file.parent / f"{file.stem}.{timestamp}.backup{file.suffix}"
-    shutil.copy2(file, backup_path)
-    return backup_path
 
 
 def _apply_updates(
@@ -488,7 +396,9 @@ def _apply_updates(
         if req and req.name.lower() in update_map:
             # Update this line
             new_version = update_map[req.name.lower()]
-            updated_line = _update_requirement_line(req, new_version, line)
+            updated_line = req.update_version(
+                new_version, preserve_trailing_newline=line.endswith("\n")
+            )
             updated_lines.append(updated_line)
             logger.debug(f"Updated line {i}: {line.strip()} → {updated_line.strip()}")
         else:
@@ -498,46 +408,3 @@ def _apply_updates(
     # Write updated content
     with open(file, "w", encoding="utf-8") as f:
         f.writelines(updated_lines)
-
-
-def _update_requirement_line(
-    req: Requirement, new_version: str, original_line: str
-) -> str:
-    """Update a requirement line with new version.
-
-    Parameters
-    ----------
-    req : Requirement
-        Requirement object.
-    new_version : str
-        New version to set.
-    original_line : str
-        Original line from file.
-
-    Returns
-    -------
-    str
-        Updated line.
-    """
-    # Create updated requirement
-    updated_req = Requirement(
-        name=req.name,
-        specs=[(">=", new_version)],  # Use >= for safe upgrade
-        extras=req.extras,
-        markers=req.markers,
-        url=req.url,
-        editable=req.editable,
-        hashes=[],  # Remove hashes as version changed
-        comment=req.comment,
-        line_number=req.line_number,
-    )
-
-    # Convert to string
-    updated_str = updated_req.to_string(include_hashes=False, include_comment=True)
-
-    # Preserve trailing newline if present
-    if original_line.endswith("\n"):
-        if not updated_str.endswith("\n"):
-            updated_str += "\n"
-
-    return updated_str

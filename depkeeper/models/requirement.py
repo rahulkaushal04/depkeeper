@@ -556,3 +556,125 @@ class Requirement:
             f"extras={self.extras!r}, editable={self.editable}, "
             f"line_number={self.line_number})"
         )
+
+    def update_version(
+        self, new_version: str, preserve_trailing_newline: bool = True
+    ) -> str:
+        """Update requirement with new version and return formatted string.
+
+        Creates an updated version of this requirement with a new version
+        constraint. Returns the formatted requirement string suitable for
+        writing to a requirements.txt file. This is useful for applying
+        version updates while preserving the requirement structure.
+
+        The method:
+        1. Creates a new version specifier (>= new_version)
+        2. Preserves extras and environment markers
+        3. Removes hashes (as they're version-specific)
+        4. Preserves inline comments
+        5. Optionally preserves trailing newlines
+
+        Parameters
+        ----------
+        new_version : str
+            New version string to set (e.g., "2.31.0").
+        preserve_trailing_newline : bool, optional
+            Whether to ensure the result ends with a newline character.
+            Default is True for requirements file compatibility.
+
+        Returns
+        -------
+        str
+            Updated requirement string formatted for requirements.txt.
+
+        Examples
+        --------
+        Simple version update:
+
+        >>> req = Requirement(
+        ...     name="requests",
+        ...     specs=[("==", "2.28.0")],
+        ...     line_number=1
+        ... )
+        >>> req.update_version("2.31.0")
+        'requests>=2.31.0\\n'
+
+        Preserve extras and markers:
+
+        >>> req = Requirement(
+        ...     name="requests",
+        ...     specs=[("==", "2.28.0")],
+        ...     extras=["security"],
+        ...     markers="python_version >= '3.8'",
+        ...     comment="HTTP library"
+        ... )
+        >>> req.update_version("2.31.0")
+        "requests[security]>=2.31.0 ; python_version >= '3.8'  # HTTP library\\n"
+
+        Hashes are removed (version-specific):
+
+        >>> req = Requirement(
+        ...     name="certifi",
+        ...     specs=[("==", "2023.7.22")],
+        ...     hashes=["sha256:abc123..."]
+        ... )
+        >>> req.update_version("2023.11.17")
+        'certifi>=2023.11.17\\n'
+
+        No trailing newline:
+
+        >>> req = Requirement(name="click", specs=[("==", "8.0.0")])
+        >>> req.update_version("8.1.7", preserve_trailing_newline=False)
+        'click>=8.1.7'
+
+        Notes
+        -----
+        **Version Specifier Choice**: Uses ">=" instead of "==" to indicate
+        "safe upgrade" semantics. This allows compatible updates while
+        preventing downgrades.
+
+        **Hash Removal**: Hashes are version-specific and must be regenerated
+        for new versions. Since hash generation requires downloading packages,
+        they are omitted from the updated requirement.
+
+        **Editable Installs**: Editable/URL requirements are preserved as-is
+        but may not be updated if they use VCS URLs without version tags.
+
+        **Use in Update Workflow**:
+        ```python
+        # Read requirements file
+        requirements = parser.parse_file("requirements.txt")
+
+        # Update specific requirement
+        for req in requirements:
+            if req.name == "requests":
+                updated_line = req.update_version("2.31.0")
+                # Write updated_line back to file
+        ```
+
+        See Also
+        --------
+        to_string : Convert requirement to string with all options
+        __str__ : Get default string representation
+        """
+        # Create updated requirement with new version
+        updated_req = Requirement(
+            name=self.name,
+            specs=[(">=", new_version)],  # Use >= for safe upgrade
+            extras=self.extras,
+            markers=self.markers,
+            url=self.url,
+            editable=self.editable,
+            hashes=[],  # Remove hashes as version changed
+            comment=self.comment,
+            line_number=self.line_number,
+        )
+
+        # Convert to string
+        updated_str = updated_req.to_string(include_hashes=False, include_comment=True)
+
+        # Preserve trailing newline if requested
+        if preserve_trailing_newline and not updated_str.endswith("\n"):
+            updated_str += "\n"
+
+        return updated_str

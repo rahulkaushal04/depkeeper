@@ -77,6 +77,8 @@ from typing import Any, Dict, Optional
 from packaging.specifiers import SpecifierSet
 from packaging.version import Version, InvalidVersion, parse
 
+from depkeeper.utils.version_utils import get_update_type
+
 
 def _parse(version: Optional[str]) -> Optional[Version]:
     """Safely parse version strings into Version objects.
@@ -667,3 +669,397 @@ class Package:
             f"Package(name={self.name!r}, current_version={self.current_version!r}, "
             f"latest_version={self.latest_version!r}, outdated={self.has_update()})"
         )
+
+    def needs_action(self) -> bool:
+        """Check if package needs action (incompatible or needs downgrade).
+
+        Determines if the package requires user attention beyond a simple update.
+        This includes cases where the current version is incompatible with the
+        Python environment or needs to be downgraded to a compatible version.
+
+        Returns
+        -------
+        bool
+            True if package is incompatible with current Python or needs downgrade,
+            False if package is up-to-date or has a straightforward update path.
+
+        Examples
+        --------
+        Package needing downgrade:
+
+        >>> pkg = Package(
+        ...     name="test",
+        ...     current_version="2.0.0",
+        ...     latest_version="3.0.0",
+        ...     compatible_version="1.5.0"
+        ... )
+        >>> pkg.needs_action()
+        True
+
+        Package with incompatible latest version:
+
+        >>> pkg = Package(
+        ...     name="test",
+        ...     current_version="1.0.0",
+        ...     latest_version="2.0.0"
+        ... )
+        >>> pkg.metadata = {"requires_python": ">=3.12"}
+        >>> pkg.needs_action()  # If running Python < 3.12
+        True
+
+        Normal update (no action needed):
+
+        >>> pkg = Package(
+        ...     name="test",
+        ...     current_version="1.0.0",
+        ...     latest_version="1.5.0",
+        ...     compatible_version="1.5.0"
+        ... )
+        >>> pkg.needs_action()
+        False
+
+        Notes
+        -----
+        This method identifies packages that require special handling:
+
+        1. **Downgrade needed**: Current version is higher than the maximum
+           compatible version for the current Python environment.
+
+        2. **Incompatible**: Latest version requires a newer Python version
+           and no compatible alternative is available.
+
+        Regular updates (where current < compatible/latest) return False as
+        they follow the normal update path.
+
+        See Also
+        --------
+        has_compatible_version : Check if compatible version exists
+        is_python_compatible : Check Python version compatibility
+        has_update : Check if update is available
+        """
+        # Check if there's a compatible version and current is greater (needs downgrade)
+        if self.has_compatible_version() and self.current_version:
+            try:
+                current = _parse(self.current_version)
+                compatible = _parse(self.compatible_version)
+                if current and compatible and current > compatible:
+                    return True
+            except Exception:
+                pass
+
+        # Check if latest is incompatible and no compatible version found
+        if not self.is_python_compatible() and not self.has_compatible_version():
+            return True
+
+        return False
+
+    def get_simple_status(self) -> tuple[str, str, str, Optional[str]]:
+        """Get simple status information for the package.
+
+        Returns a tuple of status information suitable for simple text output
+        or logging. Provides a quick overview of package state without complex
+        formatting.
+
+        Returns
+        -------
+        tuple[str, str, str, str | None]
+            Tuple containing (status, installed_version, latest_version, compatible_version):
+            - status: "error", "outdated", or "latest"
+            - installed_version: Current version or "none"
+            - latest_version: Latest version or "error" if unavailable
+            - compatible_version: Compatible version or None
+
+        Examples
+        --------
+        Package with update available:
+
+        >>> pkg = Package(
+        ...     name="requests",
+        ...     current_version="2.28.0",
+        ...     latest_version="2.31.0",
+        ...     compatible_version="2.31.0"
+        ... )
+        >>> pkg.get_simple_status()
+        ('outdated', '2.28.0', '2.31.0', '2.31.0')
+
+        Package with no version info:
+
+        >>> pkg = Package(name="missing")
+        >>> pkg.get_simple_status()
+        ('error', 'none', 'error', None)
+
+        Up-to-date package:
+
+        >>> pkg = Package(
+        ...     name="click",
+        ...     current_version="8.1.7",
+        ...     latest_version="8.1.7"
+        ... )
+        >>> pkg.get_simple_status()
+        ('latest', '8.1.7', '8.1.7', None)
+
+        Notes
+        -----
+        Status values:
+        - **error**: Package information unavailable (PyPI fetch failed)
+        - **outdated**: Update available (current < latest)
+        - **latest**: Package is up-to-date
+
+        The compatible_version is None unless it differs from latest_version,
+        indicating a Python compatibility constraint.
+
+        See Also
+        --------
+        to_json : Get detailed JSON representation
+        has_update : Check if update is available
+        """
+        installed = self.current_version or "none"
+        latest = self.latest_version or "error"
+        compatible = self.compatible_version if self.has_compatible_version() else None
+
+        if not self.latest_version:
+            status = "error"
+        elif self.has_update():
+            status = "outdated"
+        else:
+            status = "latest"
+
+        return (status, installed, latest, compatible)
+
+    def to_json(self) -> dict[str, Any]:
+        """Convert package to JSON-serializable dictionary.
+
+        Creates a comprehensive dictionary representation of the package
+        suitable for JSON serialization, API responses, or structured logging.
+        Includes all version information, status, update type, and Python
+        requirements.
+
+        Returns
+        -------
+        dict[str, Any]
+            Dictionary with package information including:
+            - name: Package name
+            - status: "error", "outdated", or "latest"
+            - versions: Dict of current/latest/compatible versions (if available)
+            - update_type: Type of update (if outdated)
+            - python_requirements: Python version requirements per version
+            - error: Error message (if status is "error")
+
+        Examples
+        --------
+        Outdated package:
+
+        >>> pkg = Package(
+        ...     name="requests",
+        ...     current_version="2.28.0",
+        ...     latest_version="2.31.0",
+        ...     compatible_version="2.31.0"
+        ... )
+        >>> import json
+        >>> print(json.dumps(pkg.to_json(), indent=2))
+        {
+          "name": "requests",
+          "status": "outdated",
+          "versions": {
+            "current": "2.28.0",
+            "latest": "2.31.0",
+            "compatible": "2.31.0"
+          },
+          "update_type": "minor"
+        }
+
+        Package with error:
+
+        >>> pkg = Package(name="missing")
+        >>> pkg.to_json()
+        {'name': 'missing', 'status': 'error', 'error': 'Package information unavailable'}
+
+        Package with Python requirements:
+
+        >>> pkg = Package(
+        ...     name="typing-extensions",
+        ...     current_version="4.5.0",
+        ...     latest_version="4.8.0"
+        ... )
+        >>> pkg.metadata = {"requires_python": ">=3.8"}
+        >>> data = pkg.to_json()
+        >>> data["python_requirements"]
+        {'latest': '>=3.8'}
+
+        Notes
+        -----
+        The returned dictionary structure:
+
+        - **name** (always present): Package name
+        - **status** (always present): "error", "outdated", or "latest"
+        - **versions** (if available): Dict with current/latest/compatible
+        - **update_type** (if outdated): "major", "minor", "patch", etc.
+        - **python_requirements** (if available): Requirements per version
+        - **error** (if error status): Error description
+
+        This method is used for JSON output format in the CLI and can be
+        used for API responses or structured logging.
+
+        See Also
+        --------
+        get_simple_status : Get simpler status tuple
+        __str__ : Get human-readable string
+        """
+
+        # Determine status
+        if not self.latest_version:
+            status = "error"
+        elif self.has_update():
+            status = "outdated"
+        else:
+            status = "latest"
+
+        entry = {
+            "name": self.name,
+            "status": status,
+        }
+
+        # Add version information
+        versions = {}
+        if self.current_version:
+            versions["current"] = self.current_version
+        if self.latest_version:
+            versions["latest"] = self.latest_version
+        if self.compatible_version:
+            versions["compatible"] = self.compatible_version
+
+        if versions:
+            entry["versions"] = versions
+
+        # Add update type if available
+        if self.has_update():
+            update_type = get_update_type(self.current_version, self.latest_version)
+            if update_type:
+                entry["update_type"] = update_type
+
+        # Build python_requirements only with non-null values
+        python_reqs = {}
+        installed_req = self.get_version_python_req("current")
+        if installed_req:
+            python_reqs["current"] = installed_req
+
+        latest_req = self.get_requires_python()
+        if latest_req:
+            python_reqs["latest"] = latest_req
+
+        if self.has_compatible_version():
+            compatible_req = self.get_version_python_req("compatible")
+            if compatible_req:
+                python_reqs["compatible"] = compatible_req
+
+        if python_reqs:
+            entry["python_requirements"] = python_reqs
+
+        # Add error field if package fetch failed
+        if not self.latest_version:
+            entry["error"] = "Package information unavailable"
+
+        return entry
+
+    def format_python_requirements(self) -> str:
+        """Format detailed Python requirements for all versions.
+
+        Creates a formatted string showing Python version requirements for
+        the current, latest, and compatible versions. Useful for displaying
+        in tables or reports where users need to see Python compatibility
+        at a glance.
+
+        Returns
+        -------
+        str
+            Formatted string with Python requirements, using Rich markup
+            for colored output. Returns "[dim]-[/dim]" if no requirements
+            are available.
+
+        Examples
+        --------
+        Package with multiple version requirements:
+
+        >>> pkg = Package(
+        ...     name="test",
+        ...     current_version="1.0.0",
+        ...     latest_version="2.0.0",
+        ...     compatible_version="1.5.0"
+        ... )
+        >>> pkg.metadata = {
+        ...     "version_info": {
+        ...         "1.0.0": {"requires_python": ">=3.7"},
+        ...         "2.0.0": {"requires_python": ">=3.10"},
+        ...         "1.5.0": {"requires_python": ">=3.8"}
+        ...     }
+        ... }
+        >>> print(pkg.format_python_requirements())
+        Current: >=3.7
+        Latest: >=3.10
+        Compatible: >=3.8
+
+        Package with only latest requirement:
+
+        >>> pkg = Package(name="test", latest_version="1.0.0")
+        >>> pkg.metadata = {"requires_python": ">=3.8"}
+        >>> print(pkg.format_python_requirements())
+        Latest: >=3.8
+
+        Incompatible latest version:
+
+        >>> pkg = Package(
+        ...     name="test",
+        ...     current_version="1.0.0",
+        ...     latest_version="2.0.0",
+        ...     compatible_version="1.5.0"
+        ... )
+        >>> # Latest requires Python 3.12, but running 3.10
+        >>> result = pkg.format_python_requirements()
+
+        Notes
+        -----
+        The output format uses Rich markup for colored display:
+        - Current version in default color
+        - Latest version in green (if compatible) or red (if incompatible)
+        - Compatible version in cyan
+        - Warnings in yellow for incompatibility
+
+        Requirements are separated by newlines for multi-line table cells.
+        Returns "[dim]-[/dim]" if no Python requirements are available for
+        any version.
+
+        This method is primarily used by the check command for displaying
+        Python compatibility information in the output table.
+
+        See Also
+        --------
+        get_version_python_req : Get Python requirement for specific version
+        get_requires_python : Get Python requirement from metadata
+        is_python_compatible : Check if compatible with Python version
+        """
+        parts = []
+
+        # Current version requirement
+        current_req = self.get_version_python_req("current")
+        if current_req:
+            parts.append(f"Current: {current_req}")
+
+        # Available (latest) version requirement
+        latest_req = self.get_version_python_req("latest") or self.get_requires_python()
+        if latest_req:
+            # Color code based on compatibility
+            if self.is_python_compatible():
+                parts.append(f"Latest: [green]{latest_req}[/green]")
+            else:
+                parts.append(f"Latest: [red]{latest_req}[/red]")
+
+        # Compatible version requirement (if different from latest)
+        if self.has_compatible_version():
+            compatible_req = self.get_version_python_req("compatible")
+            if compatible_req and compatible_req != latest_req:
+                parts.append(f"Compatible: [bright_cyan]{compatible_req}[/bright_cyan]")
+        elif not self.is_python_compatible() and self.latest_version:
+            # No compatible version found
+            parts.append(f"[yellow]⚠ No compatible version for current Python[/yellow]")
+
+        return "\n".join(parts) if parts else "[dim]-[/dim]"

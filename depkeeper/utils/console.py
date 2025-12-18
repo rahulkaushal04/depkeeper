@@ -583,3 +583,68 @@ def get_raw_console() -> Console:
     print_table : High-level table printing
     """
     return _get_console()
+
+
+def colorize_update_type(update_type: str) -> str:
+    """Apply color coding to update type.
+
+    Applies Rich markup color formatting to version update type strings
+    for visual distinction in terminal output. Uses semantic colors to
+    indicate risk level: green for safe patches, yellow for minor updates,
+    and red for major updates or downgrades.
+
+    Parameters
+    ----------
+    update_type : str
+        Update type string (major, minor, patch, new, downgrade, update, etc.).
+
+    Returns
+    -------
+    str
+        Color-coded update type string with Rich markup.
+
+    Examples
+    --------
+    >>> from depkeeper.utils.console import colorize_update_type
+    >>> colorize_update_type("major")
+    '[red]major[/red]'
+    >>> colorize_update_type("minor")
+    '[yellow]minor[/yellow]'
+    >>> colorize_update_type("patch")
+    '[green]patch[/green]'
+
+    Unknown types return unchanged:
+
+    >>> colorize_update_type("unknown")
+    'unknown'
+
+    Notes
+    -----
+    Color mapping:
+    - **green**: patch (low risk, bug fixes only)
+    - **yellow**: minor, update (moderate risk, new features)
+    - **red**: major, downgrade (high risk, breaking changes)
+    - **cyan**: new (new package installation)
+    - **white**: unknown or unrecognized types
+
+    The colors follow semantic versioning risk levels and are designed
+    to help users quickly identify the impact of updates.
+
+    See Also
+    --------
+    depkeeper.utils.version_utils.get_update_type : Determine update type
+    print_table : Display colored tables
+    """
+    color_map = {
+        "major": "red",
+        "minor": "yellow",
+        "patch": "green",
+        "new": "cyan",
+        "downgrade": "red",
+        "update": "yellow",
+    }
+
+    color = color_map.get(update_type.lower())
+    if color:
+        return f"[{color}]{update_type}[/{color}]"
+    return update_type

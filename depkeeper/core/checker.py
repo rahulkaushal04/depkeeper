@@ -475,8 +475,7 @@ class VersionChecker:
         Returns
         -------
         Package
-            Parsed package object with metadata. Available_versions and
-            last_updated are not populated in Phase 1.
+            Parsed package object with metadata.
 
         Notes
         -----
@@ -529,9 +528,7 @@ class VersionChecker:
             current_version=current_version,
             latest_version=latest_version,
             compatible_version=compatible_version,
-            available_versions=[],
             metadata=metadata,
-            last_updated=None,
         )
 
     def _find_max_minor_version(
@@ -923,7 +920,5 @@ class VersionChecker:
             name=name,
             current_version=current_version,
             latest_version=None,
-            available_versions=[],
             metadata={},
-            last_updated=None,
         )

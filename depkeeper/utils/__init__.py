@@ -7,6 +7,7 @@ from depkeeper.utils.filesystem import (
     safe_read_file,
     safe_write_file,
     validate_path,
+    create_timestamped_backup,
 )
 from depkeeper.utils.logger import (
     get_logger,
@@ -23,6 +24,7 @@ from depkeeper.utils.console import (
     print_table,
     print_warning,
     reconfigure_console,
+    colorize_update_type,
 )
 from depkeeper.utils.progress import (
     ProgressTracker,
@@ -32,6 +34,7 @@ from depkeeper.utils.progress import (
 from depkeeper.utils.http import (
     HTTPClient,
 )
+from depkeeper.utils.version_utils import get_update_type
 
 __all__ = [
     # Console
@@ -43,6 +46,7 @@ __all__ = [
     "print_warning",
     "get_raw_console",
     "reconfigure_console",
+    "colorize_update_type",
     # Logging
     "get_logger",
     "setup_logging",
@@ -55,10 +59,13 @@ __all__ = [
     "restore_backup",
     "find_requirements_files",
     "validate_path",
+    "create_timestamped_backup",
     # HTTP
     "HTTPClient",
     # Progress
     "ProgressTracker",
     "create_spinner",
     "create_progress",
+    # Version utilities
+    "get_update_type",
 ]
