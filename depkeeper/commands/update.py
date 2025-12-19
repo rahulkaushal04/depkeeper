@@ -164,7 +164,7 @@ async def _update_async(
 
     # Check versions
     async with VersionChecker(extract_from_ranges=True) as checker:
-        packages = await checker.check_multiple(requirements)
+        packages = await checker.check_packages(requirements)
 
     # Filter packages if requested
     if package_filter:
@@ -260,7 +260,7 @@ def _find_updates(
             continue
 
         # Determine target version (safe upgrade)
-        target_version = pkg.compatible_version or pkg.latest_version
+        target_version = pkg.safe_upgrade_version or pkg.latest_version
 
         if not target_version:
             logger.debug(f"No target version for {pkg.name}")
