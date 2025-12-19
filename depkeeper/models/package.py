@@ -386,15 +386,18 @@ class Package:
         if self.current is None or self.latest is None:
             return False
 
-        # If there's a safe upgrade version, compare against that instead
-        # (safe_upgrade represents the max version we can actually upgrade to)
-        target_version = (
+        # Parse target version (safe_upgrade takes precedence over latest)
+        target_version_str = (
             self.safe_upgrade_version
             if self.safe_upgrade_version
             else self.latest_version
         )
+
         try:
-            return _parse(target_version) > _parse(self.current_version)
+            target_version = _parse(target_version_str)
+            if target_version is None:
+                return False
+            return target_version > self.current
         except (InvalidVersion, TypeError):
             return False
 
@@ -653,7 +656,10 @@ class Package:
         # Also check if it differs from current (upgrade available to safe version)
         if self.current_version and self.safe_upgrade_version != self.current_version:
             try:
-                return _parse(self.safe_upgrade_version) > _parse(self.current_version)
+                safe_upgrade = _parse(self.safe_upgrade_version)
+                if safe_upgrade is None or self.current is None:
+                    return False
+                return safe_upgrade > self.current
             except (InvalidVersion, TypeError):
                 return False
 
@@ -871,7 +877,7 @@ class Package:
             Dictionary with package information including:
             - name: Package name
             - status: "error", "outdated", or "latest"
-            - versions: Dict of current/latest/compatible versions (if available)
+            - versions: Dict of current/latest/safe_upgrade versions (if available)
             - update_type: Type of update (if outdated)
             - python_requirements: Python version requirements per version
             - error: Error message (if status is "error")
@@ -884,7 +890,7 @@ class Package:
         ...     name="requests",
         ...     current_version="2.28.0",
         ...     latest_version="2.31.0",
-        ...     compatible_version="2.31.0"
+        ...     safe_upgrade_version="2.31.0"
         ... )
         >>> import json
         >>> print(json.dumps(pkg.to_json(), indent=2))
@@ -936,17 +942,11 @@ class Package:
         get_simple_status : Get simpler status tuple
         __str__ : Get human-readable string
         """
-
-        # Determine status
+        # Determine status based on version availability and update status
         if not self.latest_version:
             status = "error"
-        # Add update type if available
-        if self.has_update():
-            # Use target version (safe_upgrade if set, otherwise latest) for update type
-            target_version = self.safe_upgrade_version if self.safe_upgrade_version else self.latest_version
-            update_type = get_update_type(self.current_version, target_version)
-            if update_type:
-                entry["update_type"] = update_type
+        elif self.has_update():
+            status = "outdated"
         else:
             status = "latest"
 
@@ -967,9 +967,14 @@ class Package:
         if versions:
             entry["versions"] = versions
 
-        # Add update type if available
-        if self.has_update():
-            update_type = get_update_type(self.current_version, self.latest_version)
+        # Add update type if outdated (use target version for accurate type)
+        if status == "outdated":
+            target_version = (
+                self.safe_upgrade_version
+                if self.safe_upgrade_version
+                else self.latest_version
+            )
+            update_type = get_update_type(self.current_version, target_version)
             if update_type:
                 entry["update_type"] = update_type
 
@@ -992,7 +997,7 @@ class Package:
             entry["python_requirements"] = python_reqs
 
         # Add error field if package fetch failed
-        if not self.latest_version:
+        if status == "error":
             entry["error"] = "Package information unavailable"
 
         return entry
@@ -1142,10 +1147,14 @@ class Package:
         """
         if self.current_version and self.latest_version:
             status = "outdated" if self.has_update() else "up-to-date"
-            return (
+            result = (
                 f"{self.name} {self.current_version} → "
                 f"{self.latest_version} ({status})"
             )
+            # Add safe upgrade info if it differs from latest
+            if self.has_safe_upgrade_version():
+                result += f" [safe: {self.safe_upgrade_version}]"
+            return result
         if self.latest_version:
             return f"{self.name} (latest: {self.latest_version})"
         return self.name
@@ -1178,5 +1187,6 @@ class Package:
         """
         return (
             f"Package(name={self.name!r}, current_version={self.current_version!r}, "
-            f"latest_version={self.latest_version!r}, outdated={self.has_update()})"
+            f"latest_version={self.latest_version!r}, "
+            f"safe_upgrade_version={self.safe_upgrade_version!r}, outdated={self.has_update()})"
         )

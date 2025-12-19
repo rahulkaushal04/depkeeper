@@ -53,6 +53,7 @@ import sys
 import asyncio
 from typing import Any, Dict, List, Optional
 from packaging.specifiers import SpecifierSet
+from packaging.version import parse, InvalidVersion
 
 from depkeeper.exceptions import PyPIError
 from depkeeper.utils.http import HTTPClient
@@ -225,14 +226,14 @@ class VersionChecker:
         if self._owns_http_client and self.http_client is not None:
             await self.http_client.__aexit__(exc_type, exc_val, exc_tb)
 
-    async def check_package(
+    async def get_package_info(
         self,
         name: str,
         current_version: Optional[str] = None,
     ) -> Package:
-        """Check package information from PyPI.
+        """Fetch package information from PyPI.
 
-        Fetches the latest version and metadata for a package from the PyPI
+        Retrieves the latest version and metadata for a package from the PyPI
         JSON API. The request is rate-limited using the configured semaphore
         to prevent overwhelming the API.
 
@@ -266,14 +267,14 @@ class VersionChecker:
         Check if a package has updates:
 
         >>> async with VersionChecker() as checker:
-        ...     pkg = await checker.check_package("requests", "2.28.0")
+        ...     pkg = await checker.get_package_info("requests", "2.28.0")
         ...     if pkg.current_version != pkg.latest_version:
         ...         print(f"Update available: {pkg.latest_version}")
 
         Check latest version without current version:
 
         >>> async with VersionChecker() as checker:
-        ...     pkg = await checker.check_package("flask")
+        ...     pkg = await checker.get_package_info("flask")
         ...     print(f"Latest: {pkg.latest_version}")
 
         Handle missing packages:
@@ -281,7 +282,7 @@ class VersionChecker:
         >>> from depkeeper.exceptions import PyPIError
         >>> async with VersionChecker() as checker:
         ...     try:
-        ...         pkg = await checker.check_package("nonexistent-pkg")
+        ...         pkg = await checker.get_package_info("nonexistent-pkg")
         ...     except PyPIError as e:
         ...         print(f"Package not found: {e.package_name}")
 
@@ -292,19 +293,21 @@ class VersionChecker:
 
         See Also
         --------
-        check_multiple : Check multiple packages concurrently
+        check_packages : Fetch information for multiple packages concurrently
         """
         async with self._semaphore:
-            metadata = await self._fetch_pypi_metadata(name)
-            return self._parse_package_data(name, metadata, current_version)
+            metadata = await self._fetch_pypi_metadata(name=name)
+            return self._parse_package_data(
+                name=name, data=metadata, current_version=current_version
+            )
 
-    async def check_multiple(
+    async def check_packages(
         self,
         requirements: List[Requirement],
     ) -> List[Package]:
-        """Check multiple packages concurrently.
+        """Fetch information for multiple packages concurrently.
 
-        Fetches version information for all packages in parallel, up to the
+        Retrieves version information for all packages in parallel, up to the
         configured concurrency limit. If any package check fails, an error
         Package object is returned for that package instead of raising an
         exception, allowing the operation to continue for other packages.
@@ -333,14 +336,14 @@ class VersionChecker:
         ...         Requirement(name="flask", specs=[(">=", "2.0.0")]),
         ...         Requirement(name="click", specs=[]),
         ...     ]
-        ...     packages = await checker.check_multiple(reqs)
+        ...     packages = await checker.check_packages(reqs)
         ...     for pkg in packages:
         ...         print(f"{pkg.name}: {pkg.latest_version}")
 
         Handle failures gracefully:
 
         >>> async with VersionChecker() as checker:
-        ...     packages = await checker.check_multiple(reqs)
+        ...     packages = await checker.check_packages(reqs)
         ...     for pkg in packages:
         ...         if pkg.latest_version is None:
         ...             print(f"Failed to check {pkg.name}")
@@ -356,23 +359,56 @@ class VersionChecker:
 
         See Also
         --------
-        check_package : Check a single package
+        get_package_info : Fetch information for a single package
         """
-        return await self._check_multiple_concurrent(requirements)
+        # Create concurrent tasks for all package checks
+        check_tasks = [self._create_package_check_task(req) for req in requirements]
 
-    async def _check_multiple_concurrent(
-        self, requirements: List[Requirement]
+        # Gather all results, capturing exceptions for individual failures
+        results = await asyncio.gather(*check_tasks, return_exceptions=True)
+
+        # Process results and handle failures gracefully
+        return self._process_check_results(requirements, results)
+
+    def _create_package_check_task(
+        self, requirement: Requirement
+    ) -> asyncio.Task[Package]:
+        """Create an async task to check a single package.
+
+        Parameters
+        ----------
+        requirement : Requirement
+            Requirement object containing package name and version specs.
+
+        Returns
+        -------
+        asyncio.Task[Package]
+            Async task that will fetch package information.
+
+        Notes
+        -----
+        This is an internal helper method to improve code organization.
+        """
+        current_version = self.extract_current_version(requirement)
+        return asyncio.create_task(
+            self.get_package_info(requirement.name, current_version)
+        )
+
+    def _process_check_results(
+        self, requirements: List[Requirement], results: List[Any]
     ) -> List[Package]:
-        """Check multiple packages concurrently without progress bar.
+        """Process results from concurrent package checks.
 
-        Internal method that handles the actual concurrent checking logic.
-        Creates tasks for all packages and gathers results with exception
-        handling.
+        Handles both successful Package objects and exceptions, converting
+        failures into error Package objects to maintain consistency.
 
         Parameters
         ----------
         requirements : list of Requirement
-            List of requirements to check.
+            Original requirements that were checked.
+        results : list of Any
+            Results from asyncio.gather, may contain Package objects or
+            Exception instances.
 
         Returns
         -------
@@ -381,21 +417,19 @@ class VersionChecker:
 
         Notes
         -----
-        This is an internal method. Use check_multiple() instead.
+        This is an internal helper method to improve code organization.
         """
-        tasks = []
-        for req in requirements:
-            current = self.extract_current_version(req)
-            tasks.append(self.check_package(req.name, current))
-
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
         packages: List[Package] = []
-        for req, result in zip(requirements, results):
+
+        for requirement, result in zip(requirements, results):
             if isinstance(result, Exception):
-                logger.error(f"Failed to check {req.name}: {result}")
-                current = self.extract_current_version(req)
-                packages.append(self.create_error_package(req.name, current))
+                logger.error(
+                    f"Failed to fetch package info for {requirement.name}: {result}"
+                )
+                current_version = self.extract_current_version(requirement)
+                packages.append(
+                    self.create_error_package(requirement.name, current_version)
+                )
             else:
                 packages.append(result)
 
@@ -480,7 +514,7 @@ class VersionChecker:
         Notes
         -----
         This is an internal method. The Package object is returned by
-        check_package() and check_multiple().
+        get_package_info() and check_packages().
 
         Phase 1 includes minimal metadata. Future phases may extract:
         - Complete version history
@@ -501,21 +535,27 @@ class VersionChecker:
             },
         }
 
-        # Find max compatible version within the same major version
-        # This helps avoid breaking changes from major version upgrades
-        # AND ensures compatibility with current Python version
-        compatible_version = None
+        # Find max safe upgrade version that is Python compatible
+        # - If current version exists: stay within same major version to avoid breaking changes
+        # - If no current version: find latest Python-compatible version
+        safe_upgrade_version = None
+        current_py = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+
         if current_version and latest_version:
-            current_py = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-            compatible_version = self._find_max_minor_version(
+            # Current version exists: find max version within same major (minor/patch updates only)
+            safe_upgrade_version = self._find_max_minor_version(
                 data, current_version, latest_version, current_py
             )
-            if compatible_version:
-                # Get metadata for compatible version
-                compatible_metadata = self._get_version_metadata(
-                    data, compatible_version
-                )
-                metadata["compatible_metadata"] = compatible_metadata
+        elif latest_version:
+            # No current version: find latest Python-safe upgrade version (any major)
+            safe_upgrade_version = self._find_safe_upgrade_version(data, current_py)
+
+        if safe_upgrade_version:
+            # Get metadata for safe upgrade version
+            safe_upgrade_metadata = self._get_version_metadata(
+                data, safe_upgrade_version
+            )
+            metadata["safe_upgrade_metadata"] = safe_upgrade_metadata
 
         # Get metadata for current version if available
         if current_version:
@@ -527,7 +567,7 @@ class VersionChecker:
             name=name,
             current_version=current_version,
             latest_version=latest_version,
-            compatible_version=compatible_version,
+            safe_upgrade_version=safe_upgrade_version,
             metadata=metadata,
         )
 
@@ -560,8 +600,6 @@ class VersionChecker:
             Latest version with same major version as current that is compatible
             with the Python version, or None if not found
         """
-        from packaging.version import parse, InvalidVersion
-
         try:
             current_parsed = parse(current_version)
             latest_parsed = parse(latest_version)
@@ -571,19 +609,19 @@ class VersionChecker:
             )
             return None
 
-        # If latest is same major version, check if it's Python compatible
+        # If latest is same major version, check if it's safe to upgrade to
         if hasattr(current_parsed, "release") and hasattr(latest_parsed, "release"):
             if len(current_parsed.release) > 0 and len(latest_parsed.release) > 0:
                 if current_parsed.release[0] == latest_parsed.release[0]:
-                    # Same major version, check Python compatibility
+                    # Same major version, check if it's safe to upgrade to
                     releases = data.get("releases", {})
                     if latest_version in releases:
-                        if self._is_version_compatible(
+                        if self._is_version_safe_to_upgrade(
                             releases[latest_version], python_version
                         ):
                             return latest_version
 
-        # Otherwise, search for max version with same major AND Python compatible
+        # Otherwise, search for max version with same major AND Python safe to upgrade to
         releases = data.get("releases", {})
         if not releases:
             return None
@@ -604,8 +642,10 @@ class VersionChecker:
                         and len(current_parsed.release) > 0
                         and parsed.release[0] == current_parsed.release[0]
                     ):
-                        # Check Python compatibility
-                        if self._is_version_compatible(releases[v], python_version):
+                        # Check if it's safe to upgrade to
+                        if self._is_version_safe_to_upgrade(
+                            releases[v], python_version
+                        ):
                             valid_versions.append((v, parsed))
                 except InvalidVersion:
                     continue
@@ -621,14 +661,14 @@ class VersionChecker:
             logger.debug(f"Error finding max minor version: {e}")
             return None
 
-    def _find_compatible_version(
+    def _find_safe_upgrade_version(
         self, data: Dict[str, Any], python_version: str
     ) -> Optional[str]:
-        """Find the latest stable version compatible with the given Python version.
+        """Find the latest stable safe upgrade version for the given Python version.
 
         Searches through all available versions from newest to oldest to find
-        the most recent version that is compatible with the specified Python version.
-        Prioritizes stable releases over pre-releases.
+        the most recent version that is safe to upgrade to with the specified
+        Python version. Prioritizes stable releases over pre-releases.
 
         Parameters
         ----------
@@ -640,13 +680,11 @@ class VersionChecker:
         Returns
         -------
         str or None
-            Latest compatible stable version, or None if not found
+            Latest safe upgrade version, or None if not found
         """
         releases = data.get("releases", {})
         if not releases:
             return None
-
-        from packaging.version import parse, InvalidVersion
 
         # Get all versions sorted from newest to oldest
         try:
@@ -666,30 +704,33 @@ class VersionChecker:
         except Exception:
             return None
 
-        # First pass: Try to find latest stable (non-prerelease) compatible version
+        # First pass: Try to find latest stable (non-prerelease) safe upgrade version
         for version_str, parsed_version in valid_versions:
-            if parsed_version.is_prerelease:
-                continue  # Skip pre-releases in first pass
+            if (
+                hasattr(parsed_version, "is_prerelease")
+                and parsed_version.is_prerelease
+            ):
+                continue
 
-            if self._is_version_compatible(releases[version_str], python_version):
-                logger.debug(f"Found latest compatible stable version: {version_str}")
+            if self._is_version_safe_to_upgrade(releases[version_str], python_version):
+                logger.debug(f"Found latest safe upgrade stable version: {version_str}")
                 return version_str
 
         # Second pass: If no stable version found, try pre-releases
         for version_str, parsed_version in valid_versions:
-            if self._is_version_compatible(releases[version_str], python_version):
+            if self._is_version_safe_to_upgrade(releases[version_str], python_version):
                 logger.debug(
-                    f"Found latest compatible pre-release version: {version_str}"
+                    f"Found latest safe upgrade pre-release version: {version_str}"
                 )
                 return version_str
 
-        logger.debug(f"No compatible version found for Python {python_version}")
+        logger.debug(f"No safe upgrade version found for Python {python_version}")
         return None
 
-    def _is_version_compatible(
+    def _is_version_safe_to_upgrade(
         self, release_data: List[Dict[str, Any]], python_version: str
     ) -> bool:
-        """Check if a version is compatible with the given Python version.
+        """Check if a version is safe to upgrade to with the given Python version.
 
         Parameters
         ----------
@@ -701,7 +742,7 @@ class VersionChecker:
         Returns
         -------
         bool
-            True if compatible, False otherwise
+            True if safe to upgrade to, False otherwise
         """
         if not release_data:
             return False
@@ -912,7 +953,7 @@ class VersionChecker:
 
         Notes
         -----
-        This is an internal helper method used by check_multiple() to handle
+        This is an internal helper method used by check_packages() to handle
         individual package check failures without stopping the entire batch
         operation.
         """
@@ -920,5 +961,6 @@ class VersionChecker:
             name=name,
             current_version=current_version,
             latest_version=None,
+            safe_upgrade_version=None,
             metadata={},
         )

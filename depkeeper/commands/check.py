@@ -221,7 +221,7 @@ async def _check_packages_with_progress(
         if show_progress:
             return await _check_with_progress(checker, requirements)
         else:
-            return await checker.check_multiple(requirements)
+            return await checker.check_packages(requirements)
 
 
 async def _check_with_progress(
@@ -244,7 +244,7 @@ async def _check_with_progress(
             current_version = checker.extract_current_version(req)
             tracker.update(task, description=f"Checking {req.name}...", completed=i)
 
-            package = await checker.check_package(
+            package = await checker.get_package_info(
                 req.name,
                 current_version=current_version,
             )
@@ -329,22 +329,24 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
         }
 
     # Determine the target version for comparison and display
-    # Compatible version now shows max version within same major version
+    # Safe upgrade version now shows max version within same major version
     target_version = None
-    compatible_display = "[dim]-[/dim]"
+    safe_upgrade_display = "[dim]-[/dim]"
     needs_downgrade = False
 
-    if pkg.has_compatible_version():
-        # There's a max compatible version within same major version
-        target_version = pkg.compatible_version
+    if pkg.has_safe_upgrade_version():
+        # There's a max safe upgrade version within same major version
+        target_version = pkg.safe_upgrade_version
 
-        # Only show compatible version if it's different from current
+        # Only show safe upgrade version if it's different from current
         # (i.e., there's actually an upgrade available)
-        if pkg.current_version and pkg.compatible_version != pkg.current_version:
-            compatible_display = f"[bright_cyan]{pkg.compatible_version}[/bright_cyan]"
+        if pkg.current_version and pkg.safe_upgrade_version != pkg.current_version:
+            safe_upgrade_display = (
+                f"[bright_cyan]{pkg.safe_upgrade_version}[/bright_cyan]"
+            )
         else:
-            # Current == compatible, so no upgrade available - show as "-"
-            compatible_display = "[dim]-[/dim]"
+            # Current == safe upgrade, so no upgrade available - show as "-"
+            safe_upgrade_display = "[dim]-[/dim]"
 
         # Check if current version is newer than max compatible (needs downgrade)
         if pkg.current_version:
@@ -355,9 +357,13 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
             except Exception:
                 pass
     else:
-        # No compatible version found within same major, use latest
+        # No safe upgrade version found within same major, use latest
         target_version = pkg.latest_version
-        compatible_display = f"[green]{pkg.latest_version}[/green]"
+        # Only show latest as safe upgrade if it's different from current
+        if pkg.current_version and pkg.latest_version != pkg.current_version:
+            compatible_display = f"[green]{pkg.latest_version}[/green]"
+        else:
+            compatible_display = "[dim]-[/dim]"
 
     # Check if update is available based on target version
     has_update = False
@@ -393,7 +399,7 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
             "Package": pkg.name,
             "Current": pkg.current_version or "[dim]-[/dim]",
             "Latest": pkg.latest_version,
-            "Safe Upgrade": compatible_display,
+            "Safe Upgrade": safe_upgrade_display,
             "Update": colored_type,
             "Python Requires": python_reqs,
         }
@@ -404,7 +410,7 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
         "Package": pkg.name,
         "Current": pkg.current_version or "[dim]-[/dim]",
         "Latest": pkg.latest_version or "[dim]-[/dim]",
-        "Safe Upgrade": compatible_display,
+        "Safe Upgrade": safe_upgrade_display,
         "Update": "[dim]-[/dim]",
         "Python Requires": python_reqs,
     }
@@ -417,12 +423,12 @@ def _display_simple(packages: List[Package]) -> None:
     console = get_raw_console()
 
     for pkg in packages:
-        status, installed, latest, compatible = pkg.get_simple_status(pkg)
+        status, installed, latest, safe_upgrade = pkg.get_simple_status(pkg)
 
         # Show status with versions
-        if compatible and compatible != latest:
+        if safe_upgrade and safe_upgrade != latest:
             console.print(
-                f"[{status}] {pkg.name:20} {installed:10} → {latest:10} (safe: {compatible})"
+                f"[{status}] {pkg.name:20} {installed:10} → {latest:10} (safe: {safe_upgrade})"
             )
         else:
             console.print(f"[{status}] {pkg.name:20} {installed:10} → {latest:10}")
@@ -436,8 +442,8 @@ def _display_simple(packages: List[Package]) -> None:
                 req_parts.append(f"current: {current_req}")
             if latest_req:
                 req_parts.append(f"latest: {latest_req}")
-            if pkg.has_compatible_version():
-                safe_req = pkg.get_version_python_req("compatible")
+            if pkg.has_safe_upgrade_version():
+                safe_req = pkg.get_version_python_req("safe_upgrade")
                 if safe_req:
                     req_parts.append(f"safe: {safe_req}")
             if req_parts:
