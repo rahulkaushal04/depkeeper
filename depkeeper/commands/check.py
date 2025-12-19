@@ -12,11 +12,13 @@ import click
 import asyncio
 from pathlib import Path
 from typing import List, Dict
+from packaging.version import parse
 
 from depkeeper.models.package import Package
 from depkeeper.utils.logger import get_logger
 from depkeeper.exceptions import DepKeeperError
 from depkeeper.core.checker import VersionChecker
+from depkeeper.models.requirement import Requirement
 from depkeeper.utils.progress import ProgressTracker
 from depkeeper.core.parser import RequirementsParser
 from depkeeper.utils.version_utils import get_update_type
@@ -158,9 +160,8 @@ async def _check_async(
     print_info(f"Found {len(requirements)} package(s)")
 
     # Check versions with progress tracking
-    packages = await _check_packages_with_progress(
-        requirements, ctx.verbose > 0, extract_from_ranges
-    )
+    async with VersionChecker(extract_from_ranges=extract_from_ranges) as checker:
+        packages = await _check_with_progress(checker, requirements)
 
     # Filter outdated if requested
     if outdated_only:
@@ -196,37 +197,9 @@ async def _check_async(
     return packages_needing_action > 0
 
 
-async def _check_packages_with_progress(
-    requirements: list,
-    show_progress: bool,
-    extract_from_ranges: bool,
-) -> List[Package]:
-    """Check packages with optional progress display.
-
-    Parameters
-    ----------
-    requirements : list
-        List of requirements to check.
-    show_progress : bool
-        Whether to show progress bar.
-    extract_from_ranges : bool
-        Whether to extract baseline versions from range constraints.
-
-    Returns
-    -------
-    List[Package]
-        List of checked packages.
-    """
-    async with VersionChecker(extract_from_ranges=extract_from_ranges) as checker:
-        if show_progress:
-            return await _check_with_progress(checker, requirements)
-        else:
-            return await checker.check_packages(requirements)
-
-
 async def _check_with_progress(
     checker: VersionChecker,
-    requirements: list,
+    requirements: List[Requirement],
 ) -> List[Package]:
     """Check packages with progress tracking."""
     tracker = ProgressTracker(transient=False)
@@ -351,8 +324,6 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
         # Check if current version is newer than max compatible (needs downgrade)
         if pkg.current_version:
             try:
-                from packaging.version import parse
-
                 needs_downgrade = parse(pkg.current_version) > parse(target_version)
             except Exception:
                 pass
@@ -361,16 +332,14 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
         target_version = pkg.latest_version
         # Only show latest as safe upgrade if it's different from current
         if pkg.current_version and pkg.latest_version != pkg.current_version:
-            compatible_display = f"[green]{pkg.latest_version}[/green]"
+            safe_upgrade_display = f"[green]{pkg.latest_version}[/green]"
         else:
-            compatible_display = "[dim]-[/dim]"
+            safe_upgrade_display = "[dim]-[/dim]"
 
     # Check if update is available based on target version
     has_update = False
     if target_version and pkg.current_version:
         try:
-            from packaging.version import parse
-
             has_update = parse(target_version) > parse(pkg.current_version)
         except Exception:
             has_update = target_version != pkg.current_version
@@ -384,7 +353,7 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
             "Package": pkg.name,
             "Current": pkg.current_version or "[dim]-[/dim]",
             "Latest": pkg.latest_version,
-            "Safe Upgrade": compatible_display,
+            "Safe Upgrade": safe_upgrade_display,
             "Update": "[red]downgrade[/red]",
             "Python Requires": python_reqs,
         }

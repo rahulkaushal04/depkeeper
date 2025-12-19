@@ -1006,7 +1006,7 @@ class Package:
         """Format detailed Python requirements for all versions.
 
         Creates a formatted string showing Python version requirements for
-        the current, latest, and compatible versions. Useful for displaying
+        the current, latest, and safe upgrade versions. Useful for displaying
         in tables or reports where users need to see Python compatibility
         at a glance.
 
@@ -1094,15 +1094,20 @@ class Package:
             else:
                 parts.append(f"Latest: [red]{latest_req}[/red]")
 
-        # Safe upgrade version requirement (if different from latest)
-        if self.has_safe_upgrade_version():
+        # Safe upgrade version requirement (show if update available or action needed)
+        if self.has_update() or self.needs_action():
             safe_upgrade_req = self.get_version_python_req("safe_upgrade")
-            if safe_upgrade_req and safe_upgrade_req != latest_req:
+            if safe_upgrade_req:
                 parts.append(
                     f"Safe Upgrade: [bright_cyan]{safe_upgrade_req}[/bright_cyan]"
                 )
-        elif not self.is_python_compatible() and self.latest_version:
-            # No safe upgrade version found
+
+        # Warn if latest is incompatible and no safe upgrade exists
+        if (
+            not self.is_python_compatible()
+            and self.latest_version
+            and not self.has_safe_upgrade_version()
+        ):
             parts.append(
                 f"[yellow]⚠ No safe upgrade version for current Python[/yellow]"
             )
