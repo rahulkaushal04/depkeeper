@@ -867,7 +867,7 @@ def _display_simple(packages: List[Package]) -> None:
 
     Parse output with grep:
 
-        $ depkeeper check --format simple | grep '\[↑\]'
+        $ depkeeper check --format simple | grep '[↑]'
         [↑] flask              2.0.0      → 3.0.0 (safe: 2.3.5)
 
     Notes
