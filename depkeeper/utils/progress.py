@@ -472,8 +472,11 @@ class ProgressTracker:
         >>> task = tracker.add_task("Processing files", total=100)
         >>> tracker.update(task, advance=1)
         """
-        if self._progress is None:
-            raise RuntimeError("Progress tracker not started. Call start() first.")
+        if self.disable or self._progress is None:
+            dummy_id = TaskID(0)
+            if task_id:
+                self._tasks[task_id] = dummy_id
+            return dummy_id
 
         rich_task_id = self._progress.add_task(description, total=total, **kwargs)
 

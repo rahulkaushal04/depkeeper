@@ -257,11 +257,17 @@ class RequirementsParser:
             file_path=Path(file_path), parent_directory=_parent_directory_path
         )
 
+        self.logger.debug(
+            f"Parsing file: {resolved_path}"
+            + (" (constraint file)" if is_constraint_file else "")
+        )
+
         # Check for circular dependencies in include directives
         if resolved_path in self._included_files_stack:
             cycle_path = " -> ".join(
                 str(p) for p in self._included_files_stack + [resolved_path]
             )
+            self.logger.error(f"Circular dependency detected in includes: {cycle_path}")
             raise ParseError(
                 f"Circular dependency detected: {cycle_path}",
                 file_path=str(resolved_path),
@@ -273,12 +279,16 @@ class RequirementsParser:
         # Track include stack for circular dependency detection
         self._included_files_stack.append(resolved_path)
         try:
-            return self.parse_string(
+            result = self.parse_string(
                 file_content,
                 source_file_path=str(resolved_path),
                 is_constraint_file=is_constraint_file,
                 _current_directory_path=resolved_path,
             )
+            self.logger.info(
+                f"Parsed {len(result)} requirements from {resolved_path.name}"
+            )
+            return result
         finally:
             self._included_files_stack.pop()
 
@@ -364,6 +374,11 @@ class RequirementsParser:
         parse_line : Parse a single requirement line
         """
         parsed_requirements: List[Requirement] = []
+        total_lines = len(requirements_content.splitlines())
+        self.logger.debug(
+            f"Parsing {total_lines} lines"
+            + (f" from {source_file_path}" if source_file_path else "")
+        )
 
         for line_number, line_text in enumerate(
             requirements_content.splitlines(), start=1
@@ -380,14 +395,21 @@ class RequirementsParser:
 
             # Handle include directive result (returns list of requirements)
             if isinstance(parse_result, list):
+                self.logger.debug(
+                    f"Included {len(parse_result)} requirements from directive"
+                )
                 parsed_requirements.extend(parse_result)
             elif isinstance(parse_result, Requirement):
                 if is_constraint_file:
                     # Store constraints for later application to requirements
                     self._constraint_requirements[parse_result.name] = parse_result
+                    self.logger.debug(
+                        f"Stored constraint: {parse_result.name} {parse_result.specs}"
+                    )
                 else:
                     parsed_requirements.append(parse_result)
 
+        self.logger.debug(f"Completed parsing: {len(parsed_requirements)} requirements")
         return parsed_requirements
 
     # ----------------------------------------------------------------------

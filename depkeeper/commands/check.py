@@ -315,8 +315,9 @@ async def _check_async(
     ----------
     ctx : DepKeeperContext
         CLI context object containing global configuration such as verbosity
-        level, color preferences, and config file path. Currently used for
-        logging context but available for future configuration needs.
+        level, color preferences, and config file path. The verbosity level
+        affects message output: informational messages and progress bars are
+        shown for table format or when verbose > 0.
     file : Path
         Absolute or relative path to the requirements.txt file to check.
         Must exist and be readable (enforced by Click validation).
@@ -369,8 +370,11 @@ async def _check_async(
     The function uses async context managers for proper resource cleanup,
     particularly for the VersionChecker which manages HTTP connections.
 
-    Progress tracking is displayed to the user during the check process,
-    showing real-time status of which packages are being checked.
+    Progress tracking and informational messages are displayed based on
+    output format and verbosity:
+    - **table format**: Always shows progress and messages
+    - **json/simple format**: Clean output by default, but shows progress
+      and messages when verbose mode is enabled (ctx.verbose > 0)
 
     Empty requirements files result in a warning but are not treated as
     errors. The function returns False to indicate no updates available.
@@ -381,7 +385,11 @@ async def _check_async(
     _check_with_progress : Async package checking with progress tracking
     depkeeper.core.checker.VersionChecker : PyPI version checking
     """
-    print_info(f"Checking {file}...")
+    # Show messages and progress for table format OR when verbose mode is enabled
+    show_messages = format == "table" or ctx.verbose > 0
+
+    if show_messages:
+        print_info(f"Checking {file}...")
 
     # Parse requirements file
     parser = RequirementsParser()
@@ -392,14 +400,16 @@ async def _check_async(
 
     # Early return if no requirements found
     if not requirements:
-        print_warning("No packages found in requirements file")
+        if show_messages:
+            print_warning("No packages found in requirements file")
         return False
 
-    print_info(f"Found {len(requirements)} package(s)")
+    if show_messages:
+        print_info(f"Found {len(requirements)} package(s)")
 
     # Check versions with progress tracking
     async with VersionChecker(extract_from_ranges=extract_from_ranges) as checker:
-        packages = await _check_with_progress(checker, requirements)
+        packages = await _check_with_progress(ctx, checker, requirements, format)
 
     # Filter outdated if requested
     if outdated_only:
@@ -407,10 +417,13 @@ async def _check_async(
 
     # Display results
     if not packages:
-        if outdated_only:
-            print_success("All packages are up to date!")
-        else:
-            print_warning("No packages to display")
+        if show_messages:
+            msg = (
+                "All packages are up to date!"
+                if outdated_only
+                else "No packages to display"
+            )
+            (print_success if outdated_only else print_warning)(msg)
         return False
 
     # Count packages needing action (updates or incompatibilities)
@@ -423,21 +436,25 @@ async def _check_async(
         _display_table(packages)
     elif format == "simple":
         _display_simple(packages)
-    elif format == "json":
+    else:  # json
         _display_json(packages)
 
-    # Summary
-    if packages_needing_action > 0:
-        print_warning(f"\n{packages_needing_action} package(s) have updates available")
-    else:
-        print_success("\nAll packages are up to date!")
+    if show_messages:
+        if packages_needing_action > 0:
+            print_warning(
+                f"\n{packages_needing_action} package(s) have updates available"
+            )
+        else:
+            print_success("\nAll packages are up to date!")
 
     return packages_needing_action > 0
 
 
 async def _check_with_progress(
+    ctx: DepKeeperContext,
     checker: VersionChecker,
     requirements: List[Requirement],
+    format: str = "table",
 ) -> List[Package]:
     """Check package versions with real-time progress tracking and error resilience.
 
@@ -453,6 +470,9 @@ async def _check_with_progress(
 
     Parameters
     ----------
+    ctx : DepKeeperContext
+        CLI context object containing verbosity level. Used to determine
+        whether to show progress bars for json/simple output formats.
     checker : VersionChecker
         Configured VersionChecker instance with active async HTTP session.
         Should be created within an async context manager to ensure proper
@@ -460,6 +480,10 @@ async def _check_with_progress(
     requirements : List[Requirement]
         List of parsed Requirement objects from the requirements file. Each
         contains package name, version specifiers, extras, markers, etc.
+    format : str, optional
+        Output format ("table", "simple", or "json"). Affects progress bar
+        visibility: table format always shows progress, json/simple formats
+        only show progress when verbose mode is enabled. Default is "table".
 
     Returns
     -------
@@ -473,9 +497,10 @@ async def _check_with_progress(
     --------
     Internal usage within async context:
 
+        >>> ctx = DepKeeperContext()
         >>> async with VersionChecker() as checker:
         ...     requirements = parser.parse_file("requirements.txt")
-        ...     packages = await _check_with_progress(checker, requirements)
+        ...     packages = await _check_with_progress(ctx, checker, requirements)
         ...     for pkg in packages:
         ...         if pkg.has_error:
         ...             print(f"Failed to check {pkg.name}")
@@ -487,6 +512,11 @@ async def _check_with_progress(
     The function uses a ProgressTracker with transient=False to ensure the
     progress bar remains visible after completion, providing a persistent
     record of the operation in the terminal.
+
+    Progress bar visibility is controlled by output format and verbosity:
+    - **table format**: Always displays progress bar
+    - **json/simple formats**: Progress bar disabled by default for clean
+      output, but enabled when verbose mode is active (ctx.verbose > 0)
 
     Progress updates occur before each package check, showing the current
     package being processed. The final progress message shows the total
@@ -507,7 +537,9 @@ async def _check_with_progress(
     depkeeper.utils.progress.ProgressTracker : Progress bar implementation
     depkeeper.models.package.Package : Package data model
     """
-    tracker = ProgressTracker(transient=False)
+    # Disable progress for JSON/simple formats unless verbose mode is enabled
+    disable_progress = format in ["json", "simple"] and ctx.verbose == 0
+    tracker = ProgressTracker(transient=False, disable=disable_progress)
     tracker.start()
     task = tracker.add_task(
         "Checking packages...",
@@ -902,7 +934,7 @@ def _display_simple(packages: List[Package]) -> None:
     console = get_raw_console()
 
     for pkg in packages:
-        status, installed, latest, safe_upgrade = pkg.get_simple_status(pkg)
+        status, installed, latest, safe_upgrade = pkg.get_simple_status()
 
         # Show status with versions
         if safe_upgrade and safe_upgrade != latest:
