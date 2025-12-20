@@ -74,6 +74,7 @@ def get_update_type(
     str
         Update type classification:
         - 'new': No current version (new installation)
+        - 'same': Both versions are identical (no update needed)
         - 'downgrade': Target is older than current
         - 'major': Major version change (X.0.0)
         - 'minor': Minor version change (0.X.0)
@@ -98,6 +99,8 @@ def get_update_type(
     'new'
     >>> get_update_type("2.0.0", "1.0.0")
     'downgrade'
+    >>> get_update_type("1.0.0", "1.0.0")
+    'same'
     >>> get_update_type("invalid", "1.0.0")
     'unknown'
     >>> get_update_type("1.0.0", None)
@@ -123,6 +126,10 @@ def get_update_type(
     packaging.version.parse : Version string parser
     packaging.version.Version : Version comparison class
     """
+    # Both versions are None = unknown
+    if current_version is None and target_version is None:
+        return "unknown"
+
     # No current version = new installation
     if current_version is None:
         return "new"
@@ -135,6 +142,10 @@ def get_update_type(
         current = parse(current_version)
         target = parse(target_version)
 
+        # Check if versions are the same
+        if target == current:
+            return "same"
+
         # Check for downgrade
         if target < current:
             return "downgrade"
@@ -144,21 +155,30 @@ def get_update_type(
             current_parts = current.release
             target_parts = target.release
 
-            # Need at least major version to compare
-            if len(current_parts) >= 1 and len(target_parts) >= 1:
-                # Major version change
-                if current_parts[0] != target_parts[0]:
-                    return "major"
+            # Normalize to 3-part versions by padding with zeros
+            current_normalized = list(current_parts) + [0] * (3 - len(current_parts))
+            target_normalized = list(target_parts) + [0] * (3 - len(target_parts))
 
-                # Minor version change
-                if len(current_parts) >= 2 and len(target_parts) >= 2:
-                    if current_parts[1] != target_parts[1]:
-                        return "minor"
+            # Extract major, minor, patch (with defaults of 0)
+            current_major = current_normalized[0] if len(current_normalized) > 0 else 0
+            current_minor = current_normalized[1] if len(current_normalized) > 1 else 0
+            current_patch = current_normalized[2] if len(current_normalized) > 2 else 0
 
-                # Patch version change
-                if len(current_parts) >= 3 and len(target_parts) >= 3:
-                    if current_parts[2] != target_parts[2]:
-                        return "patch"
+            target_major = target_normalized[0] if len(target_normalized) > 0 else 0
+            target_minor = target_normalized[1] if len(target_normalized) > 1 else 0
+            target_patch = target_normalized[2] if len(target_normalized) > 2 else 0
+
+            # Major version change
+            if current_major != target_major:
+                return "major"
+
+            # Minor version change
+            if current_minor != target_minor:
+                return "minor"
+
+            # Patch version change (or pre-release/post-release change at same base version)
+            if current_patch != target_patch or current_parts == target_parts:
+                return "patch"
 
         # Versions are different but can't classify type
         return "update"
