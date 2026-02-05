@@ -1,0 +1,4 @@
+# Requirements with hashes
+requests==2.28.0 --hash=sha256:abc123def456
+django==4.0 --hash=sha256:111111 --hash=sha256:222222
+flask==2.0.1 --hash=sha256:333333
