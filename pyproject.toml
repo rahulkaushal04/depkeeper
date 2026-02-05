@@ -13,7 +13,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "depkeeper"
-version = "0.1.0.dev0"
+version = "0.1.0.dev1"
 description = "Modern Python dependency management for requirements.txt files"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -49,11 +49,10 @@ classifiers = [
 
 # Library dependencies (minimum versions only)
 dependencies = [
-    "click>=8.1.0",
-    "packaging>=23.0",
+    "click>=8.1.8",
+    "packaging>=23.2",
     "httpx>=0.24.0",
-    "rich>=13.0.0",
-    "pydantic>=2.0.0",
+    "rich>=13.9.4",
 ]
 
 
@@ -69,7 +68,6 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "pytest-mock>=3.11.0",
     "pytest-httpx>=0.22.0",
-    "ruff>=0.1.0",
     "mypy>=1.5.0",
     "types-setuptools",
     "pre-commit>=3.4.0",
@@ -82,9 +80,9 @@ test = [
     "pytest-httpx>=0.22.0",
 ]
 docs = [
-    "mkdocs>=1.5.0",
-    "mkdocs-material>=9.4.0",
-    "mkdocstrings[python]>=0.23.0",
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.7.1",
+    "mkdocstrings[python]>=0.26.1",
 ]
 
 
@@ -117,39 +115,6 @@ packages = ["depkeeper"]
 
 [tool.setuptools.package-data]
 depkeeper = ["py.typed"]
-
-
-# ============================================================
-# Ruff (formatter + linter)
-# ============================================================
-
-[tool.ruff]
-line-length = 100
-target-version = "py38"
-
-[tool.ruff.lint]
-select = [
-    "E","W","F","I","N","UP","B","C4","DTZ","T10","EM","ISC",
-    "ICN","G","PIE","T20","PT","Q","RSE","RET","SIM","TID",
-    "TCH","ARG","PTH","ERA","PL","TRY","RUF"
-]
-ignore = [
-    "E501",      # line too long (handled by formatter)
-    "ERA001",    # commented-out code
-    "PLC0415",   # import at top-level (allow lazy imports)
-    "PLR0913",   # too many arguments
-    "TRY003",    # avoid long exception messages
-]
-
-[tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = [
-    "PLR2004",   # magic numbers in tests
-    "S101",      # assert usage
-    "ARG",       # unused args OK in fixtures
-]
-
-[tool.ruff.lint.isort]
-known-first-party = ["depkeeper"]
 
 
 # ============================================================
@@ -201,6 +166,7 @@ markers = [
     "integration: integration tests",
     "e2e: end-to-end tests",
     "network: tests requiring network",
+    "asyncio: asyncio tests",
 ]
 
 asyncio_mode = "auto"

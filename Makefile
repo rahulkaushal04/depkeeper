@@ -31,12 +31,10 @@ help:
 	@echo "  install          Install package in production mode"
 	@echo "  install-dev      Install package with dev dependencies"
 	@echo "  test             Run tests with coverage"
-	@echo "  lint             Run ruff lint checks"
-	@echo "  format           Format code with ruff"
 	@echo "  typecheck        Run mypy static type checks"
 	@echo "  docs             Build mkdocs documentation"
 	@echo "  clean            Remove cache and build artifacts"
-	@echo "  all              Run format, lint, typecheck, and test"
+	@echo "  all              Run typecheck and test"
 	@echo ""
 
 
@@ -59,17 +57,6 @@ install-dev:
 # ==========================================================
 # Code Quality
 # ==========================================================
-
-.PHONY: lint
-lint:
-	ruff check depkeeper tests
-	@echo "$(GREEN)✓ Lint checks passed$(RESET)"
-
-.PHONY: format
-format:
-	ruff format depkeeper tests
-	ruff check --fix depkeeper tests
-	@echo "$(GREEN)✓ Formatted source code$(RESET)"
 
 .PHONY: typecheck
 typecheck:
@@ -107,7 +94,7 @@ docs:
 .PHONY: clean
 clean:
 	rm -rf build/ dist/ *.egg-info
-	rm -rf .pytest_cache/ .mypy_cache/ .ruff_cache/
+	rm -rf .pytest_cache/ .mypy_cache/
 	rm -rf htmlcov/ .coverage coverage.xml
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
@@ -120,5 +107,5 @@ clean:
 # ==========================================================
 
 .PHONY: all
-all: format lint typecheck test
+all: typecheck test
 	@echo "$(GREEN)✓ All checks passed successfully!$(RESET)"

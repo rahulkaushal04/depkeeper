@@ -114,7 +114,6 @@ This project is licensed under the **Apache-2.0 License** — see the [LICENSE](
 
 ## ❤️ Support
 
-- 📬 Email: [support@depkeeper.dev](mailto:support@depkeeper.dev)
 - 💬 GitHub Discussions: [https://github.com/rahulkaushal04/depkeeper/discussions](https://github.com/rahulkaushal04/depkeeper/discussions)
 - 🐞 Issues: [https://github.com/rahulkaushal04/depkeeper/issues](https://github.com/rahulkaushal04/depkeeper/issues)
 

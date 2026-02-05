@@ -50,7 +50,6 @@ from depkeeper import Client
 ### Code Quality
 
 - [ ] My code follows depkeeper’s style guidelines
-- [ ] I ran `ruff check` and `ruff format`
 - [ ] I ran `mypy` and resolved type issues
 
 ### Testing
