@@ -42,15 +42,13 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, Dict, List, Optional
-
-from packaging.version import InvalidVersion, Version, parse
-from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, parse
 
 from depkeeper.exceptions import PyPIError
-from depkeeper.core.data_store import PyPIDataStore, PyPIPackageData
 from depkeeper.models.package import Package
-from depkeeper.models.requirement import Requirement
 from depkeeper.utils.logger import get_logger
+from depkeeper.models.requirement import Requirement
+from depkeeper.core.data_store import PyPIDataStore, PyPIPackageData
 
 logger = get_logger("version_checker")
 
