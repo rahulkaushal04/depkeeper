@@ -48,8 +48,6 @@ def _should_use_color() -> bool:
     """Return True if colored output should be enabled."""
     if os.environ.get("NO_COLOR"):
         return False
-    if os.environ.get("CI"):
-        return False
     try:
         return sys.stdout.isatty()
     except (AttributeError, OSError):
