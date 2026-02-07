@@ -37,7 +37,7 @@ import json
 import click
 import asyncio
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from depkeeper.models import Package
 from depkeeper.exceptions import DepKeeperError, ParseError
@@ -374,7 +374,7 @@ def _display_table(packages: List[Package]) -> None:
     """
     data = [_create_table_row(pkg) for pkg in packages]
 
-    column_styles = {
+    column_styles: Dict[str, Dict[str, Any]] = {
         "Status": {"justify": "center", "no_wrap": True, "width": 10},
         "Package": {"style": "bold cyan", "no_wrap": True},
         "Current": {"justify": "center", "style": "dim"},

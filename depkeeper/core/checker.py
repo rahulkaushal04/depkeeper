@@ -1,17 +1,18 @@
-"""Version checking and package recommendation for depkeeper.
+"""Version checking with strict major version boundary enforcement.
 
 This module provides the primary interface for determining which version of
-a package should be recommended for upgrade.  All PyPI metadata is sourced
-through :class:`~depkeeper.core.data_store.PyPIDataStore` to ensure that
-every ``/pypi/{pkg}/json`` call is made at most once per process.
+a package should be recommended for upgrade, with **strict enforcement** of
+major version boundaries to prevent breaking changes.
+
+All PyPI metadata is sourced through :class:`~depkeeper.core.data_store.PyPIDataStore`
+to ensure that every ``/pypi/{pkg}/json`` call is made at most once per process.
 
 The recommendation algorithm prioritises:
 
-1. **Python compatibility** — versions that do not support the running
+1. **Major-version stability** — recommendations **never** cross major version
+   boundaries. If current is 2.x.x, recommended will always be 2.y.z (never 3.0.0).
+2. **Python compatibility** — versions that do not support the running
    interpreter are skipped.
-2. **Major-version stability** — when a current version is known, the
-   recommended version stays within the same major release unless no
-   compatible version exists in that major.
 3. **Stable releases** — pre-releases are never recommended.
 
 Typical usage::
@@ -41,34 +42,34 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, Dict, List, Optional
-
-from packaging.version import InvalidVersion, Version, parse
-from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, parse
 
 from depkeeper.exceptions import PyPIError
-from depkeeper.core.data_store import PyPIDataStore, PyPIPackageData
 from depkeeper.models.package import Package
-from depkeeper.models.requirement import Requirement
 from depkeeper.utils.logger import get_logger
+from depkeeper.models.requirement import Requirement
+from depkeeper.core.data_store import PyPIDataStore, PyPIPackageData
 
 logger = get_logger("version_checker")
 
 
 class VersionChecker:
-    """Async package version checker backed by :class:`PyPIDataStore`.
+    """Async package version checker with strict major version boundaries.
 
     Fetches metadata from PyPI (via the shared data store) and determines
-    the highest Python-compatible version for each package, respecting
-    major-version boundaries when a current version is known.
+    the highest Python-compatible version for each package, **strictly
+    respecting major-version boundaries** when a current version is known.
+    Unlike the base implementation, this checker will never recommend
+    crossing a major version boundary, even if a newer major exists.
 
     All network I/O is delegated to *data_store*, which guarantees that
     each unique package is fetched at most once.
 
     Args:
-        data_store: Shared PyPI metadata cache.  **Required**.
+        data_store: Shared PyPI metadata cache. **Required**.
         infer_version_from_constraints: When ``True`` and a requirement has
             no pinned version (``==``), attempt to infer a "current" version
-            from range constraints like ``>=2.0``.  Defaults to ``True``.
+            from range constraints like ``>=2.0``. Defaults to ``True``.
 
     Raises:
         TypeError: If *data_store* is ``None``.
@@ -80,7 +81,7 @@ class VersionChecker:
         ...     checker = VersionChecker(data_store=store)
         ...     pkg     = await checker.get_package_info("flask", current_version="2.0.0")
         ...     print(pkg.recommended_version)
-        '2.3.3'
+        '2.3.3'  # Never 3.x.x, even if 3.0.0 is available
     """
 
     def __init__(
@@ -107,15 +108,23 @@ class VersionChecker:
     ) -> Package:
         """Fetch metadata and compute a recommended version for *name*.
 
+        **CRITICAL**: Recommendations **NEVER** cross major version boundaries.
+        If *current_version* is ``2.x.x``, the recommended version will be
+        ``2.y.z`` (never ``3.0.0``), even if ``3.0.0`` is the latest available
+        version on PyPI.
+
         Calls :meth:`PyPIDataStore.get_package_data` (which may trigger a
-        network fetch or return cached data), then applies the
-        recommendation algorithm to choose the best upgrade target.
+        network fetch or return cached data), then applies the strict
+        major-boundary recommendation algorithm to choose the best upgrade
+        target.
 
         Args:
             name: Package name (any casing / separator style).
             current_version: The version currently installed (if known).
                 When provided, the recommendation stays within the same
-                major version unless no compatible version exists.
+                major version. If no compatible version exists in that
+                major, stays on current version rather than crossing
+                the boundary.
 
         Returns:
             A :class:`Package` with ``latest_version``,
@@ -131,7 +140,7 @@ class VersionChecker:
             >>> pkg.latest_version
             '2.31.0'
             >>> pkg.recommended_version
-            '2.31.0'
+            '2.31.0'  # Stays in major version 2
         """
         try:
             pkg_data = await self.data_store.get_package_data(name)
@@ -182,7 +191,7 @@ class VersionChecker:
            return that version (pinned).
         2. If :attr:`infer_version_from_constraints` is ``False``, stop here.
         3. Otherwise, scan for the first ``>=``, ``>``, or ``~=`` specifier
-           and return its version.  This treats ``>=2.0`` as "currently on
+           and return its version. This treats ``>=2.0`` as "currently on
            2.0" for major-version boundary purposes.
 
         Args:
@@ -327,12 +336,21 @@ class VersionChecker:
     ) -> Package:
         """Construct a :class:`Package` from cached PyPI metadata.
 
-        Applies the recommendation algorithm:
+        Applies the **strict major-boundary** recommendation algorithm:
 
-        1. If *current_version* is provided and parseable, find the highest
-           Python-compatible version within the same major release.
-        2. Otherwise, find the highest Python-compatible stable version
-           across all majors.
+        1. If *current_version* is provided and parseable, determine its
+           major version number.
+        2. Find **all** Python-compatible versions within that same major
+           (using :meth:`PyPIPackageData.get_python_compatible_versions`).
+        3. Return the **highest** version from that filtered list as the
+           recommendation.
+        4. If no compatible version exists in the current major, **stay on
+           current version** rather than suggesting a major upgrade.
+        5. If no *current_version* is provided, find the highest
+           Python-compatible stable version across all majors.
+
+        This ensures that recommendations **never** cross major version
+        boundaries, preventing inadvertent breaking changes.
 
         Args:
             pkg_data: Cached package metadata from the data store.
@@ -340,6 +358,13 @@ class VersionChecker:
 
         Returns:
             A fully populated :class:`Package`.
+
+        Example (internal)::
+
+            >>> # Current is 2.0.0, latest is 3.1.0
+            >>> pkg = self._build_package_from_data(pkg_data, "2.0.0")
+            >>> pkg.recommended_version
+            '2.3.3'  # Highest in major 2, NOT 3.1.0
         """
         latest_version: Optional[str] = pkg_data.latest_version
         python_version: str = PyPIDataStore.get_current_python_version()
@@ -347,20 +372,62 @@ class VersionChecker:
         # ── Determine recommended version ─────────────────────────────
         recommended_version: Optional[str] = None
 
-        if current_version and latest_version:
-            # Two-pass algorithm: try to stay within current major
-            recommended_version = self._find_max_compatible_version(
-                pkg_data,
-                current_version,
-                latest_version,
-                python_version,
+        if current_version:
+            # CRITICAL: Stay within current major version
+            try:
+                current_parsed = parse(current_version)
+                current_major = (
+                    current_parsed.release[0] if current_parsed.release else None
+                )
+
+                if current_major is not None:
+                    # Get all Python-compatible versions in the current major
+                    compatible_in_major = pkg_data.get_python_compatible_versions(
+                        python_version, major=current_major
+                    )
+
+                    if compatible_in_major:
+                        # First one is the highest (already sorted descending)
+                        recommended_version = compatible_in_major[0]
+                        logger.debug(
+                            "%s: current=%s (major=%d), recommended=%s within major %d",
+                            pkg_data.name,
+                            current_version,
+                            current_major,
+                            recommended_version,
+                            current_major,
+                        )
+                    else:
+                        # No compatible version in current major - stay on current
+                        logger.warning(
+                            "%s: no Python-compatible version found in major %d, staying on %s",
+                            pkg_data.name,
+                            current_major,
+                            current_version,
+                        )
+                        recommended_version = current_version
+                else:
+                    logger.warning(
+                        "%s: cannot determine major version from %s",
+                        pkg_data.name,
+                        current_version,
+                    )
+                    recommended_version = current_version
+
+            except InvalidVersion:
+                logger.warning(
+                    "%s: invalid current version %s, cannot recommend",
+                    pkg_data.name,
+                    current_version,
+                )
+                recommended_version = None
+        else:
+            # No current version - just find highest compatible stable version
+            compatible_versions = pkg_data.get_python_compatible_versions(
+                python_version
             )
-        elif latest_version:
-            # No current version known — recommend highest compatible
-            recommended_version = self._find_recommended_version(
-                pkg_data,
-                python_version,
-            )
+            if compatible_versions:
+                recommended_version = compatible_versions[0]
 
         # ── Build metadata dict ────────────────────────────────────────
         metadata: Dict[str, Any] = {
@@ -389,107 +456,3 @@ class VersionChecker:
             recommended_version=recommended_version,
             metadata=metadata,
         )
-
-    def _find_max_compatible_version(
-        self,
-        pkg_data: PyPIPackageData,
-        current_version: str,
-        latest_version: str,
-        python_version: str,
-    ) -> Optional[str]:
-        """Find the highest Python-compatible version within *current_version*'s major.
-
-        Two-pass algorithm:
-
-        1. **Fast path**: If *latest_version* is itself within the current
-           major and is Python-compatible, return it immediately.
-        2. **Fallback**: Walk all stable versions (newest first) within the
-           current major and return the first Python-compatible match.
-
-        Args:
-            pkg_data: Cached package metadata.
-            current_version: The version currently installed.
-            latest_version: The absolute latest version on PyPI.
-            python_version: Dot-separated Python version (e.g., ``"3.11.2"``).
-
-        Returns:
-            A version string, or ``None`` when no compatible version exists
-            in the current major.
-
-        Example (internal)::
-
-            >>> # Current is 2.0.0, latest is 2.3.3
-            >>> v = self._find_max_compatible_version(
-            ...     pkg_data, "2.0.0", "2.3.3", "3.11.2"
-            ... )
-            >>> v
-            '2.3.3'
-        """
-        try:
-            current_parsed = parse(current_version)
-        except InvalidVersion:
-            # Current version is malformed — can't determine major
-            logger.debug(
-                "Cannot parse current version '%s'; skipping major-version logic",
-                current_version,
-            )
-            return None
-
-        current_major: int = current_parsed.release[0]
-
-        # ── fast path: latest is within current major ─────────────────
-        try:
-            latest_parsed = parse(latest_version)
-            if latest_parsed.release[
-                0
-            ] == current_major and pkg_data.is_python_compatible(
-                latest_version, python_version
-            ):
-                return latest_version
-        except InvalidVersion:
-            pass
-
-        # ── fallback: scan all versions in current major ──────────────
-        compatible_versions = pkg_data.get_python_compatible_versions(
-            python_version, major=current_major
-        )
-
-        # Already sorted descending by PyPIDataStore; return first match
-        if compatible_versions:
-            return compatible_versions[0]
-
-        return None
-
-    def _find_recommended_version(
-        self,
-        pkg_data: PyPIPackageData,
-        python_version: str,
-    ) -> Optional[str]:
-        """Find the highest Python-compatible **stable** version across all majors.
-
-        Only non-pre-release versions are considered.  If no stable version
-        is compatible, ``None`` is returned (pre-releases are never
-        recommended).
-
-        Args:
-            pkg_data: Cached package metadata.
-            python_version: Dot-separated Python version.
-
-        Returns:
-            A stable version string, or ``None`` when no compatible stable
-            version exists.
-
-        Example (internal)::
-
-            >>> v = self._find_recommended_version(pkg_data, "3.11.2")
-            >>> v
-            '3.1.0'
-        """
-        # get_python_compatible_versions already filters pre-releases
-        compatible_versions = pkg_data.get_python_compatible_versions(python_version)
-
-        if compatible_versions:
-            return compatible_versions[0]  # highest compatible stable
-
-        # No stable version works — do NOT fall back to pre-releases
-        return None

@@ -1,20 +1,20 @@
 -r requirements.txt
 
 # Testing
-pytest>=7.4.0
+pytest>=7.4.4
 pytest-cov>=4.1.0
-pytest-asyncio>=0.21.0
-pytest-mock>=3.11.0
+pytest-asyncio>=0.23.8
+pytest-mock>=3.14.1
 pytest-httpx>=0.22.0
 
 # Type Checking
-mypy>=1.5.0
+mypy>=1.14.1
 
 # Type stubs
 types-setuptools
 
 # Pre-commit hooks
-pre-commit>=3.4.0
+pre-commit>=3.5.0
 
 # Documentation
 mkdocs>=1.6.1

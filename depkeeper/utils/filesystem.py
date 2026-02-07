@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+from uuid import uuid4
 from pathlib import Path
 from datetime import datetime
 from typing import List, Optional, Union
@@ -52,6 +53,7 @@ def _atomic_write(target: Path, content: str) -> None:
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
+            newline="\n",
             dir=str(target.parent),
             delete=False,
             prefix=f".{target.name}.",
@@ -86,8 +88,9 @@ def _atomic_write(target: Path, content: str) -> None:
 
 def _create_backup_internal(path: Path) -> Path:
     """Create a timestamped backup of a file."""
+    unique = uuid4().hex[:8]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    backup_path = path.with_suffix(f"{path.suffix}.{timestamp}.backup")
+    backup_path = path.with_suffix(f"{path.suffix}.{timestamp}_{unique}.backup")
 
     try:
         shutil.copy2(path, backup_path)
@@ -237,6 +240,11 @@ def find_requirements_files(
         return []
 
     patterns = REQUIREMENT_FILE_PATTERNS["requirements"]
+
+    if not recursive:
+        # Only root-level patterns (no directory components)
+        patterns = [p for p in patterns if "/" not in p]
+
     matches: List[Path] = []
 
     for pattern in patterns:
@@ -246,59 +254,41 @@ def find_requirements_files(
     return sorted(set(matches))
 
 
-def list_backups(file_path: PathLike) -> List[Path]:
-    """List backups for a file, newest first."""
-    path = Path(file_path)
-    pattern = f"{path.name}.*.backup"
-
-    return sorted(
-        path.parent.glob(pattern),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-
-
-def clean_old_backups(
-    file_path: PathLike,
-    *,
-    keep: int = 5,
-) -> int:
-    """Delete old backups, keeping only the most recent ``keep``."""
-    backups = list_backups(file_path)
-    deleted = 0
-
-    for backup in backups[keep:]:
-        try:
-            backup.unlink()
-            logger.debug("Deleted old backup: %s", backup)
-            deleted += 1
-        except Exception as exc:
-            logger.warning("Failed to delete backup %s: %s", backup, exc)
-
-    return deleted
-
-
 def validate_path(
     path: PathLike,
     *,
     base_dir: Optional[PathLike] = None,
 ) -> Path:
-    """Resolve and validate a filesystem path.
-
-    If ``base_dir`` is provided, the resolved path must be within it.
     """
-    resolved = Path(path).expanduser().resolve(strict=False)
+    Resolve and validate a filesystem path in a cross-platform safe way.
 
-    if base_dir:
-        base = Path(base_dir).resolve(strict=False)
+    If ``base_dir`` is provided, the resolved path must be located within
+    the resolved base directory. Otherwise, a ``FileOperationError`` is raised.
+    """
+    p = Path(path).expanduser()
+
+    if not p.is_absolute():
+        p = Path.cwd() / p
+
+    resolved = p.resolve(strict=False)
+
+    if base_dir is not None:
+        base = Path(base_dir).expanduser()
+
+        if not base.is_absolute():
+            base = Path.cwd() / base
+
+        base = base.resolve(strict=False)
+
         try:
             resolved.relative_to(base)
-        except ValueError:
+        except ValueError as exc:
             raise FileOperationError(
                 f"Path outside allowed base directory: {resolved}",
                 file_path=str(path),
                 operation="validate",
-            )
+                original_error=exc,
+            ) from exc
 
     return resolved
 
@@ -316,8 +306,10 @@ def create_timestamped_backup(file_path: PathLike) -> Path:
             operation="backup",
         )
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = path.parent / f"{path.stem}.{timestamp}.backup{path.suffix}"
+    unique = uuid4().hex[:8]
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    backup_name = f"{path.stem}.{timestamp}_{unique}.backup{path.suffix}"
+    backup_path = path.with_name(backup_name)
 
     try:
         shutil.copy2(path, backup_path)

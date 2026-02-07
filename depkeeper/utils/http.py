@@ -114,7 +114,7 @@ class HTTPClient:
         await self._ensure_client()
         assert self._client is not None
 
-        clean_url = url.strip("\"'")
+        clean_url = url.strip().strip("\"'")
         last_exc: Optional[Exception] = None
         retry_429_count = 0
 
