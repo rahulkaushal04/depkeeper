@@ -306,8 +306,10 @@ def create_timestamped_backup(file_path: PathLike) -> Path:
             operation="backup",
         )
 
+    unique = uuid4().hex[:8]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    backup_path = path.parent / f"{path.stem}.{timestamp}.backup{path.suffix}"
+    backup_name = f"{path.stem}.{timestamp}_{unique}.backup{path.suffix}"
+    backup_path = path.with_name(backup_name)
 
     try:
         shutil.copy2(path, backup_path)
