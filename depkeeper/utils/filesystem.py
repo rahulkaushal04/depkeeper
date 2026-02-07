@@ -246,38 +246,6 @@ def find_requirements_files(
     return sorted(set(matches))
 
 
-def list_backups(file_path: PathLike) -> List[Path]:
-    """List backups for a file, newest first."""
-    path = Path(file_path)
-    pattern = f"{path.name}.*.backup"
-
-    return sorted(
-        path.parent.glob(pattern),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-
-
-def clean_old_backups(
-    file_path: PathLike,
-    *,
-    keep: int = 5,
-) -> int:
-    """Delete old backups, keeping only the most recent ``keep``."""
-    backups = list_backups(file_path)
-    deleted = 0
-
-    for backup in backups[keep:]:
-        try:
-            backup.unlink()
-            logger.debug("Deleted old backup: %s", backup)
-            deleted += 1
-        except Exception as exc:
-            logger.warning("Failed to delete backup %s: %s", backup, exc)
-
-    return deleted
-
-
 def validate_path(
     path: PathLike,
     *,

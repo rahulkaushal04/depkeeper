@@ -8,7 +8,6 @@ PEP 440–compatible version parsing.
 from __future__ import annotations
 
 from typing import Optional, Tuple
-
 from packaging.version import InvalidVersion, Version, parse
 
 
