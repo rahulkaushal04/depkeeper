@@ -797,7 +797,7 @@ class TestFindRequirementsFiles:
         files = find_requirements_files(requirements_structure, recursive=True)
 
         # Should find files in requirements/ subdirectory
-        paths = [str(f) for f in files]
+        paths = [f.as_posix() for f in files]
         assert any("requirements/base.txt" in p for p in paths)
         assert any("requirements/test.txt" in p for p in paths)
 

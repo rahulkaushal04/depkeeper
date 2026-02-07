@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+from uuid import uuid4
 from pathlib import Path
 from datetime import datetime
 from typing import List, Optional, Union
@@ -52,6 +53,7 @@ def _atomic_write(target: Path, content: str) -> None:
         with tempfile.NamedTemporaryFile(
             mode="w",
             encoding="utf-8",
+            newline="\n",
             dir=str(target.parent),
             delete=False,
             prefix=f".{target.name}.",
@@ -86,8 +88,9 @@ def _atomic_write(target: Path, content: str) -> None:
 
 def _create_backup_internal(path: Path) -> Path:
     """Create a timestamped backup of a file."""
+    unique = uuid4().hex[:8]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    backup_path = path.with_suffix(f"{path.suffix}.{timestamp}.backup")
+    backup_path = path.with_suffix(f"{path.suffix}.{timestamp}_{unique}.backup")
 
     try:
         shutil.copy2(path, backup_path)
