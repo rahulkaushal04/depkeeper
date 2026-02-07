@@ -189,7 +189,7 @@ class TestAtomicWrite:
         _atomic_write(target, content)
 
         assert target.exists()
-        assert target.read_text() == content
+        assert target.read_text(encoding="utf-8") == content
 
     def test_creates_parent_directories(self, temp_dir: Path) -> None:
         """Test _atomic_write creates missing parent directories.
@@ -281,16 +281,13 @@ class TestAtomicWrite:
             # fsync should be called
             assert mock_fsync.call_count >= 1
 
-    def test_unicode_content(self, temp_dir: Path) -> None:
-        """Test _atomic_write handles Unicode content correctly.
+    def test_unicode_content(self, tmp_path: Path) -> None:
+        target = tmp_path / "unicode.txt"
+        content = "Unicode test: ✓ α β γ 🚀"
 
-        Edge case: Should handle emoji and international characters.
-        """
-        target = temp_dir / "unicode.txt"
-        content = "Hello 世界 🌍 café"
+        safe_write_file(target, content)
 
-        _atomic_write(target, content)
-
+        assert target.exists()
         assert target.read_text(encoding="utf-8") == content
 
     def test_large_content(self, temp_dir: Path) -> None:
