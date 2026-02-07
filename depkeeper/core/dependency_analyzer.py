@@ -1,14 +1,19 @@
-"""Dependency analysis and conflict resolution for depkeeper.
+"""Fixed dependency analysis with strict major version boundaries.
 
-This module owns two responsibilities:
+This module provides enhanced conflict resolution that strictly respects major
+version boundaries during dependency resolution. It ensures that packages are
+never upgraded or downgraded across major version boundaries when resolving
+conflicts.
 
-1. **Cross-conflict detection** — given a proposed set of package versions
-   (the *update set*), discover pairs where package A's dependency on B is
-   incompatible with the version of B that is itself proposed.
-2. **Iterative resolution** — attempt to repair each conflict by first
-   trying to downgrade the *source* package (A) to a version whose
-   requirement on B is satisfied, and falling back to constraining the
-   *target* package (B) when no such source version exists.
+Key improvements over the base implementation:
+1. **Strict major version boundaries** — never suggest crossing major version
+   boundaries during conflict resolution.
+2. **Major-constrained compatibility search** — find compatible versions within
+   the current major version only.
+3. **Safe fallback** — if no compatible version exists in current major, stay
+   on current version rather than crossing boundaries.
+4. **Enhanced tracking** — properly track and report when conflicts cannot be
+   resolved without major version changes.
 
 All network I/O is routed through the shared :class:`~depkeeper.core.data_store.PyPIDataStore`
 so that package metadata is fetched at most once per process.
@@ -66,10 +71,6 @@ _MAX_RESOLUTION_ITERATIONS: int = 100
 # Keeps the resolver fast for packages with hundreds of releases.
 _MAX_SOURCE_CANDIDATES: int = 50
 
-# How many target-major versions to scan when checking feasibility.
-_MAX_TARGET_SCAN: int = 50
-
-
 # ---------------------------------------------------------------------------
 # Resolution result models
 # ---------------------------------------------------------------------------
@@ -83,6 +84,7 @@ class ResolutionStatus(Enum):
     UPGRADED = "upgraded"  # Successfully upgraded to a newer version
     DOWNGRADED = "downgraded"  # Had to downgrade due to conflicts
     KEPT_CURRENT = "kept_current"  # No safe upgrade found; stayed at current
+
     # Version was constrained by another package's requirements
     CONSTRAINED = "constrained"
 
@@ -144,6 +146,7 @@ class ResolutionResult:
             List of PackageResolution objects where version changed.
 
         Example::
+
             >>> for pkg in result.get_changed_packages():
             ...     print(f"{pkg.name}: {pkg.original} → {pkg.resolved}")
         """
@@ -164,6 +167,7 @@ class ResolutionResult:
             Multi-line summary string.
 
         Example::
+
             >>> print(result.summary())
             Resolution Summary:
             ==================
@@ -233,23 +237,55 @@ def _normalize(name: str) -> str:
     return name.lower().replace("_", "-")
 
 
+def _get_major_version(version: Optional[str]) -> Optional[int]:
+    """Extract the major component from a version string.
+
+    This is a thin, forgiving wrapper around ``packaging.version.parse``
+    that returns ``None`` on any failure instead of raising.
+
+    Args:
+        version: Version string, or ``None``.
+
+    Returns:
+        The major version integer, or ``None``.
+
+    Example::
+
+        >>> _get_major_version("3.11.2")
+        3
+        >>> _get_major_version(None)
+    """
+    if not version:
+        return None
+    try:
+        parsed = parse(version)
+        return parsed.release[0] if parsed.release else None
+    except InvalidVersion:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Analyzer
 # ---------------------------------------------------------------------------
 
 
 class DependencyAnalyzer:
-    """Detect and resolve version conflicts across a dependency graph.
+    """Detect and resolve version conflicts with strict major version boundaries.
+
+    This analyzer enhances the base conflict resolution by ensuring that no
+    package is ever upgraded or downgraded across major version boundaries
+    during conflict resolution. This prevents breaking changes from being
+    inadvertently introduced.
 
     The analyzer works exclusively through a :class:`PyPIDataStore`
     instance, which guarantees that every ``/pypi/{pkg}/json`` call is
-    made at most once.  All public entry points are ``async``.
+    made at most once. All public entry points are ``async``.
 
     Args:
-        data_store: Shared PyPI data store.  **Required** — the class has
+        data_store: Shared PyPI data store. **Required** — the class has
             no independent HTTP path.
         concurrent_limit: Upper bound on in-flight PyPI fetches.
-            Forwarded to the internal semaphore.  Defaults to ``10``.
+            Forwarded to the internal semaphore. Defaults to ``10``.
 
     Raises:
         TypeError: If *data_store* is ``None``.
@@ -272,7 +308,6 @@ class DependencyAnalyzer:
             raise TypeError(
                 "data_store must not be None; pass a PyPIDataStore instance"
             )
-
         self.data_store: PyPIDataStore = data_store
         self._semaphore: asyncio.Semaphore = asyncio.Semaphore(concurrent_limit)
 
@@ -284,27 +319,33 @@ class DependencyAnalyzer:
         self,
         packages: List[Package],
     ) -> ResolutionResult:
-        """Resolve conflicts and write results back into each :class:`Package`.
+        """Resolve conflicts while strictly respecting major version boundaries.
 
         Algorithm outline:
 
         1. Build an *update set* mapping each package name to its
            proposed version (``recommended_version`` if available,
-           otherwise ``current_version``).
+           otherwise ``current_version``). Recommended versions already
+           respect major version boundaries.
         2. Prefetch metadata for every package in one concurrent burst.
         3. Loop up to :data:`_MAX_RESOLUTION_ITERATIONS` times:
 
            a. Scan for cross-conflicts in the current update set.
            b. If none remain, stop — the set is self-consistent.
-           c. Attempt resolution (downgrade source, then constrain
-              target).  Break early when no progress is made.
+           c. Attempt resolution within major version boundaries only:
+
+              - Try to find a compatible source version within its current major
+              - If that fails, try to constrain the target within its current major
+              - If both fail, revert both packages to their current versions
+
+           d. Break early when no progress is made.
 
         4. Annotate each :class:`Package` with its final version and any
            unresolved :class:`Conflict` objects.
         5. Return a :class:`ResolutionResult` with complete details.
 
         Args:
-            packages: Mutable list of :class:`Package` objects.  Each
+            packages: Mutable list of :class:`Package` objects. Each
                 object is updated in place with the resolved version and
                 conflict metadata.
 
@@ -329,7 +370,7 @@ class DependencyAnalyzer:
         original_versions: Dict[str, Optional[str]] = {}
 
         for pkg in packages:
-            # Prefer the already-computed recommendation; fall back to current
+            # Use recommended version (which already respects major boundaries)
             proposed = pkg.recommended_version or pkg.current_version
             update_set[pkg.name] = proposed
             original_versions[pkg.name] = proposed
@@ -357,6 +398,7 @@ class DependencyAnalyzer:
                 conflicts_list = conflict_tracking.setdefault(
                     conflict.target_package, []
                 )
+
                 # Deduplicate using conflict signature
                 conflict_key = (
                     conflict.source_package,
@@ -376,7 +418,8 @@ class DependencyAnalyzer:
                 if conflict_key not in existing_keys:
                     conflicts_list.append(conflict)
 
-            resolved_any = await self._resolve_by_downgrading_source(
+            # Attempt resolution while respecting major version boundaries
+            resolved_any = await self._resolve_conflicts_within_major(
                 pkg_lookup, update_set, cross_conflicts
             )
 
@@ -408,15 +451,27 @@ class DependencyAnalyzer:
             status = self._determine_status(pkg, original, resolved, conflicts)
 
             # Find compatible alternative if there are conflicts
+            # (constrained to current major version only)
             compatible_alt = None
             if conflicts:
-                available = self.data_store.get_versions(pkg.name)
-                conflict_set = ConflictSet(pkg.name)
-                for c in conflicts:
-                    conflict_set.add_conflict(c)
-                compatible_alt = self.find_compatible_version(
-                    conflict_set, available, pkg.current_version
-                )
+                # Get current major version to constrain search
+                current_major = _get_major_version(pkg.current_version)
+
+                if current_major is not None:
+                    # Only look within current major
+                    available = self.data_store.get_versions(pkg.name)
+                    available_in_major = [
+                        v for v in available if _get_major_version(v) == current_major
+                    ]
+
+                    conflict_set = ConflictSet(pkg.name)
+                    for c in conflicts:
+                        conflict_set.add_conflict(c)
+
+                    compatible_alt = self.find_compatible_version(
+                        conflict_set, available_in_major, pkg.current_version
+                    )
+
                 packages_with_conflicts += 1
 
             # Update the Package object itself
@@ -425,7 +480,6 @@ class DependencyAnalyzer:
                 pkg.recommended_version = (
                     resolved if resolved != pkg.current_version else pkg.current_version
                 )
-
             if conflicts:
                 pkg.set_conflicts(conflicts, resolved_version=compatible_alt)
 
@@ -506,9 +560,9 @@ class DependencyAnalyzer:
         """Scan the update set for pairwise version conflicts.
 
         For every package *P* at its proposed version *V*, fetch *V*'s
-        dependency list.  For each dependency *D* that also appears in the
+        dependency list. For each dependency *D* that also appears in the
         update set, check whether the proposed version of *D* satisfies
-        *P*'s requirement specifier.  If not, emit a :class:`Conflict`.
+        *P*'s requirement specifier. If not, emit a :class:`Conflict`.
 
         Args:
             packages: Full package list (provides iteration order).
@@ -545,6 +599,7 @@ class DependencyAnalyzer:
 
                 # Only interesting when the dependency is itself in our update set
                 target_version = update_set.get(req_name)
+
                 if (
                     target_version
                     and req.specifier
@@ -563,30 +618,30 @@ class DependencyAnalyzer:
         return cross_conflicts
 
     # ------------------------------------------------------------------
-    # Resolution strategies
+    # Resolution strategies (major-version constrained)
     # ------------------------------------------------------------------
 
-    async def _resolve_by_downgrading_source(
+    async def _resolve_conflicts_within_major(
         self,
         pkg_lookup: Dict[str, Package],
         update_set: Dict[str, Optional[str]],
         cross_conflicts: List[Conflict],
     ) -> bool:
-        """Attempt to eliminate conflicts by adjusting package versions.
+        """Attempt to eliminate conflicts while never crossing major boundaries.
 
         Two strategies are tried in order for each unique *source* package
         that appears in *cross_conflicts*:
 
-        1. **Downgrade source** — find the highest version of the source
-           whose requirement on the target is satisfied by the target's
-           proposed version.
-        2. **Constrain target** — find the highest version of the target
-           (within its current major) that satisfies the source's
-           requirement, and revert the source to its current version.
+        1. **Downgrade source within its major** — find the highest version
+           of the source (within its current major) whose requirement on the
+           target is satisfied by the target's proposed version.
+        2. **Constrain target within its major** — find the highest version
+           of the target (within its current major) that satisfies the
+           source's requirement, and revert the source to its current version.
 
-        If neither strategy produces a viable version, both packages are
-        reverted to their *current* (installed) versions and a warning is
-        logged.
+        If neither strategy produces a viable version within major boundaries,
+        both packages are reverted to their *current* (installed) versions and
+        a warning is logged.
 
         Args:
             pkg_lookup: Name → :class:`Package` mapping for quick access.
@@ -599,6 +654,7 @@ class DependencyAnalyzer:
             during this call.
         """
         resolved_any: bool = False
+
         # Track which source packages have already been handled so that
         # multiple conflicts with the same source are not processed twice.
         processed_sources: Set[str] = set()
@@ -612,52 +668,48 @@ class DependencyAnalyzer:
 
             source_pkg = pkg_lookup.get(source_name)
             target_pkg = pkg_lookup.get(target_name)
+
             if not source_pkg or not target_pkg:
                 continue
 
-            target_major: Optional[int] = _get_major_version(target_pkg.current_version)
-            target_proposed: Optional[str] = update_set.get(target_name)
+            # Get major versions for both packages (boundaries we cannot cross)
+            source_major = _get_major_version(source_pkg.current_version)
+            target_major = _get_major_version(target_pkg.current_version)
+            target_proposed = update_set.get(target_name)
 
             logger.debug(
-                "Attempting to resolve: %s==%s requires %s%s, "
-                "target constrained to major %s",
+                "Resolving conflict: %s (major %s) vs %s (major %s)",
                 source_name,
-                conflict.source_version,
+                source_major,
                 target_name,
-                conflict.required_spec,
                 target_major,
             )
 
-            # ── strategy 1: downgrade source ──────────────────────────
-            compatible_source = await self._find_compatible_source_version(
+            # ── strategy 1: find compatible source within its major ──────
+            compatible_source = await self._find_compatible_source_within_major(
                 source_pkg=source_pkg,
+                source_major=source_major,
                 target_name=target_name,
                 target_proposed_version=target_proposed,
-                target_major=target_major,
             )
 
             if compatible_source and compatible_source != update_set.get(source_name):
                 logger.info(
-                    "Resolved: %s %s → %s (compatible with %s==%s)",
+                    "Resolved: %s %s → %s (compatible with %s==%s, within major %s)",
                     source_name,
                     update_set.get(source_name),
                     compatible_source,
                     target_name,
                     target_proposed,
+                    source_major,
                 )
                 update_set[source_name] = compatible_source
                 resolved_any = True
                 processed_sources.add(source_name)
                 continue  # move to next conflict
 
-            # ── strategy 2: constrain target ──────────────────────────
-            logger.debug(
-                "No compatible %s version found; trying to constrain %s",
-                source_name,
-                target_name,
-            )
-
-            constrained_target = await self._find_constrained_target_version(
+            # ── strategy 2: constrain target within its major ────────────
+            constrained_target = await self._find_constrained_target_within_major(
                 target_name=target_name,
                 target_major=target_major,
                 required_spec=conflict.required_spec,
@@ -665,12 +717,14 @@ class DependencyAnalyzer:
 
             if constrained_target and constrained_target != target_proposed:
                 logger.info(
-                    "Resolved: constraining %s to %s (required by %s)",
+                    "Resolved: constraining %s to %s (required by %s, within major %s)",
                     target_name,
                     constrained_target,
                     source_name,
+                    target_major,
                 )
                 update_set[target_name] = constrained_target
+
                 # Revert source to current since we gave up upgrading it
                 if source_pkg.current_version:
                     update_set[source_name] = source_pkg.current_version
@@ -678,7 +732,7 @@ class DependencyAnalyzer:
             else:
                 # ── fallback: revert both to current ──────────────────
                 logger.warning(
-                    "No compatible version found for %s ↔ %s; reverting both",
+                    "No compatible version found for %s ↔ %s within major boundaries; reverting both",
                     source_name,
                     target_name,
                 )
@@ -692,100 +746,79 @@ class DependencyAnalyzer:
         return resolved_any
 
     # ------------------------------------------------------------------
-    # Version search helpers
+    # Version search helpers (major-constrained)
     # ------------------------------------------------------------------
 
-    async def _find_compatible_source_version(
+    async def _find_compatible_source_within_major(
         self,
         source_pkg: Package,
+        source_major: Optional[int],
         target_name: str,
         target_proposed_version: Optional[str],
-        target_major: Optional[int],
     ) -> Optional[str]:
-        """Walk the source package's versions (newest first) for compatibility.
+        """Find compatible source version ONLY within source's current major.
 
-        A candidate version is *compatible* when it either has no
-        dependency on *target_name* at all, or its dependency specifier is
-        satisfied by *target_proposed_version* (or, as a last resort, by
-        any stable version of the target within *target_major*).
+        Walk the source package's versions (newest first, within its current
+        major version only) for compatibility. A candidate version is
+        *compatible* when it either has no dependency on *target_name* at all,
+        or its dependency specifier is satisfied by *target_proposed_version*.
 
         The search is bounded by :data:`_MAX_SOURCE_CANDIDATES` to avoid
-        scanning packages with very long release histories.  Pre-releases
-        and versions outside the source's current major are skipped but do
-        **not** count against the candidate budget.
+        scanning packages with very long release histories. Pre-releases are
+        skipped but do **not** count against the candidate budget.
 
         Args:
             source_pkg: The source :class:`Package` being adjusted.
+            source_major: Major version the source must stay within (or
+                ``None`` if major cannot be determined).
             target_name: Normalised name of the dependency that caused the
                 conflict.
             target_proposed_version: The target's current entry in the
                 update set (may be ``None``).
-            target_major: Major version the target must stay within (or
-                ``None`` to allow any major).
 
         Returns:
-            The highest compatible source version string, or ``None`` when
-            no candidate satisfies the constraints.
+            The highest compatible source version string (within the same
+            major), or ``None`` when no candidate satisfies the constraints.
 
         Example::
 
-            >>> v = await analyzer._find_compatible_source_version(
+            >>> v = await analyzer._find_compatible_source_within_major(
             ...     source_pkg=flask_pkg,
+            ...     source_major=3,
             ...     target_name="werkzeug",
             ...     target_proposed_version="3.0.1",
-            ...     target_major=3,
             ... )
             >>> v
             '3.1.0'
         """
-        source_name: str = source_pkg.name
-        source_major: Optional[int] = _get_major_version(source_pkg.current_version)
-        current_python: str = PyPIDataStore.get_current_python_version()
+        if source_major is None:
+            logger.debug(
+                "Cannot determine source major version for %s", source_pkg.name
+            )
+            return None
 
-        available: List[str] = (
+        source_name: str = source_pkg.name
+        python_version: str = PyPIDataStore.get_current_python_version()
+
+        # Get all versions in source's current major that are Python-compatible
+        available_in_major = (
             await self.data_store.get_package_data(source_name)
-        ).all_versions
+        ).get_python_compatible_versions(python_version, major=source_major)
 
         candidates_checked: int = 0
 
-        for version_str in available:
+        for version_str in available_in_major:
             # ── hard budget on evaluated candidates ────────────────────
             if candidates_checked >= _MAX_SOURCE_CANDIDATES:
                 break
 
-            try:
-                parsed = parse(version_str)
-            except InvalidVersion:
-                continue
-
-            # Pre-releases and cross-major jumps are filtered but do NOT
-            # consume from the candidate budget.
-            if parsed.is_prerelease:
-                continue
-            if source_major is not None:
-                version_major = parsed.release[0] if parsed.release else 0
-                if version_major != source_major:
-                    continue
-
-            # Python-compatibility gate (cache-only, no I/O)
-            if not self.data_store.is_python_compatible(
-                source_name, version_str, current_python
-            ):
-                logger.debug(
-                    "%s==%s incompatible with Python %s; skipping",
-                    source_name,
-                    version_str,
-                    current_python,
-                )
-                continue
-
-            # This version passed all filters — count it
             candidates_checked += 1
 
             # ── fetch deps and locate the requirement on target ────────
             deps = await self.data_store.get_version_dependencies(
                 source_name, version_str
             )
+
             target_spec: Optional[SpecifierSet] = _extract_specifier_for(
                 deps, target_name
             )
@@ -815,30 +848,32 @@ class DependencyAnalyzer:
 
         return None
 
-    async def _find_constrained_target_version(
+    async def _find_constrained_target_within_major(
         self,
         target_name: str,
         target_major: Optional[int],
         required_spec: str,
     ) -> Optional[str]:
-        """Find the highest target version that satisfies *required_spec*.
+        """Find target version satisfying spec ONLY within target's current major.
 
-        Only stable versions within *target_major* (when provided) are
-        considered.  Returns ``None`` when the specifier itself is
-        unparseable or no matching version exists.
+        Only stable versions within *target_major* are considered. Returns
+        ``None`` when the specifier itself is unparseable, when major version
+        cannot be determined, or when no matching version exists within the
+        major boundary.
 
         Args:
             target_name: Package whose versions are being scanned.
             target_major: If not ``None``, only versions sharing this
-                major number are considered.
+                major number are considered. If ``None``, returns ``None``
+                immediately (cannot constrain without knowing the boundary).
             required_spec: PEP-440 specifier string, e.g. ``">=2.0,<3"``.
 
         Returns:
-            A version string, or ``None``.
+            A version string (within the specified major), or ``None``.
 
         Example::
 
-            >>> v = await analyzer._find_constrained_target_version(
+            >>> v = await analyzer._find_constrained_target_within_major(
             ...     target_name="werkzeug",
             ...     target_major=2,
             ...     required_spec=">=2.0,<3",
@@ -846,32 +881,38 @@ class DependencyAnalyzer:
             >>> v
             '2.3.7'
         """
+        if target_major is None:
+            logger.debug("Cannot determine target major version for %s", target_name)
+            return None
+
         try:
             spec = SpecifierSet(required_spec)
         except InvalidSpecifier:
             logger.debug("Unparseable specifier %r for %s", required_spec, target_name)
             return None
 
-        available: List[str] = (
-            await self.data_store.get_package_data(target_name)
-        ).all_versions
+        # Get all versions in target's current major
+        available = (await self.data_store.get_package_data(target_name)).all_versions
 
         for version_str in available:  # already sorted descending
             try:
                 parsed = parse(version_str)
-            except InvalidVersion:
-                continue
 
-            if parsed.is_prerelease:
-                continue
+                # Skip pre-releases
+                if parsed.is_prerelease:
+                    continue
 
-            if target_major is not None:
-                version_major = parsed.release[0] if parsed.release else 0
+                # Check if in correct major
+                version_major = parsed.release[0] if parsed.release else None
                 if version_major != target_major:
                     continue
 
-            if version_str in spec:
-                return version_str  # first match is the highest
+                # Check if satisfies spec
+                if version_str in spec:
+                    return version_str  # first match is the highest
+
+            except InvalidVersion:
+                continue
 
         return None
 
@@ -891,9 +932,11 @@ class DependencyAnalyzer:
         Args:
             conflict_set: Aggregated conflicts for a single package.
             available_versions: Candidate versions (any order; the
-                conflict_set itself determines compatibility).
+                conflict_set itself determines compatibility). Typically
+                pre-filtered to only include versions within the current
+                major.
             min_version: If provided, discard any candidate that parses
-                below this version.  Typically the currently-installed
+                below this version. Typically the currently-installed
                 version.
 
         Returns:
@@ -923,49 +966,10 @@ class DependencyAnalyzer:
 
         return compatible
 
-    # ------------------------------------------------------------------
-    # Small utilities (private / static)
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _get_major_version(version: Optional[str]) -> Optional[int]:
-        """Extract the major component from a version string.
-
-        This is a thin, forgiving wrapper around ``packaging.version.parse``
-        that returns ``None`` on any failure instead of raising.
-
-        Args:
-            version: Version string, or ``None``.
-
-        Returns:
-            The major version integer, or ``None``.
-
-        Example::
-
-            >>> DependencyAnalyzer._get_major_version("3.11.2")
-            3
-            >>> DependencyAnalyzer._get_major_version(None)
-        """
-        if not version:
-            return None
-        try:
-            parsed = parse(version)
-            return parsed.release[0] if parsed.release else None
-        except InvalidVersion:
-            return None
-
 
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
-
-
-def _get_major_version(version: Optional[str]) -> Optional[int]:
-    """Module-level alias so resolution helpers can call without an instance.
-
-    See :pymeth:`DependencyAnalyzer._get_major_version` for full docs.
-    """
-    return DependencyAnalyzer._get_major_version(version)
 
 
 def _extract_specifier_for(deps: List[str], target_name: str) -> Optional[SpecifierSet]:
