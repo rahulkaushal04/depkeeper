@@ -66,13 +66,13 @@ class Requirement:
         else:
             requirement = self.name
 
-            if self.extras:
-                requirement += f"[{','.join(self.extras)}]"
+        if self.extras:
+            requirement += f"[{','.join(self.extras)}]"
 
-            if self.specs:
-                requirement += ",".join(
-                    f"{operator}{version}" for operator, version in self.specs
-                )
+        if self.specs:
+            requirement += ",".join(
+                f"{operator}{version}" for operator, version in self.specs
+            )
 
         parts.append(requirement)
 
