@@ -50,8 +50,8 @@ def get_update_type(
         return "unknown"
 
     try:
-        current = _parse_version(current_version)
-        target = _parse_version(target_version)
+        current = parse(current_version)
+        target = parse(target_version)
 
         if target == current:
             return "same"
@@ -63,14 +63,6 @@ def get_update_type(
 
     except InvalidVersion:
         return "unknown"
-
-
-def _parse_version(value: str) -> Version:
-    """Parse a version string into a PEP 440 Version object."""
-    parsed = parse(value)
-    if not isinstance(parsed, Version):
-        raise InvalidVersion(value)
-    return parsed
 
 
 def _classify_upgrade(current: Version, target: Version) -> str:

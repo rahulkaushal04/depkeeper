@@ -170,9 +170,18 @@ def print_table(
 def confirm(message: str, *, default: bool = False) -> bool:
     """Prompt the user for a yes/no confirmation.
 
+    The prompt accepts common yes/no inputs. Behavior is as follows:
+
+    - "y", "yes"   → return True
+    - "n", "no"    → return False
+    - empty input  → return `default`
+    - any other input (invalid) → return `default`
+    - Ctrl+C / EOF → return False
+
     Args:
-        message: Prompt message.
-        default: Default choice if user presses Enter.
+        message: Prompt message shown to the user.
+        default: Default choice used when the user presses Enter or
+            provides an unrecognized response.
 
     Returns:
         True if confirmed, False otherwise.
@@ -190,7 +199,13 @@ def confirm(message: str, *, default: bool = False) -> bool:
     if not response:
         return default
 
-    return response in ("y", "yes")
+    if response in ("y", "yes"):
+        return True
+    if response in ("n", "no"):
+        return False
+
+    # Invalid input → fall back to default
+    return default
 
 
 # ---------------------------------------------------------------------------

@@ -18,12 +18,10 @@ Test Coverage:
 from __future__ import annotations
 
 import pytest
-from typing import Optional
 from packaging.version import InvalidVersion, Version
 
 from depkeeper.utils.version_utils import (
     get_update_type,
-    _parse_version,
     _classify_upgrade,
     _normalize_release,
 )
@@ -364,77 +362,6 @@ class TestGetUpdateTypeEdgeCases:
         # Fourth component should be treated as local/metadata
         result = get_update_type("1.2.3.4", "1.2.3.5")
         assert result in ("update", "patch", "same")
-
-
-class TestParseVersion:
-    """Tests for _parse_version internal function."""
-
-    def test_parse_valid_version(self) -> None:
-        """Test parsing valid version string returns Version object.
-
-        Happy path: Standard semantic version.
-        """
-        version = _parse_version("1.2.3")
-        assert isinstance(version, Version)
-        assert str(version) == "1.2.3"
-
-    def test_parse_invalid_version_raises(self) -> None:
-        """Test parsing invalid version raises InvalidVersion.
-
-        Error case: Malformed version string.
-        """
-        with pytest.raises(InvalidVersion):
-            _parse_version("not-a-version")
-
-    def test_parse_empty_string_raises(self) -> None:
-        """Test parsing empty string raises InvalidVersion.
-
-        Edge case: Empty string is invalid.
-        """
-        with pytest.raises(InvalidVersion):
-            _parse_version("")
-
-    def test_parse_prerelease_version(self) -> None:
-        """Test parsing pre-release version.
-
-        PEP 440: Alpha, beta, rc versions.
-        """
-        for version_str in ["1.0.0a1", "1.0.0b2", "1.0.0rc3"]:
-            version = _parse_version(version_str)
-            assert isinstance(version, Version)
-
-    def test_parse_post_release_version(self) -> None:
-        """Test parsing post-release version.
-
-        PEP 440: Post-release versions.
-        """
-        version = _parse_version("1.0.0.post1")
-        assert isinstance(version, Version)
-
-    def test_parse_dev_version(self) -> None:
-        """Test parsing development version.
-
-        PEP 440: Dev versions.
-        """
-        version = _parse_version("1.0.0.dev1")
-        assert isinstance(version, Version)
-
-    def test_parse_local_version(self) -> None:
-        """Test parsing version with local identifier.
-
-        PEP 440: Local version identifiers.
-        """
-        version = _parse_version("1.0.0+local")
-        assert isinstance(version, Version)
-
-    def test_parse_normalizes_version(self) -> None:
-        """Test parsing normalizes version format.
-
-        PEP 440: Various formats normalize to canonical form.
-        """
-        version = _parse_version("1.0.0")
-        # Leading zeros should be stripped
-        assert str(_parse_version("01.00.00")) == "1.0.0"
 
 
 class TestClassifyUpgrade:

@@ -237,6 +237,11 @@ def find_requirements_files(
         return []
 
     patterns = REQUIREMENT_FILE_PATTERNS["requirements"]
+
+    if not recursive:
+        # Only root-level patterns (no directory components)
+        patterns = [p for p in patterns if "/" not in p]
+
     matches: List[Path] = []
 
     for pattern in patterns:
@@ -284,7 +289,7 @@ def create_timestamped_backup(file_path: PathLike) -> Path:
             operation="backup",
         )
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     backup_path = path.parent / f"{path.stem}.{timestamp}.backup{path.suffix}"
 
     try:
