@@ -259,22 +259,36 @@ def validate_path(
     *,
     base_dir: Optional[PathLike] = None,
 ) -> Path:
-    """Resolve and validate a filesystem path.
-
-    If ``base_dir`` is provided, the resolved path must be within it.
     """
-    resolved = Path(path).expanduser().resolve(strict=False)
+    Resolve and validate a filesystem path in a cross-platform safe way.
 
-    if base_dir:
-        base = Path(base_dir).resolve(strict=False)
+    If ``base_dir`` is provided, the resolved path must be located within
+    the resolved base directory. Otherwise, a ``FileOperationError`` is raised.
+    """
+    p = Path(path).expanduser()
+
+    if not p.is_absolute():
+        p = Path.cwd() / p
+
+    resolved = p.resolve(strict=False)
+
+    if base_dir is not None:
+        base = Path(base_dir).expanduser()
+
+        if not base.is_absolute():
+            base = Path.cwd() / base
+
+        base = base.resolve(strict=False)
+
         try:
             resolved.relative_to(base)
-        except ValueError:
+        except ValueError as exc:
             raise FileOperationError(
                 f"Path outside allowed base directory: {resolved}",
                 file_path=str(path),
                 operation="validate",
-            )
+                original_error=exc,
+            ) from exc
 
     return resolved
 

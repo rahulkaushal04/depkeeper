@@ -213,7 +213,7 @@ class TestAtomicWrite:
 
         _atomic_write(temp_file, new_content)
 
-        assert temp_file.read_text() == new_content
+        assert temp_file.read_text(encoding="utf-8") == new_content
         assert temp_file.read_text() != original_content
 
     def test_cleans_up_temp_file_on_success(self, temp_dir: Path) -> None:
@@ -300,7 +300,7 @@ class TestAtomicWrite:
 
         _atomic_write(target, content)
 
-        assert target.read_text() == content
+        assert target.read_text(encoding="utf-8") == content
 
 
 class TestCreateBackupInternal:
@@ -326,7 +326,7 @@ class TestCreateBackupInternal:
 
         backup = _create_backup_internal(temp_file)
 
-        assert backup.read_text() == original_content
+        assert backup.read_text(encoding="utf-8") == original_content
 
     def test_backup_preserves_metadata(self, temp_file: Path) -> None:
         """Test backup preserves file metadata (timestamps, permissions).
@@ -383,7 +383,7 @@ class TestRestoreBackupInternal:
         # Restore
         _restore_backup_internal(backup, temp_file)
 
-        assert temp_file.read_text() == "test content"
+        assert temp_file.read_text(encoding="utf-8") == "test content"
 
     def test_restores_to_new_location(self, temp_file: Path, temp_dir: Path) -> None:
         """Test restore can write to different target path.
@@ -396,7 +396,7 @@ class TestRestoreBackupInternal:
         _restore_backup_internal(backup, new_target)
 
         assert new_target.exists()
-        assert new_target.read_text() == "test content"
+        assert new_target.read_text(encoding="utf-8") == "test content"
 
     def test_raises_on_missing_backup(self, temp_dir: Path) -> None:
         """Test _restore_backup_internal fails for missing backup.
@@ -548,7 +548,7 @@ class TestSafeWriteFile:
         safe_write_file(target, content, create_backup=False)
 
         assert target.exists()
-        assert target.read_text() == content
+        assert target.read_text(encoding="utf-8") == content
 
     def test_creates_backup_by_default(self, temp_file: Path) -> None:
         """Test safe_write_file creates backup by default.
@@ -561,7 +561,7 @@ class TestSafeWriteFile:
 
         assert backup is not None
         assert backup.exists()
-        assert backup.read_text() == original_content
+        assert backup.read_text(encoding="utf-8") == original_content
 
     def test_skips_backup_when_disabled(self, temp_file: Path) -> None:
         """Test safe_write_file skips backup when create_backup=False.
@@ -601,7 +601,7 @@ class TestSafeWriteFile:
                 safe_write_file(temp_file, "new content")
 
         # Original content should be restored
-        assert temp_file.read_text() == original_content
+        assert temp_file.read_text(encoding="utf-8") == original_content
 
     def test_accepts_string_path(self, temp_dir: Path) -> None:
         """Test safe_write_file accepts string paths.
@@ -624,7 +624,7 @@ class TestSafeWriteFile:
 
         safe_write_file(target, content, create_backup=False)
 
-        assert target.read_text() == content
+        assert target.read_text(encoding="utf-8") == content
 
     def test_overwrites_existing_content(self, temp_file: Path) -> None:
         """Test safe_write_file completely replaces existing content.
@@ -633,7 +633,7 @@ class TestSafeWriteFile:
         """
         safe_write_file(temp_file, "replacement", create_backup=False)
 
-        assert temp_file.read_text() == "replacement"
+        assert temp_file.read_text(encoding="utf-8") == "replacement"
 
     def test_creates_parent_directories(self, temp_dir: Path) -> None:
         """Test safe_write_file creates missing parent directories.
@@ -671,7 +671,7 @@ class TestCreateBackup:
 
         backup = create_backup(temp_file)
 
-        assert backup.read_text() == original
+        assert backup.read_text(encoding="utf-8") == original
 
     def test_raises_on_nonexistent_file(self, temp_dir: Path) -> None:
         """Test create_backup fails for non-existent files.
@@ -708,7 +708,7 @@ class TestRestoreBackup:
 
         restore_backup(backup, temp_file)
 
-        assert temp_file.read_text() == "test content"
+        assert temp_file.read_text(encoding="utf-8") == "test content"
 
     def test_infers_target_from_backup_name(self, temp_file: Path) -> None:
         """Test restore_backup infers target from backup filename.
@@ -722,7 +722,7 @@ class TestRestoreBackup:
 
         # Should restore to original location
         assert temp_file.exists()
-        assert temp_file.read_text() == "test content"
+        assert temp_file.read_text(encoding="utf-8") == "test content"
 
     def test_raises_on_missing_backup(self, temp_dir: Path) -> None:
         """Test restore_backup fails for non-existent backup.
@@ -759,7 +759,7 @@ class TestRestoreBackup:
 
         restore_backup(str(backup), str(temp_file))
 
-        assert temp_file.read_text() == "test content"
+        assert temp_file.read_text(encoding="utf-8") == "test content"
 
 
 class TestFindRequirementsFiles:
@@ -1023,7 +1023,7 @@ class TestCreateTimestampedBackup:
 
         backup = create_timestamped_backup(temp_file)
 
-        assert backup.read_text() == original
+        assert backup.read_text(encoding="utf-8") == original
 
     def test_multiple_backups_unique(self, temp_file: Path) -> None:
         """Test multiple backups have unique names.
@@ -1118,7 +1118,7 @@ class TestEdgeCases:
         temp_file.write_text("modified")
         restore_backup(backup, temp_file)
 
-        assert temp_file.read_text() == original
+        assert temp_file.read_text(encoding="utf-8") == original
 
     def test_very_long_filename(self, temp_dir: Path) -> None:
         """Test handles very long filenames.
@@ -1161,7 +1161,7 @@ class TestEdgeCases:
         # Backup empty file
         backup = create_backup(empty_file)
         assert backup.exists()
-        assert backup.read_text() == ""
+        assert backup.read_text(encoding="utf-8") == ""
 
     def test_whitespace_only_content(self, temp_dir: Path) -> None:
         """Test files with only whitespace.
