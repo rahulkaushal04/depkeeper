@@ -83,8 +83,13 @@ test:
 
 .PHONY: docs
 docs:
-	cd docs && mkdocs build
+	mkdocs build
 	@echo "$(GREEN)✓ Documentation built$(RESET)"
+
+.PHONY: docs-serve
+docs-serve:
+	mkdocs serve
+	@echo "$(GREEN)✓ Documentation server running$(RESET)"
 
 
 # ==========================================================

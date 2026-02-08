@@ -1,0 +1,280 @@
+# ============================================================
+# MkDocs Configuration for depkeeper
+# ============================================================
+# Documentation: https://docs.depkeeper.dev
+# Repository: https://github.com/rahulkaushal04/depkeeper
+# ============================================================
+
+site_name: depkeeper
+site_description: Modern, intelligent Python dependency management for requirements.txt files
+site_author: Rahul Kaushal
+site_url: https://docs.depkeeper.dev
+
+repo_name: rahulkaushal04/depkeeper
+repo_url: https://github.com/rahulkaushal04/depkeeper
+edit_uri: edit/main/docs/
+
+copyright: Copyright &copy; 2024-2026 Rahul Kaushal
+
+# Strict mode ensures broken links and references cause build failures
+strict: true
+
+# ============================================================
+# Theme Configuration
+# ============================================================
+
+theme:
+  name: material
+  language: en
+
+  # Color palette with automatic dark/light mode toggle
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+  # Custom fonts for better readability
+  font:
+    text: Inter
+    code: JetBrains Mono
+
+  features:
+    # Navigation enhancements
+    - navigation.instant          # Fast page loading without full reload
+    - navigation.instant.prefetch # Prefetch pages on hover
+    - navigation.tracking         # Update URL with active anchor
+    - navigation.tabs             # Top-level sections in tabs
+    - navigation.tabs.sticky      # Keep tabs visible when scrolling
+    - navigation.sections         # Render top-level sections as groups
+    - navigation.expand           # Expand all collapsible sections by default
+    - navigation.path             # Show breadcrumb navigation
+    - navigation.top              # Back-to-top button
+    - navigation.footer           # Previous/next page navigation in footer
+    - navigation.indexes          # Allow section index pages
+
+    # Search improvements
+    - search.suggest              # Show search suggestions
+    - search.highlight            # Highlight search terms in results
+    - search.share                # Share search results via deep link
+
+    # Content features
+    - content.code.copy           # Copy button for code blocks
+    - content.code.annotate       # Allow annotations in code blocks
+    - content.tabs.link           # Link content tabs across pages
+    - content.tooltips            # Improved tooltips for abbreviations
+    - content.action.edit         # Edit this page button
+    - content.action.view         # View source of this page button
+
+    # Table of contents
+    - toc.follow                  # Sidebar scrolls with active heading
+
+  # Icons and branding
+  icon:
+    repo: fontawesome/brands/github
+    logo: material/package-variant-closed
+    edit: material/pencil
+    view: material/eye
+
+  favicon: assets/favicon.png
+
+# ============================================================
+# Plugins
+# ============================================================
+
+plugins:
+  # Built-in search with custom configuration
+  - search:
+      separator: '[\s\-\_\.\(\)\[\]\/]+'
+      lang: en
+
+  # API documentation from docstrings
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [.]
+          options:
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            show_category_heading: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            heading_level: 2
+            docstring_style: google
+            docstring_section_style: spacy
+            merge_init_into_class: true
+            show_signature_annotations: true
+            separate_signature: true
+            signature_crossrefs: true
+            members_order: source
+            filters:
+              - "!^_"          # Exclude private members
+              - "^__init__$"   # Include __init__ methods
+
+  # Minify HTML output for faster loading
+  - minify:
+      minify_html: true
+      minify_js: true
+      minify_css: true
+      htmlmin_opts:
+        remove_comments: true
+
+# ============================================================
+# Markdown Extensions
+# ============================================================
+
+markdown_extensions:
+  # Python Markdown core extensions
+  - abbr                # Abbreviations with tooltips
+  - admonition          # Call-out boxes (note, warning, etc.)
+  - attr_list           # Add HTML attributes to elements
+  - def_list            # Definition lists
+  - footnotes           # Footnote support
+  - md_in_html          # Markdown inside HTML blocks
+  - tables              # Table support
+  - toc:                # Table of contents
+      permalink: true
+      permalink_title: Link to this section
+      toc_depth: 3
+
+  # PyMdown Extensions for enhanced Markdown
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret      # Superscript with ^^text^^
+  - pymdownx.critic     # Track changes and comments
+  - pymdownx.details    # Collapsible call-outs
+  - pymdownx.emoji:
+        emoji_index: material.extensions.emoji.twemoji
+        emoji_generator: material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+      auto_title: true
+  - pymdownx.inlinehilite  # Inline code highlighting
+  - pymdownx.keys          # Keyboard key styling
+  - pymdownx.magiclink:
+      normalize_issue_symbols: true
+      repo_url_shorthand: true
+      user: rahulkaushal04
+      repo: depkeeper
+  - pymdownx.mark          # Highlight text with ==text==
+  - pymdownx.smartsymbols  # Smart symbols (arrows, fractions, etc.)
+  - pymdownx.snippets:
+      auto_append:
+        - includes/abbreviations.md
+      check_paths: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+  - pymdownx.tabbed:
+      alternate_style: true
+      combine_header_slug: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+      clickable_checkbox: false
+  - pymdownx.tilde         # Subscript with ~text~ and strikethrough
+
+# ============================================================
+# Extra Configuration
+# ============================================================
+
+extra:
+  version:
+    provider: mike
+
+  # Social links in footer
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/rahulkaushal04/depkeeper
+      name: depkeeper on GitHub
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/depkeeper/
+      name: depkeeper on PyPI
+    - icon: fontawesome/solid/bug
+      link: https://github.com/rahulkaushal04/depkeeper/issues
+      name: Report an issue
+
+  # Status badge configuration
+  status:
+    new: Recently added
+    deprecated: Deprecated
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/extra.js
+
+# ============================================================
+# Navigation Structure
+# ============================================================
+
+nav:
+  - Home: index.md
+
+  - Getting Started:
+    - getting-started/index.md
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+    - Basic Usage: getting-started/basic-usage.md
+
+  - User Guide:
+    - guides/index.md
+    - Checking for Updates: guides/checking-updates.md
+    - Updating Dependencies: guides/updating-dependencies.md
+    - Dependency Resolution: guides/dependency-resolution.md
+    - CI/CD Integration: guides/ci-cd-integration.md
+    - Configuration: guides/configuration.md
+    - Best Practices: guides/best-practices.md
+    - Troubleshooting: guides/troubleshooting.md
+
+  - Reference:
+    - reference/index.md
+    - CLI Commands: reference/cli-commands.md
+    - Python API: reference/python-api.md
+    - Configuration Options: reference/configuration-options.md
+    - Exit Codes: reference/exit-codes.md
+    - File Formats: reference/file-formats.md
+
+  - Contributing:
+    - contributing/index.md
+    - Development Setup: contributing/development-setup.md
+    - Code Style: contributing/code-style.md
+    - Testing: contributing/testing.md
+    - Submitting Changes: contributing/submitting-changes.md
+    - Release Process: contributing/release-process.md
+
+  - Community:
+    - FAQ: community/faq.md
+    - Changelog: changelog.md
+    - License: license.md
+
+# ============================================================
+# Validation and Hooks
+# ============================================================
+
+validation:
+  nav:
+    omitted_files: info
+    not_found: warn
+    absolute_links: info
+  links:
+    not_found: warn
+    absolute_links: info
+    unrecognized_links: info
