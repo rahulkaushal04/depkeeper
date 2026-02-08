@@ -25,41 +25,41 @@ Managing Python dependencies shouldn't be painful. While `pip` is simple and Poe
 
 <div class="grid cards" markdown>
 
--   :material-lightning-bolt:{ .lg .middle } **Smart Updates**
+- :material-lightning-bolt:{ .lg .middle } **Smart Updates**
 
-    ---
+  ***
 
-    Automatically discover available updates with intelligent recommendations that respect semantic versioning boundaries.
+  Automatically discover available updates with intelligent recommendations that respect semantic versioning boundaries.
 
--   :material-shield-check:{ .lg .middle } **Safe by Default**
+- :material-shield-check:{ .lg .middle } **Safe by Default**
 
-    ---
+  ***
 
-    Never accidentally cross major version boundaries. depkeeper keeps your environment stable while staying current.
+  Never accidentally cross major version boundaries. depkeeper keeps your environment stable while staying current.
 
--   :material-vector-triangle:{ .lg .middle } **Conflict Resolution**
+- :material-vector-triangle:{ .lg .middle } **Conflict Resolution**
 
-    ---
+  ***
 
-    Detect and resolve dependency conflicts before they break your builds.
+  Detect and resolve dependency conflicts before they break your builds.
 
--   :material-rocket-launch:{ .lg .middle } **Fast & Concurrent**
+- :material-rocket-launch:{ .lg .middle } **Fast & Concurrent**
 
-    ---
+  ***
 
-    Async PyPI queries maximize performance. Check hundreds of packages in seconds.
+  Async PyPI queries maximize performance. Check hundreds of packages in seconds.
 
--   :material-format-list-bulleted:{ .lg .middle } **Multiple Formats**
+- :material-format-list-bulleted:{ .lg .middle } **Multiple Formats**
 
-    ---
+  ***
 
-    Output as beautiful tables, simple text, or JSON for seamless CI/CD integration.
+  Output as beautiful tables, simple text, or JSON for seamless CI/CD integration.
 
--   :material-puzzle:{ .lg .middle } **Pip Compatible**
+- :material-puzzle:{ .lg .middle } **Pip Compatible**
 
-    ---
+  ***
 
-    Works alongside pip, not instead of it. No need to change your workflow.
+  Works alongside pip, not instead of it. No need to change your workflow.
 
 </div>
 
@@ -106,16 +106,16 @@ Apply 3 updates? [y/N]: y
 
 ## Feature Comparison
 
-| Feature | pip | Poetry | depkeeper |
-|---------|-----|--------|-----------|
-| Simple workflow | ✅ | ⚠️ | ✅ |
-| Dependency resolution | ❌ | ✅ | ✅ |
-| Update recommendations | ❌ | ⚠️ | ✅ |
-| Major version boundaries | ❌ | ❌ | ✅ |
-| Conflict detection | ❌ | ✅ | ✅ |
-| CI/CD friendly | ✅ | ✅ | ✅ |
-| requirements.txt support | ✅ | ❌ | ✅ |
-| No lock-in | ✅ | ❌ | ✅ |
+| Feature                  | pip | Poetry | depkeeper |
+| ------------------------ | --- | ------ | --------- |
+| Simple workflow          | ✅  | ⚠️     | ✅        |
+| Dependency resolution    | ❌  | ✅     | ✅        |
+| Update recommendations   | ❌  | ⚠️     | ✅        |
+| Major version boundaries | ❌  | ❌     | ✅        |
+| Conflict detection       | ❌  | ✅     | ✅        |
+| CI/CD friendly           | ✅  | ✅     | ✅        |
+| requirements.txt support | ✅  | ❌     | ✅        |
+| No lock-in               | ✅  | ❌     | ✅        |
 
 ---
 
@@ -147,29 +147,29 @@ Apply 3 updates? [y/N]: y
 
 <div class="grid cards" markdown>
 
--   :material-play-circle:{ .lg .middle } **[Quick Start](getting-started/quickstart.md)**
+- :material-play-circle:{ .lg .middle } **[Quick Start](getting-started/quickstart.md)**
 
-    ---
+  ***
 
-    Get up and running in 5 minutes with the essentials.
+  Get up and running in 5 minutes with the essentials.
 
--   :material-school:{ .lg .middle } **[User Guide](guides/index.md)**
+- :material-school:{ .lg .middle } **[User Guide](guides/index.md)**
 
-    ---
+  ***
 
-    Deep dive into all features and workflows.
+  Deep dive into all features and workflows.
 
--   :material-api:{ .lg .middle } **[API Reference](reference/python-api.md)**
+- :material-api:{ .lg .middle } **[API Reference](reference/python-api.md)**
 
-    ---
+  ***
 
-    Integrate depkeeper programmatically.
+  Integrate depkeeper programmatically.
 
--   :material-account-group:{ .lg .middle } **[Contributing](contributing/index.md)**
+- :material-account-group:{ .lg .middle } **[Contributing](contributing/index.md)**
 
-    ---
+  ***
 
-    Help make depkeeper even better.
+  Help make depkeeper even better.
 
 </div>
 

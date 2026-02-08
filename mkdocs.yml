@@ -261,8 +261,8 @@ nav:
 
   - Community:
       - FAQ: community/faq.md
-      - Changelog: changelog.md
-      - License: license.md
+      - Changelog: community/changelog.md
+      - License: community/license.md
 
 # ============================================================
 # Validation and Hooks
