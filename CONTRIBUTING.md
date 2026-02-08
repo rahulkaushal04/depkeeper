@@ -276,6 +276,6 @@ Please provide:
 
 - GitHub Discussions
 - Security reports via the **Security** tab in this repository
-- Documentation: [https://docs.depkeeper.dev](https://docs.depkeeper.dev) (coming soon)
+- Documentation: [https://rahulkaushal04.github.io/depkeeper/](https://rahulkaushal04.github.io/depkeeper/) (coming soon)
 
 Thank you for helping make **depkeeper** better! 🚀

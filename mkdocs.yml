@@ -1,14 +1,14 @@
 # ============================================================
 # MkDocs Configuration for depkeeper
 # ============================================================
-# Documentation: https://docs.depkeeper.dev
+# Documentation: https://rahulkaushal04.github.io/depkeeper/
 # Repository: https://github.com/rahulkaushal04/depkeeper
 # ============================================================
 
 site_name: depkeeper
 site_description: Modern, intelligent Python dependency management for requirements.txt files
 site_author: Rahul Kaushal
-site_url: https://docs.depkeeper.dev
+site_url: https://rahulkaushal04.github.io/depkeeper/
 
 repo_name: rahulkaushal04/depkeeper
 repo_url: https://github.com/rahulkaushal04/depkeeper

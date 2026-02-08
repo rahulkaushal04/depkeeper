@@ -94,7 +94,7 @@ docs = [
 
 [project.urls]
 Homepage     = "https://github.com/rahulkaushal04/depkeeper"
-Documentation = "https://docs.depkeeper.dev"
+Documentation = "https://rahulkaushal04.github.io/depkeeper/"
 Repository   = "https://github.com/rahulkaushal04/depkeeper"
 "Bug Tracker" = "https://github.com/rahulkaushal04/depkeeper/issues"
 Changelog    = "https://github.com/rahulkaushal04/depkeeper/blob/main/CHANGELOG.md"

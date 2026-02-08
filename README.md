@@ -103,7 +103,7 @@ Options:
 
 ## Documentation
 
-Full documentation will be available soon at **[https://docs.depkeeper.dev](https://docs.depkeeper.dev)**
+Full documentation will be available soon at **[https://rahulkaushal04.github.io/depkeeper/](https://rahulkaushal04.github.io/depkeeper/)**
 
 ---
 

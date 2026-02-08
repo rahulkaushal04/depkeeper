@@ -22,7 +22,7 @@ Programmatic usage::
     >>> requirements = parser.parse_file("requirements.txt")
 
 For more information, see:
-    https://docs.depkeeper.dev
+    https://rahulkaushal04.github.io/depkeeper/
 """
 
 from __future__ import annotations
