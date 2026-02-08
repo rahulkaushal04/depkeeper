@@ -84,6 +84,7 @@ docs = [
     "mkdocs-material>=9.7.1",
     "mkdocstrings[python]>=0.26.1",
     "pymdown-extensions>=10.15",
+    "mkdocs-minify-plugin>=0.8.0",
 ]
 
 

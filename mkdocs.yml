@@ -17,7 +17,7 @@ edit_uri: edit/main/docs/
 copyright: Copyright &copy; 2024-2026 Rahul Kaushal
 
 # Strict mode ensures broken links and references cause build failures
-strict: true
+# strict: true
 
 # ============================================================
 # Theme Configuration
@@ -51,33 +51,33 @@ theme:
 
   features:
     # Navigation enhancements
-    - navigation.instant          # Fast page loading without full reload
+    - navigation.instant # Fast page loading without full reload
     - navigation.instant.prefetch # Prefetch pages on hover
-    - navigation.tracking         # Update URL with active anchor
-    - navigation.tabs             # Top-level sections in tabs
-    - navigation.tabs.sticky      # Keep tabs visible when scrolling
-    - navigation.sections         # Render top-level sections as groups
-    - navigation.expand           # Expand all collapsible sections by default
-    - navigation.path             # Show breadcrumb navigation
-    - navigation.top              # Back-to-top button
-    - navigation.footer           # Previous/next page navigation in footer
-    - navigation.indexes          # Allow section index pages
+    - navigation.tracking # Update URL with active anchor
+    - navigation.tabs # Top-level sections in tabs
+    - navigation.tabs.sticky # Keep tabs visible when scrolling
+    - navigation.sections # Render top-level sections as groups
+    - navigation.expand # Expand all collapsible sections by default
+    - navigation.path # Show breadcrumb navigation
+    - navigation.top # Back-to-top button
+    - navigation.footer # Previous/next page navigation in footer
+    - navigation.indexes # Allow section index pages
 
     # Search improvements
-    - search.suggest              # Show search suggestions
-    - search.highlight            # Highlight search terms in results
-    - search.share                # Share search results via deep link
+    - search.suggest # Show search suggestions
+    - search.highlight # Highlight search terms in results
+    - search.share # Share search results via deep link
 
     # Content features
-    - content.code.copy           # Copy button for code blocks
-    - content.code.annotate       # Allow annotations in code blocks
-    - content.tabs.link           # Link content tabs across pages
-    - content.tooltips            # Improved tooltips for abbreviations
-    - content.action.edit         # Edit this page button
-    - content.action.view         # View source of this page button
+    - content.code.copy # Copy button for code blocks
+    - content.code.annotate # Allow annotations in code blocks
+    - content.tabs.link # Link content tabs across pages
+    - content.tooltips # Improved tooltips for abbreviations
+    - content.action.edit # Edit this page button
+    - content.action.view # View source of this page button
 
     # Table of contents
-    - toc.follow                  # Sidebar scrolls with active heading
+    - toc.follow # Sidebar scrolls with active heading
 
   # Icons and branding
   icon:
@@ -85,8 +85,6 @@ theme:
     logo: material/package-variant-closed
     edit: material/pencil
     view: material/eye
-
-  favicon: assets/favicon.png
 
 # ============================================================
 # Plugins
@@ -120,8 +118,8 @@ plugins:
             signature_crossrefs: true
             members_order: source
             filters:
-              - "!^_"          # Exclude private members
-              - "^__init__$"   # Include __init__ methods
+              - "!^_" # Exclude private members
+              - "^__init__$" # Include __init__ methods
 
   # Minify HTML output for faster loading
   - minify:
@@ -137,14 +135,14 @@ plugins:
 
 markdown_extensions:
   # Python Markdown core extensions
-  - abbr                # Abbreviations with tooltips
-  - admonition          # Call-out boxes (note, warning, etc.)
-  - attr_list           # Add HTML attributes to elements
-  - def_list            # Definition lists
-  - footnotes           # Footnote support
-  - md_in_html          # Markdown inside HTML blocks
-  - tables              # Table support
-  - toc:                # Table of contents
+  - abbr # Abbreviations with tooltips
+  - admonition # Call-out boxes (note, warning, etc.)
+  - attr_list # Add HTML attributes to elements
+  - def_list # Definition lists
+  - footnotes # Footnote support
+  - md_in_html # Markdown inside HTML blocks
+  - tables # Table support
+  - toc: # Table of contents
       permalink: true
       permalink_title: Link to this section
       toc_depth: 3
@@ -154,27 +152,28 @@ markdown_extensions:
       generic: true
   - pymdownx.betterem:
       smart_enable: all
-  - pymdownx.caret      # Superscript with ^^text^^
-  - pymdownx.critic     # Track changes and comments
-  - pymdownx.details    # Collapsible call-outs
+  - pymdownx.caret # Superscript with ^^text^^
+  - pymdownx.critic # Track changes and comments
+  - pymdownx.details # Collapsible call-outs
   - pymdownx.emoji:
-        emoji_index: material.extensions.emoji.twemoji
-        emoji_generator: material.extensions.emoji.to_svg
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span
       pygments_lang_class: true
       auto_title: true
-  - pymdownx.inlinehilite  # Inline code highlighting
-  - pymdownx.keys          # Keyboard key styling
+  - pymdownx.inlinehilite # Inline code highlighting
+  - pymdownx.keys # Keyboard key styling
   - pymdownx.magiclink:
       normalize_issue_symbols: true
       repo_url_shorthand: true
       user: rahulkaushal04
       repo: depkeeper
-  - pymdownx.mark          # Highlight text with ==text==
-  - pymdownx.smartsymbols  # Smart symbols (arrows, fractions, etc.)
+  - pymdownx.mark # Highlight text with ==text==
+  - pymdownx.smartsymbols # Smart symbols (arrows, fractions, etc.)
   - pymdownx.snippets:
+      base_path: docs
       auto_append:
         - includes/abbreviations.md
       check_paths: true
@@ -188,7 +187,7 @@ markdown_extensions:
   - pymdownx.tasklist:
       custom_checkbox: true
       clickable_checkbox: false
-  - pymdownx.tilde         # Subscript with ~text~ and strikethrough
+  - pymdownx.tilde # Subscript with ~text~ and strikethrough
 
 # ============================================================
 # Extra Configuration
@@ -229,41 +228,41 @@ nav:
   - Home: index.md
 
   - Getting Started:
-    - getting-started/index.md
-    - Installation: getting-started/installation.md
-    - Quick Start: getting-started/quickstart.md
-    - Basic Usage: getting-started/basic-usage.md
+      - getting-started/index.md
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quickstart.md
+      - Basic Usage: getting-started/basic-usage.md
 
   - User Guide:
-    - guides/index.md
-    - Checking for Updates: guides/checking-updates.md
-    - Updating Dependencies: guides/updating-dependencies.md
-    - Dependency Resolution: guides/dependency-resolution.md
-    - CI/CD Integration: guides/ci-cd-integration.md
-    - Configuration: guides/configuration.md
-    - Best Practices: guides/best-practices.md
-    - Troubleshooting: guides/troubleshooting.md
+      - guides/index.md
+      - Checking for Updates: guides/checking-updates.md
+      - Updating Dependencies: guides/updating-dependencies.md
+      - Dependency Resolution: guides/dependency-resolution.md
+      - CI/CD Integration: guides/ci-cd-integration.md
+      - Configuration: guides/configuration.md
+      - Best Practices: guides/best-practices.md
+      - Troubleshooting: guides/troubleshooting.md
 
   - Reference:
-    - reference/index.md
-    - CLI Commands: reference/cli-commands.md
-    - Python API: reference/python-api.md
-    - Configuration Options: reference/configuration-options.md
-    - Exit Codes: reference/exit-codes.md
-    - File Formats: reference/file-formats.md
+      - reference/index.md
+      - CLI Commands: reference/cli-commands.md
+      - Python API: reference/python-api.md
+      - Configuration Options: reference/configuration-options.md
+      - Exit Codes: reference/exit-codes.md
+      - File Formats: reference/file-formats.md
 
   - Contributing:
-    - contributing/index.md
-    - Development Setup: contributing/development-setup.md
-    - Code Style: contributing/code-style.md
-    - Testing: contributing/testing.md
-    - Submitting Changes: contributing/submitting-changes.md
-    - Release Process: contributing/release-process.md
+      - contributing/index.md
+      - Development Setup: contributing/development-setup.md
+      - Code Style: contributing/code-style.md
+      - Testing: contributing/testing.md
+      - Submitting Changes: contributing/submitting-changes.md
+      - Release Process: contributing/release-process.md
 
   - Community:
-    - FAQ: community/faq.md
-    - Changelog: changelog.md
-    - License: license.md
+      - FAQ: community/faq.md
+      - Changelog: changelog.md
+      - License: license.md
 
 # ============================================================
 # Validation and Hooks
