@@ -1,0 +1,490 @@
+/* ============================================================
+ * Custom Styles for depkeeper Documentation
+ * ============================================================
+ * Enhancements for Material for MkDocs theme
+ * ============================================================ */
+
+/* ============================================================
+ * Root Variables
+ * ============================================================ */
+:root {
+    --depkeeper-shadow-light: 0 4px 10px rgba(0, 0, 0, 0.1);
+    --depkeeper-shadow-medium: 0 8px 20px rgba(0, 0, 0, 0.15);
+    --depkeeper-transition: 0.2s ease-in-out;
+    --depkeeper-border-radius: 0.5rem;
+}
+
+/* Dark mode adjustments */
+[data-md-color-scheme="slate"] {
+    --depkeeper-shadow-light: 0 4px 10px rgba(0, 0, 0, 0.3);
+    --depkeeper-shadow-medium: 0 8px 20px rgba(0, 0, 0, 0.4);
+}
+
+/* ============================================================
+ * Hero Section (Home Page)
+ * ============================================================ */
+.hero {
+    text-align: center;
+    padding: 3rem 1rem;
+    margin-bottom: 2rem;
+}
+
+.hero h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+}
+
+.hero p {
+    font-size: 1.2rem;
+    color: var(--md-default-fg-color--light);
+    margin-bottom: 2rem;
+}
+
+.hero .md-button {
+    margin: 0.5rem;
+    padding: 0.75rem 2rem;
+    font-weight: 500;
+    transition: transform var(--depkeeper-transition), box-shadow var(--depkeeper-transition);
+}
+
+.hero .md-button:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--depkeeper-shadow-light);
+}
+
+/* ============================================================
+ * Footer CTA Section
+ * ============================================================ */
+.footer-cta {
+    text-align: center;
+    padding: 3rem 1rem;
+    margin-top: 3rem;
+    border-top: 1px solid var(--md-default-fg-color--lightest);
+    background-color: var(--md-default-bg-color);
+}
+
+.footer-cta h2 {
+    margin-bottom: 1rem;
+}
+
+.footer-cta p {
+    color: var(--md-default-fg-color--light);
+    margin-bottom: 1.5rem;
+}
+
+/* ============================================================
+ * Grid Cards
+ * ============================================================ */
+.md-typeset .grid.cards > ul > li {
+    border: 1px solid var(--md-default-fg-color--lightest);
+    border-radius: var(--depkeeper-border-radius);
+    transition: border-color var(--depkeeper-transition),
+                box-shadow var(--depkeeper-transition),
+                transform var(--depkeeper-transition);
+}
+
+.md-typeset .grid.cards > ul > li:hover {
+    border-color: var(--md-primary-fg-color);
+    box-shadow: var(--depkeeper-shadow-light);
+    transform: translateY(-2px);
+}
+
+/* Add icon styling for cards */
+.md-typeset .grid.cards > ul > li :is(.twemoji, .lg, .xl) {
+    filter: brightness(1.1);
+}
+
+/* ============================================================
+ * Code Blocks
+ * ============================================================ */
+.md-typeset pre > code {
+    font-size: 0.85em;
+    line-height: 1.5;
+}
+
+/* Code block title styling */
+.md-typeset .highlight > .filename {
+    font-weight: 600;
+    padding: 0.5rem 1rem;
+    background-color: var(--md-code-bg-color);
+    border-bottom: 1px solid var(--md-default-fg-color--lightest);
+}
+
+/* Copy button improvements */
+.md-clipboard {
+    transition: opacity var(--depkeeper-transition);
+}
+
+.md-clipboard:hover {
+    opacity: 1;
+}
+
+/* Inline code improvements */
+.md-typeset code {
+    padding: 0.2em 0.4em;
+    border-radius: 0.25rem;
+    background-color: var(--md-code-bg-color);
+}
+
+/* Terminal/console output styling - adapts to theme */
+.md-typeset .highlight .language-console pre,
+.md-typeset .highlight .language-bash pre,
+.md-typeset .highlight .language-shell pre {
+    background-color: var(--md-code-bg-color);
+    border-left: 4px solid var(--md-primary-fg-color);
+}
+
+/* ============================================================
+ * Tables
+ * ============================================================ */
+.md-typeset table:not([class]) {
+    font-size: 0.85em;
+    border-radius: var(--depkeeper-border-radius);
+    overflow: hidden;
+}
+
+.md-typeset table:not([class]) th {
+    background-color: var(--md-default-fg-color--lightest);
+    font-weight: 600;
+    text-align: left;
+    padding: 0.8rem 1rem;
+}
+
+.md-typeset table:not([class]) td {
+    padding: 0.6rem 1rem;
+}
+
+.md-typeset table:not([class]) tbody tr {
+    transition: background-color var(--depkeeper-transition);
+}
+
+.md-typeset table:not([class]) tbody tr:hover {
+    background-color: var(--md-default-fg-color--lightest);
+}
+
+/* ============================================================
+ * Admonitions (Call-out Boxes)
+ * ============================================================ */
+.md-typeset .admonition {
+    border-radius: var(--depkeeper-border-radius);
+}
+
+/* Custom admonition colors that work in both themes */
+.md-typeset .admonition.tip {
+    border-left-color: var(--md-success-fg-color);
+}
+
+.md-typeset .admonition.warning {
+    border-left-color: var(--md-warning-fg-color);
+}
+
+.md-typeset .admonition.danger,
+.md-typeset .admonition.error {
+    border-left-color: var(--md-error-fg-color);
+}
+
+.md-typeset .admonition.info,
+.md-typeset .admonition.note {
+    border-left-color: var(--md-info-fg-color);
+}
+
+/* ============================================================
+ * Navigation Improvements
+ * ============================================================ */
+.md-nav__item--active > .md-nav__link {
+    font-weight: 600;
+    color: var(--md-primary-fg-color);
+}
+
+.md-nav__link {
+    transition: color var(--depkeeper-transition);
+}
+
+.md-nav__link:hover {
+    color: var(--md-accent-fg-color);
+}
+
+/* Improve section titles in navigation */
+.md-nav__title {
+    font-weight: 600;
+}
+
+/* ============================================================
+ * Search Improvements
+ * ============================================================ */
+.md-search__form {
+    border-radius: var(--depkeeper-border-radius);
+    box-shadow: var(--depkeeper-shadow-light);
+    transition: box-shadow var(--depkeeper-transition);
+}
+
+.md-search__form:focus-within {
+    box-shadow: var(--depkeeper-shadow-medium);
+}
+
+.md-search__input {
+    border-radius: var(--depkeeper-border-radius);
+}
+
+/* Search results improvements */
+.md-search-result__article {
+    border-radius: var(--depkeeper-border-radius);
+    transition: background-color var(--depkeeper-transition);
+}
+
+/* ============================================================
+ * Badges and Labels
+ * ============================================================ */
+.badge {
+    display: inline-block;
+    padding: 0.2em 0.6em;
+    font-size: 0.75em;
+    font-weight: 600;
+    line-height: 1;
+    border-radius: 0.25rem;
+    white-space: nowrap;
+}
+
+.badge-new {
+    background-color: var(--md-success-fg-color);
+    color: white;
+}
+
+.badge-deprecated {
+    background-color: var(--md-error-fg-color);
+    color: white;
+}
+
+.badge-experimental {
+    background-color: var(--md-warning-fg-color);
+    color: white;
+}
+
+/* ============================================================
+ * Version Selector
+ * ============================================================ */
+.md-version {
+    font-size: 0.8rem;
+    opacity: 0.9;
+}
+
+.md-version__current {
+    font-weight: 600;
+}
+
+/* ============================================================
+ * API Documentation (mkdocstrings)
+ * ============================================================ */
+/* Function/method signatures */
+.doc-signature {
+    background-color: var(--md-code-bg-color);
+    padding: 0.5rem 1rem;
+    border-radius: var(--depkeeper-border-radius);
+    border-left: 4px solid var(--md-primary-fg-color);
+    margin-bottom: 1rem;
+}
+
+/* Parameter lists */
+.doc-parameters dt {
+    font-weight: 600;
+    color: var(--md-primary-fg-color);
+}
+
+/* ============================================================
+ * Accessibility Improvements
+ * ============================================================ */
+/* Focus visible for keyboard navigation */
+a:focus-visible,
+button:focus-visible {
+    outline: 2px solid var(--md-accent-fg-color);
+    outline-offset: 2px;
+    border-radius: 0.25rem;
+}
+
+/* Skip to content link */
+.skip-to-content {
+    position: absolute;
+    top: -40px;
+    left: 0;
+    background: var(--md-primary-fg-color);
+    color: white;
+    padding: 0.5rem 1rem;
+    z-index: 100;
+    transition: top var(--depkeeper-transition);
+}
+
+.skip-to-content:focus {
+    top: 0;
+}
+
+/* ============================================================
+ * Smooth Scrolling
+ * ============================================================ */
+html {
+    scroll-behavior: smooth;
+}
+
+/* Scroll margin for anchors (prevents header overlap) */
+:target {
+    scroll-margin-top: 5rem;
+}
+
+/* ============================================================
+ * Mobile Responsiveness
+ * ============================================================ */
+@media screen and (max-width: 76.1875em) {
+    .hero {
+        padding: 2rem 1rem;
+    }
+
+    .hero h1 {
+        font-size: 2rem;
+    }
+
+    .hero p {
+        font-size: 1rem;
+    }
+
+    .hero .md-button {
+        display: block;
+        width: 100%;
+        margin: 0.5rem 0;
+    }
+
+    .footer-cta {
+        padding: 2rem 1rem;
+    }
+
+    /* Stack tables horizontally on mobile */
+    .md-typeset table:not([class]) {
+        font-size: 0.75em;
+    }
+}
+
+/* Extra small screens */
+@media screen and (max-width: 480px) {
+    .hero h1 {
+        font-size: 1.75rem;
+    }
+
+    .md-typeset pre > code {
+        font-size: 0.75em;
+    }
+}
+
+/* ============================================================
+ * Print Styles
+ * ============================================================ */
+@media print {
+    /* Hide navigation elements */
+    .md-sidebar,
+    .md-header,
+    .md-footer,
+    .md-search,
+    .md-top,
+    .md-nav__source {
+        display: none !important;
+    }
+
+    /* Optimize content for print */
+    .md-main__inner {
+        max-width: 100%;
+    }
+
+    .md-content {
+        max-width: 100%;
+    }
+
+    /* Ensure code blocks don't overflow */
+    .md-typeset pre {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+
+    /* Optimize colors for print */
+    body {
+        color: #000;
+        background: #fff;
+    }
+
+    /* Add page breaks */
+    h1, h2, h3 {
+        page-break-after: avoid;
+    }
+
+    pre, blockquote {
+        page-break-inside: avoid;
+    }
+}
+
+/* ============================================================
+ * Animations and Transitions
+ * ============================================================ */
+@media (prefers-reduced-motion: no-preference) {
+    /* Fade in animation for content */
+    .md-content {
+        animation: fadeIn 0.3s ease-in;
+    }
+
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(10px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+}
+
+/* Respect user's motion preferences */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+
+    html {
+        scroll-behavior: auto;
+    }
+}
+
+/* ============================================================
+ * Utility Classes
+ * ============================================================ */
+.text-center {
+    text-align: center;
+}
+
+.text-muted {
+    color: var(--md-default-fg-color--light);
+}
+
+.mb-0 { margin-bottom: 0; }
+.mb-1 { margin-bottom: 0.5rem; }
+.mb-2 { margin-bottom: 1rem; }
+.mb-3 { margin-bottom: 1.5rem; }
+
+.mt-0 { margin-top: 0; }
+.mt-1 { margin-top: 0.5rem; }
+.mt-2 { margin-top: 1rem; }
+.mt-3 { margin-top: 1.5rem; }
+
+/* ============================================================
+ * Dark Mode Specific Adjustments
+ * ============================================================ */
+[data-md-color-scheme="slate"] {
+    /* Enhance readability in dark mode */
+    .md-typeset code {
+        background-color: rgba(255, 255, 255, 0.05);
+    }
+
+    .md-typeset table:not([class]) th {
+        background-color: rgba(255, 255, 255, 0.05);
+    }
+}
