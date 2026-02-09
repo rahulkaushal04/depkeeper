@@ -229,11 +229,17 @@ make docs-serve    # Serve documentation locally
 Configure these variables for development:
 
 ```bash
-# Enable debug logging
-export DEPKEEPER_LOG_LEVEL=DEBUG
+# Path to configuration file
+export DEPKEEPER_CONFIG=path/to/config.toml
 
 # Disable colored output
 export DEPKEEPER_COLOR=false
+```
+
+For debug-level logging, use the `-vv` flag when running commands:
+
+```bash
+depkeeper -vv check
 ```
 
 ---

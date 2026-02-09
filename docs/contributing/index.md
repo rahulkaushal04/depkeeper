@@ -63,21 +63,7 @@ Maintainers provide guidance during the review process.
 
 ---
 
-## Development Workflow
-
-```mermaid
-flowchart LR
-    A[Fork Repo] --> B[Create Branch]
-    B --> C[Write Code]
-    C --> D[Run Tests]
-    D --> E[Open PR]
-    E --> F[Code Review]
-    F --> G[Merge]
-
-    G -.->|New Feature / Fix| B
-```
-
-### Standard Contribution Flow
+## Standard Contribution Flow
 
 1. Fork the repository
 2. Create a dedicated branch for your change

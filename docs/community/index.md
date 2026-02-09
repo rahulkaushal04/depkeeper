@@ -19,20 +19,7 @@ depkeeper is an open source project and we welcome contributions of all kinds. W
 
 ---
 
-## Community Resources
-
-```mermaid
-graph LR
-    A[Question?] --> B{Type}
-    B -->|Usage| C[FAQ]
-    B -->|Bug| D[GitHub Issues]
-    B -->|Feature| D
-    B -->|Security| E[Security Policy]
-    B -->|Contributing| F[Contributing Guide]
-    C --> G[Troubleshooting Guide]
-```
-
-### Quick Links
+## Quick Links
 
 | Resource | Description |
 |---|---|
