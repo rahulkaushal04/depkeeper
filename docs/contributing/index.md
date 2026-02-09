@@ -5,108 +5,61 @@ description: Learn how to contribute to depkeeper
 
 # Contributing to depkeeper
 
-Thank you for your interest in contributing to **depkeeper**.
-We welcome all types of contributions, including bug fixes, new features, documentation improvements, and design suggestions.
-
+We welcome contributions of all types, including bug fixes, new features, documentation improvements, and design suggestions.
 This project values clear communication, code quality, and respectful collaboration.
 
 ---
 
 ## How You Can Contribute
 
-<div class="grid cards" markdown>
+There are many ways to participate in the depkeeper project, regardless of your experience level.
 
--   :material-bug:{ .lg .middle } **Report a Bug**
-
-    ---
-
-    If you encounter a bug or unexpected behavior, please open an issue and include clear reproduction steps.
-
-    [:octicons-arrow-right-24: Open an issue](https://github.com/rahulkaushal04/depkeeper/issues/new)
-
--   :material-lightbulb:{ .lg .middle } **Propose a Feature**
-
-    ---
-
-    Have an idea that could improve depkeeper?
-    Start a discussion or submit a feature request.
-
-    [:octicons-arrow-right-24: Start a discussion](https://github.com/rahulkaushal04/depkeeper/discussions)
-
--   :material-file-document:{ .lg .middle } **Improve Documentation**
-
-    ---
-
-    Help keep the documentation accurate, clear, and easy to follow.
-
-    [:octicons-arrow-right-24: Edit documentation](https://github.com/rahulkaushal04/depkeeper/tree/main/docs)
-
--   :material-code-tags:{ .lg .middle } **Contribute Code**
-
-    ---
-
-    Fix bugs, improve performance, or add new features.
-
-    [:octicons-arrow-right-24: Development setup](development-setup.md)
-
-</div>
+| Contribution | Description | Link |
+|---|---|---|
+| Report a Bug | Open an issue when you encounter unexpected behavior. Include clear reproduction steps. | [Open an issue](https://github.com/rahulkaushal04/depkeeper/issues/new) |
+| Propose a Feature | Submit feature requests or improvement ideas through discussions. | [Start a discussion](https://github.com/rahulkaushal04/depkeeper/discussions) |
+| Improve Documentation | Keep documentation accurate, clear, and easy to follow. | [Edit documentation](https://github.com/rahulkaushal04/depkeeper/tree/main/docs) |
+| Contribute Code | Fix bugs, improve performance, or add new features. | [Development setup](development-setup.md) |
 
 ---
 
 ## Contributor Resources
 
-The following guides will help you get started:
+Use these guides to get started:
 
-- **[Development Setup](development-setup.md)**
-  Instructions for setting up your local development environment
-
-- **[Code Style Guide](code-style.md)**
-  Coding standards and best practices
-
-- **[Testing Guide](testing.md)**
-  How to write and execute tests
-
-- **[Release Process](release-process.md)**
-  Overview of how releases are planned and published
+- **[Development Setup](development-setup.md)** -- Set up your local development environment
+- **[Code Style Guide](code-style.md)** -- Follow coding standards and best practices
+- **[Testing Guide](testing.md)** -- Write and execute tests
+- **[Release Process](release-process.md)** -- Understand how releases are planned and published
 
 ---
 
 ## Code of Conduct
 
-All contributors must follow our
-**[Code of Conduct](https://github.com/rahulkaushal04/depkeeper/blob/main/CODE_OF_CONDUCT.md)**.
-
-We are committed to providing a respectful, inclusive, and professional environment.
+All contributors must follow our **[Code of Conduct](../community/code-of-conduct.md)** to maintain a respectful, inclusive, and professional environment.
 
 ---
 
 ## Getting Support
 
-If you need help or have questions:
+Get help through the following channels:
 
-- **General Questions**
-  GitHub Discussions: https://github.com/rahulkaushal04/depkeeper/discussions
-
-- **Bug Reports**
-  GitHub Issues: https://github.com/rahulkaushal04/depkeeper/issues
-
-- **Security Issues**
-  Please refer to
-  https://github.com/rahulkaushal04/depkeeper/blob/main/SECURITY.md
+- **General Questions** -- [GitHub Discussions](https://github.com/rahulkaushal04/depkeeper/discussions)
+- **Bug Reports** -- [GitHub Issues](https://github.com/rahulkaushal04/depkeeper/issues)
+- **Security Issues** -- [Security Policy](../community/security.md)
 
 ---
 
 ## First-Time Contributors
 
-If you are new to open-source contributions:
+New to open-source contributions? Follow these steps:
 
-1. Look for issues labeled
-   [`good first issue`](https://github.com/rahulkaushal04/depkeeper/labels/good%20first%20issue)
-2. Review the Development Setup guide
-3. Follow the Code Style guidelines
+1. Find issues labeled [`good first issue`](https://github.com/rahulkaushal04/depkeeper/labels/good%20first%20issue)
+2. Review the [Development Setup](development-setup.md) guide
+3. Follow the [Code Style](code-style.md) guidelines
 4. Submit a pull request
 
-Maintainers are happy to provide guidance during the review process.
+Maintainers provide guidance during the review process.
 
 ---
 
@@ -128,12 +81,34 @@ flowchart LR
 
 1. Fork the repository
 2. Create a dedicated branch for your change
-3. Implement your changes following project guidelines
+3. Implement changes following project guidelines
 4. Add or update tests as required
 5. Open a pull request with a clear description
 6. Address review feedback
-7. Changes are merged after approval
+7. Maintainers merge changes after approval
 
 ---
 
-Thank you for contributing to **depkeeper**.
+## Project Structure
+
+The depkeeper codebase is organized as follows:
+
+```
+depkeeper/
+├── depkeeper/             # Source code
+│   ├── commands/          # CLI command implementations (check, update)
+│   ├── core/              # Dependency parsing, version checking, resolution
+│   ├── models/            # Data models (package, requirement, conflict)
+│   ├── utils/             # Console output, HTTP, logging, file I/O
+│   ├── cli.py             # CLI entry point and global options
+│   ├── constants.py       # Centralized configuration constants
+│   ├── context.py         # CLI context management
+│   └── exceptions.py      # Custom exception hierarchy
+├── tests/                 # Test suite (unit, integration, e2e)
+├── docs/                  # Documentation source (MkDocs)
+└── scripts/               # Development setup and automation
+```
+
+---
+
+Thank you for contributing to depkeeper.

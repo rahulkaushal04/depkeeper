@@ -5,20 +5,20 @@ description: Set up your local development environment for depkeeper
 
 # Development Setup
 
-This guide walks you through setting up a local development environment for contributing to **depkeeper**.
-It covers prerequisites, installation options, common workflows, and development tooling.
+Set up a local development environment for contributing to depkeeper.
+This guide covers prerequisites, installation, workflows, and tooling configuration.
 
 ---
 
 ## Prerequisites
 
-Ensure the following tools are installed on your system:
+Install the following tools:
 
 - **Python** ≥ 3.8
 - **Git** for version control
 - **Make** (optional) for development shortcuts
 
-You can verify your Python version with:
+Verify your Python version:
 
 ```bash
 python --version
@@ -28,7 +28,7 @@ python --version
 
 ## Installation
 
-You can set up the project using either the automated setup scripts or manual steps.
+Choose between automated setup scripts or manual installation steps.
 
 ### Option 1: Automated Setup (Recommended)
 
@@ -54,7 +54,7 @@ These scripts create a virtual environment, install dependencies, and configure 
 
 ### Option 2: Manual Setup
 
-Use this approach if you prefer full control over the environment.
+Manual setup provides full control over each installation step.
 
 ```bash
 # Clone repository
@@ -82,7 +82,7 @@ pre-commit install
 
 ## Verify Installation
 
-After setup, ensure everything is working correctly:
+Confirm the installation succeeded:
 
 ```bash
 # Verify CLI
@@ -95,7 +95,7 @@ pytest
 pre-commit run --all-files
 ```
 
-All commands should complete without errors.
+Each command should complete without errors.
 
 ---
 
@@ -103,7 +103,7 @@ All commands should complete without errors.
 
 ### 1. Create a Branch
 
-Use descriptive branch names to keep the repository organized:
+Use descriptive branch names with appropriate prefixes:
 
 | Change Type   | Prefix      | Example                      |
 | ------------- | ----------- | ---------------------------- |
@@ -129,6 +129,8 @@ git checkout -b feature/my-feature
 
 ### 3. Run Tests
 
+Run the test suite to verify your changes:
+
 ```bash
 # Full test suite
 pytest
@@ -147,17 +149,18 @@ pytest -k "test_parse"
 
 ### 4. Run Linters and Type Checks
 
+Ensure code quality standards are met:
+
 ```bash
 # Run all checks
 pre-commit run --all-files
 
 # Individual tools
 black .
-isort .
 mypy depkeeper
 ```
 
-All checks must pass before submitting a pull request.
+All checks must pass before opening a pull request.
 
 ---
 
@@ -190,29 +193,31 @@ The project follows **Conventional Commits**:
 
 ### 6. Push and Open a Pull Request
 
+Push your branch and create a pull request:
+
 ```bash
 git push origin feature/my-feature
 ```
 
-Then open a Pull Request on GitHub with:
+Include in your pull request:
 
-- A clear description of changes
-- References to related issues (if any)
+- Clear description of changes
+- References to related issues
 - Test results or validation notes
 
 ---
 
 ## Makefile Shortcuts
 
-The `Makefile` provides commonly used development commands:
+Use these shortcuts for common development tasks:
 
 ```bash
-make install       # Install dependencies (dev mode)
-make test          # Run tests
-make coverage      # Run tests with coverage
-make lint          # Run linters
-make format        # Format code
-make clean         # Remove build artifacts
+make install       # Install depkeeper in production mode
+make install-dev   # Install with dev dependencies and pre-commit hooks
+make test          # Run tests with coverage reports
+make typecheck     # Run mypy static type checks
+make all           # Run typecheck and test together
+make clean         # Remove cache and build artifacts
 make docs          # Build documentation
 make docs-serve    # Serve documentation locally
 ```
@@ -221,7 +226,7 @@ make docs-serve    # Serve documentation locally
 
 ## Environment Variables
 
-The following variables are useful during development:
+Configure these variables for development:
 
 ```bash
 # Enable debug logging
@@ -237,15 +242,14 @@ export DEPKEEPER_COLOR=false
 
 ### VS Code
 
-Recommended extensions:
+Install these recommended extensions:
 
 - Python
 - Pylance
 - Black Formatter
-- isort
 - Even Better TOML
 
-Suggested `.vscode/settings.json`:
+Add this configuration to `.vscode/settings.json`:
 
 ```json
 {
@@ -263,9 +267,11 @@ Suggested `.vscode/settings.json`:
 
 ### PyCharm
 
+Configure your PyCharm environment:
+
 1. Set project interpreter to `./venv/bin/python`
-2. Mark `depkeeper` as _Sources Root_
-3. Mark `tests` as _Test Sources Root_
+2. Mark `depkeeper` as Sources Root
+3. Mark `tests` as Test Sources Root
 4. Configure pytest as the test runner
 
 ---
@@ -273,6 +279,8 @@ Suggested `.vscode/settings.json`:
 ## Troubleshooting
 
 ### Virtual Environment Issues
+
+Recreate the virtual environment:
 
 ```bash
 rm -rf venv
@@ -285,7 +293,7 @@ pip install -e ".[dev]"
 
 ### Import Errors
 
-Ensure the virtual environment is active:
+Verify the virtual environment is active:
 
 ```bash
 which python
@@ -295,6 +303,8 @@ which python
 ---
 
 ### Pre-commit Failures
+
+Update hooks or run them individually:
 
 ```bash
 # Update hooks
@@ -308,6 +318,6 @@ pre-commit run black --all-files
 
 ## Next Steps
 
-- **[Code Style](code-style.md)** — Coding standards and formatting
-- **[Testing](testing.md)** — Writing and running tests
-- **[Release Process](release-process.md)** — Versioning and releases
+- [Code Style](code-style.md) -- Learn coding standards and formatting requirements
+- [Testing](testing.md) -- Understand testing practices and guidelines
+- [Release Process](release-process.md) -- Review versioning and release procedures

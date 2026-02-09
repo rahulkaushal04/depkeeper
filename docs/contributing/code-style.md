@@ -5,16 +5,16 @@ description: Coding standards and style guidelines for depkeeper
 
 # Code Style
 
-This document defines the coding standards and conventions used in **depkeeper**.
+Coding standards and conventions for depkeeper.
 Following these guidelines ensures consistency, readability, and maintainability across the codebase.
 
 ---
 
 ## Guiding Principles
 
-- Code should be **clear, explicit, and predictable**
-- Prefer **readability over cleverness**
-- Follow established **Python community standards**
+- Write clear, explicit, and predictable code
+- Prefer readability over cleverness
+- Follow established Python community standards
 - Automate formatting and checks wherever possible
 
 ---
@@ -37,7 +37,7 @@ depkeeper follows modern Python best practices:
 
 ### Code Formatting (Black)
 
-Black enforces a consistent, opinionated code format.
+Black enforces consistent, opinionated code formatting.
 
 ```bash
 # Format all files
@@ -51,22 +51,19 @@ black --check .
 
 ### Static Type Checking (mypy)
 
-mypy is used in **strict mode** to enforce strong typing.
+mypy runs in strict mode to enforce strong typing.
 
 ```bash
 mypy depkeeper
 ```
 
-All new code must:
-
-- Be fully type-annotated
-- Pass mypy without errors
+All new code must be fully type-annotated and pass mypy without errors.
 
 ---
 
 ### Pre-commit Hooks
 
-All formatting and checks are enforced automatically before commits.
+Formatting and checks run automatically before commits.
 
 ```bash
 # Install hooks
@@ -99,10 +96,10 @@ from depkeeper.models import Package
 from depkeeper.utils.logger import get_logger
 ```
 
-**Rules**
+Import rules:
 
 - Use `from __future__ import annotations`
-- Group imports manually: standard library → third-party → local
+- Group imports: standard library, third-party, local
 - Use absolute imports
 - Avoid wildcard imports
 
@@ -110,7 +107,7 @@ from depkeeper.utils.logger import get_logger
 
 ## Type Annotations (Python 3.8)
 
-All new code must use **Python 3.8–compatible typing**.
+All new code must use Python 3.8-compatible typing.
 
 ```python
 from typing import Optional
@@ -155,7 +152,7 @@ class PackageInfo(TypedDict):
 
 ## Docstrings
 
-Use **Google-style docstrings** for all public modules, classes, and functions.
+Use Google-style docstrings for all public modules, classes, and functions.
 
 ```python
 def check_package(name: str) -> Package:
@@ -197,7 +194,7 @@ class Package:
 
 ## Asynchronous Code
 
-Use async APIs for all I/O-bound operations.
+Use async APIs for I/O-bound operations.
 
 ```python
 async def fetch_package(name: str) -> Dict[str, str]:
@@ -215,7 +212,9 @@ results = await asyncio.gather(*tasks, return_exceptions=True)
 
 ## Error Handling
 
-- Use **custom exception types**
+Follow these practices for exception handling:
+
+- Use custom exception types
 - Never suppress exceptions
 - Preserve original traceback context
 
@@ -239,7 +238,7 @@ DEFAULT_TIMEOUT = 30
 MAX_RETRIES = 3
 ```
 
-Avoid inline magic values.
+Avoid using inline magic values.
 
 ---
 
@@ -286,9 +285,11 @@ def _private_helper() -> None:
 
 ## Function Design
 
-- Keep functions **under ~50 lines**
-- One responsibility per function
-- Extract complex logic into helpers
+Follow these guidelines for writing functions:
+
+- Keep functions under 50 lines when possible
+- Limit each function to one responsibility
+- Extract complex logic into helper functions
 - Prefer explicit flow over implicit behavior
 
 ---
@@ -309,18 +310,18 @@ def check(file: Path, dry_run: bool) -> None:
 
 ## Testing Style
 
-Refer to **[Testing](testing.md)** for details.
+Refer to [Testing](testing.md) for complete testing guidelines.
 
 ```python
 def test_parser_handles_extras():
     ...
 ```
 
-Best practices:
+Follow these practices:
 
-- Clear, descriptive test names
-- Reusable fixtures
-- Parametrized tests for variations
+- Use clear, descriptive test names
+- Create reusable fixtures
+- Parametrize tests for variations
 
 ---
 
@@ -339,7 +340,7 @@ logger.error("Failed to parse input")
 
 ## Anti-Patterns
 
-❌ **Avoid**
+Avoid these patterns:
 
 ```python
 def func(items=[]):  # Mutable default
@@ -351,7 +352,7 @@ except:  # Bare except
 from module import *  # Wildcard import
 ```
 
-✅ **Preferred**
+Preferred alternatives:
 
 ```python
 from typing import Optional, List
@@ -369,5 +370,5 @@ from module import specific_function
 
 ## Next Steps
 
-- **[Testing](testing.md)** — Testing practices
-- **[Development Setup](development-setup.md)** — Environment setup
+- [Testing](testing.md) -- Learn testing practices and guidelines
+- [Development Setup](development-setup.md) -- Set up your development environment
