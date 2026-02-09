@@ -112,8 +112,9 @@ depkeeper = "depkeeper.cli:main"
 # Setuptools configuration
 # ============================================================
 
-[tool.setuptools]
-packages = ["depkeeper"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["depkeeper*"]
 
 [tool.setuptools.package-data]
 depkeeper = ["py.typed"]

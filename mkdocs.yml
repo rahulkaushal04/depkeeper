@@ -256,13 +256,15 @@ nav:
       - Development Setup: contributing/development-setup.md
       - Code Style: contributing/code-style.md
       - Testing: contributing/testing.md
-      - Submitting Changes: contributing/submitting-changes.md
       - Release Process: contributing/release-process.md
 
   - Community:
+      - community/index.md
       - FAQ: community/faq.md
       - Changelog: community/changelog.md
       - License: community/license.md
+      - Code of Conduct: community/code-of-conduct.md
+      - Security Policy: community/security.md
 
 # ============================================================
 # Validation and Hooks

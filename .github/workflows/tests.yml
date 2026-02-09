@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   test:
-    name: 🧪 Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -68,7 +68,7 @@ jobs:
           verbose: true
 
   test-summary:
-    name: ✅ Test Summary
+    name: Test Summary
     needs: test
     runs-on: ubuntu-latest
     if: always()
@@ -80,8 +80,8 @@ jobs:
           echo "Overall test job result: ${{ needs.test.result }}"
 
           if [[ "${{ needs.test.result }}" != "success" ]]; then
-            echo "❌ One or more test jobs failed"
+            echo "One or more test jobs failed"
             exit 1
           else
-            echo "✅ All test jobs passed successfully"
+            echo "All test jobs passed successfully"
           fi
