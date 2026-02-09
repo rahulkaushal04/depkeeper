@@ -9,7 +9,7 @@ description: Modern, intelligent Python dependency management for requirements.t
 
 **Modern, intelligent Python dependency management for `requirements.txt` files.**
 
-Keep your dependencies up-to-date and conflict-free — without switching from pip.
+Keep your dependencies up-to-date and conflict-free -- without switching from pip.
 
 [:material-download: Install](getting-started/installation.md){ .md-button .md-button--primary }
 [:material-book-open-variant: Get Started](getting-started/quickstart.md){ .md-button }
@@ -21,43 +21,43 @@ Keep your dependencies up-to-date and conflict-free — without switching from p
 
 ## Why depkeeper?
 
-Managing Python dependencies shouldn't be painful. While `pip` is simple and Poetry is powerful, depkeeper bridges the gap — giving you **smart automation** without abandoning your existing workflow.
+Managing Python dependencies shouldn't be painful. While `pip` is simple and Poetry is powerful, depkeeper bridges the gap -- giving you **smart automation** without abandoning your existing workflow.
 
 <div class="grid cards" markdown>
 
 - :material-lightning-bolt:{ .lg .middle } **Smart Updates**
 
-  ***
+  ---
 
   Automatically discover available updates with intelligent recommendations that respect semantic versioning boundaries.
 
 - :material-shield-check:{ .lg .middle } **Safe by Default**
 
-  ***
+  ---
 
   Never accidentally cross major version boundaries. depkeeper keeps your environment stable while staying current.
 
 - :material-vector-triangle:{ .lg .middle } **Conflict Resolution**
 
-  ***
+  ---
 
   Detect and resolve dependency conflicts before they break your builds.
 
 - :material-rocket-launch:{ .lg .middle } **Fast & Concurrent**
 
-  ***
+  ---
 
   Async PyPI queries maximize performance. Check hundreds of packages in seconds.
 
 - :material-format-list-bulleted:{ .lg .middle } **Multiple Formats**
 
-  ***
+  ---
 
   Output as beautiful tables, simple text, or JSON for seamless CI/CD integration.
 
 - :material-puzzle:{ .lg .middle } **Pip Compatible**
 
-  ***
+  ---
 
   Works alongside pip, not instead of it. No need to change your workflow.
 
@@ -106,8 +106,8 @@ Apply 3 updates? [y/N]: y
 
 ## Feature Comparison
 
-| Feature                  | pip | Poetry | depkeeper |
-| ------------------------ | --- | ------ | --------- |
+| Feature | pip | Poetry | depkeeper |
+|---|---|---|---|
 | Simple workflow          | ✅  | ⚠️     | ✅        |
 | Dependency resolution    | ❌  | ✅     | ✅        |
 | Update recommendations   | ❌  | ⚠️     | ✅        |
@@ -149,25 +149,25 @@ Apply 3 updates? [y/N]: y
 
 - :material-play-circle:{ .lg .middle } **[Quick Start](getting-started/quickstart.md)**
 
-  ***
+  ---
 
   Get up and running in 5 minutes with the essentials.
 
 - :material-school:{ .lg .middle } **[User Guide](guides/index.md)**
 
-  ***
+  ---
 
   Deep dive into all features and workflows.
 
 - :material-api:{ .lg .middle } **[API Reference](reference/python-api.md)**
 
-  ***
+  ---
 
   Integrate depkeeper programmatically.
 
 - :material-account-group:{ .lg .middle } **[Contributing](contributing/index.md)**
 
-  ***
+  ---
 
   Help make depkeeper even better.
 
@@ -179,10 +179,10 @@ Apply 3 updates? [y/N]: y
 
 Built with amazing open source libraries:
 
-- [Click](https://click.palletsprojects.com/) — CLI framework
-- [Rich](https://rich.readthedocs.io/) — Beautiful terminal formatting
-- [httpx](https://www.python-httpx.org/) — Async HTTP client
-- [packaging](https://packaging.pypa.io/) — PEP 440/508 compliance
+- [Click](https://click.palletsprojects.com/) -- CLI framework
+- [Rich](https://rich.readthedocs.io/) -- Beautiful terminal formatting
+- [httpx](https://www.python-httpx.org/) -- Async HTTP client
+- [packaging](https://packaging.pypa.io/) -- PEP 440/508 compliance
 
 Inspired by [pip-tools](https://pip-tools.readthedocs.io/), [Poetry](https://python-poetry.org/), and [Dependabot](https://github.com/dependabot).
 
