@@ -13,14 +13,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "depkeeper"
-version = "0.1.0.dev2"
+version = "0.1.0.dev3"
 description = "Modern Python dependency management for requirements.txt files"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "Apache-2.0" }
 
 authors = [
-    { name = "depkeeper Contributors" },
+    { name = "Rahul Kaushal" },
 ]
 
 keywords = [
@@ -83,6 +83,8 @@ docs = [
     "mkdocs>=1.6.1",
     "mkdocs-material>=9.7.1",
     "mkdocstrings[python]>=0.26.1",
+    "pymdown-extensions>=10.15",
+    "mkdocs-minify-plugin>=0.8.0",
 ]
 
 
@@ -92,7 +94,7 @@ docs = [
 
 [project.urls]
 Homepage     = "https://github.com/rahulkaushal04/depkeeper"
-Documentation = "https://docs.depkeeper.dev"
+Documentation = "https://rahulkaushal04.github.io/depkeeper/"
 Repository   = "https://github.com/rahulkaushal04/depkeeper"
 "Bug Tracker" = "https://github.com/rahulkaushal04/depkeeper/issues"
 Changelog    = "https://github.com/rahulkaushal04/depkeeper/blob/main/CHANGELOG.md"
@@ -110,8 +112,9 @@ depkeeper = "depkeeper.cli:main"
 # Setuptools configuration
 # ============================================================
 
-[tool.setuptools]
-packages = ["depkeeper"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["depkeeper*"]
 
 [tool.setuptools.package-data]
 depkeeper = ["py.typed"]
