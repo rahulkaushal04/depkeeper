@@ -67,7 +67,6 @@ logger = get_logger("commands.check")
     help="Check for dependency conflicts between packages.",
 )
 @pass_context
-@click.pass_context
 def check(
     ctx: DepKeeperContext,
     file: Path,
