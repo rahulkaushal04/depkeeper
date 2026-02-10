@@ -17,7 +17,7 @@ edit_uri: edit/main/docs/
 copyright: Copyright &copy; 2024-2026 Rahul Kaushal
 
 # Strict mode ensures broken links and references cause build failures
-# strict: true
+strict: true
 
 # ============================================================
 # Theme Configuration

@@ -129,8 +129,8 @@ def check(
         check_conflicts: Enable cross-package conflict resolution.
 
     Exits:
-        0 if all packages are up-to-date, 1 if updates are available or an
-        error occurred.
+        0 if the command completed successfully (whether or not updates
+        are available), 1 if an error occurred.
 
     Example::
 
@@ -138,7 +138,7 @@ def check(
         $ depkeeper check requirements.txt --check-conflicts --format table
     """
     try:
-        has_updates = asyncio.run(
+        asyncio.run(
             _check_async(
                 ctx,
                 file,
@@ -148,7 +148,7 @@ def check(
                 check_conflicts=check_conflicts,
             )
         )
-        sys.exit(1 if has_updates else 0)
+        sys.exit(0)
 
     except DepKeeperError as e:
         print_error(f"{e}")
@@ -195,7 +195,9 @@ async def _check_async(
 
     Returns:
         ``True`` if any package has updates or unresolved conflicts,
-        ``False`` if everything is up-to-date.
+        ``False`` if everything is up-to-date.  The return value is
+        used only for informational logging; it does not affect the
+        exit code (which is always 0 on success).
 
     Raises:
         DepKeeperError: Requirements file cannot be parsed or is malformed.
@@ -365,12 +367,18 @@ def _display_table(packages: List[Package]) -> None:
 
     Example::
 
-        ┏━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━━┓
-        ┃ Status     ┃ Package     ┃ Current   ┃ Latest    ┃ Update Type  ┃
-        ┡━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━━┩
-        │ ✓ OK       │ requests    │ 2.31.0    │ 2.31.0    │ -            │
-        │ ⬆ OUTDATED │ flask       │ 2.0.0     │ 3.0.0     │ major        │
-        └────────────┴─────────────┴───────────┴───────────┴──────────────┘
+                                            Dependency Status
+
+          Status       Package    Current   Latest   Recommended   Update Type   Conflicts   Python Support
+
+          ✓ OK         django      3.2.0     5.0.2        -             -           -        Current: >=3.8
+                                                                                             Latest: >=3.10
+
+          ⬆ OUTDATED   requests    2.28.0    2.32.0     2.32.0        minor         -        Current: >=3.7
+                                                                                             Latest: >=3.8
+
+          ⬆ OUTDATED   flask       2.0.0     3.0.1      2.3.3         patch         -        Current: >=3.7
+                                                                                             Latest: >=3.8
     """
     data = [_create_table_row(pkg) for pkg in packages]
 
@@ -536,10 +544,12 @@ def _display_simple(packages: List[Package]) -> None:
 
     Example::
 
-        [OUTDATED] flask              2.0.0      → 3.0.0
-               ⚠ Conflict: werkzeug requires >=2.0,<3
+        requests             2.28.0     → 2.32.0     (recommended: 2.32.0)
                Python: installed: >=3.7, latest: >=3.8
-        [OK] requests             2.31.0     → 2.31.0
+        flask                2.0.0      → 3.0.1      (recommended: 2.3.3)
+               Python: installed: >=3.7, latest: >=3.8, recommended: >=3.7
+        celery               5.3.0      → 5.3.6
+               Python: installed: >=3.8, latest: >=3.8
     """
     console = get_raw_console()
 
@@ -594,12 +604,19 @@ def _display_json(packages: List[Package]) -> None:
 
         [
           {
-            "name": "flask",
-            "current_version": "2.0.0",
-            "latest_version": "3.0.0",
-            "recommended_version": "2.3.3",
-            "conflicts": [...],
-            "metadata": {...}
+            "name": "requests",
+            "status": "outdated",
+            "versions": {
+              "current": "2.28.0",
+              "latest": "2.32.0",
+              "recommended": "2.32.0"
+            },
+            "update_type": "minor",
+            "python_requirements": {
+              "current": ">=3.7",
+              "latest": ">=3.8",
+              "recommended": ">=3.8"
+            }
           },
           ...
         ]

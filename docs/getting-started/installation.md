@@ -180,17 +180,18 @@ If `depkeeper` is not found after installation:
 
 2. **Ensure pip's bin directory is in PATH**:
 
-   === "Linux/macOS"
+    === "Linux/macOS"
 
-       ```bash
-       export PATH="$HOME/.local/bin:$PATH"
-       ```
+        ```bash
+        export PATH="$HOME/.local/bin:$PATH"
+        ```
 
-   === "Windows"
+    === "Windows"
 
-       Add `%USERPROFILE%\AppData\Local\Programs\Python\Python3X\Scripts` to your PATH.
+        Add `%USERPROFILE%\AppData\Local\Programs\Python\Python3X\Scripts` to your PATH.
 
 3. **Try running as a module**:
+
    ```bash
    python -m depkeeper --version
    ```
