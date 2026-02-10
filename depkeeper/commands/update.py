@@ -1,39 +1,7 @@
 """Update command implementation for depkeeper.
 
-Updates packages in a ``requirements.txt`` file to safe upgrade versions
-while maintaining major version boundaries and Python compatibility.
-
-The command orchestrates three core components:
-
-1. **RequirementsParser** — parses the requirements file into structured
-   :class:`Requirement` objects.
-2. **VersionChecker** — queries PyPI concurrently to fetch latest versions
-   and compute recommendations.
-3. **DependencyAnalyzer** — cross-validates all recommended versions and
-   resolves conflicts through iterative downgrading/constraining.
-
-All components share a single :class:`PyPIDataStore` instance to guarantee
-that each package's metadata is fetched at most once per invocation.
-
-Recommended versions **never** cross major version boundaries, ensuring
-that updates avoid breaking changes from major version upgrades.
-
-Typical usage::
-
-    # Update all packages to safe versions
-    $ depkeeper update requirements.txt
-
-    # Preview changes without applying
-    $ depkeeper update --dry-run
-
-    # Update only specific packages
-    $ depkeeper update -p flask -p click
-
-    # Create backup and skip confirmation
-    $ depkeeper update --backup -y
-
-    # Disable conflict resolution (faster, but may create conflicts)
-    $ depkeeper update --no-check-conflicts
+Updates packages in requirements files to safe upgrade versions while
+maintaining major version boundaries and Python compatibility.
 """
 
 from __future__ import annotations
@@ -43,7 +11,7 @@ import click
 import shutil
 import asyncio
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from depkeeper.models import Package, Requirement
 from depkeeper.exceptions import DepKeeperError, ParseError
@@ -102,12 +70,12 @@ logger = get_logger("commands.update")
 @click.option(
     "--strict-version-matching",
     is_flag=True,
+    default=None,
     help="Only use exact version pins, don't infer from constraints.",
 )
 @click.option(
-    "--check-conflicts",
-    is_flag=True,
-    default=True,
+    "--check-conflicts/--no-check-conflicts",
+    default=None,
     help="Check for dependency conflicts and adjust versions accordingly.",
 )
 @pass_context
@@ -118,28 +86,26 @@ def update(
     yes: bool,
     backup: bool,
     packages: Tuple[str, ...],
-    strict_version_matching: bool,
-    check_conflicts: bool,
+    strict_version_matching: Optional[bool],
+    check_conflicts: Optional[bool],
 ) -> None:
     """Update packages to safe upgrade versions.
 
-    Updates packages to their recommended versions — the maximum version
+    Updates packages to their recommended versions -- the maximum version
     within the same major version that is compatible with your Python
     version. This avoids breaking changes from major version upgrades.
 
-    When ``--strict-version-matching`` is disabled (default), the command
-    can infer the current version from range constraints like ``>=2.0``.
-    When enabled, only exact pins (``==``) are treated as current versions.
+    \b
+    When --check-conflicts is enabled (the default), the command:
+      1. Fetches initial recommendations for every package.
+      2. Cross-validates all recommendations to detect conflicts.
+      3. Iteratively adjusts versions until a conflict-free set is found.
+      4. Applies the final resolved versions to the requirements file.
 
-    When ``--check-conflicts`` is enabled (default), the command:
-
-    1. Fetches initial recommendations for every package.
-    2. Cross-validates all recommendations to detect conflicts (package A's
-       dependency on B is incompatible with B's recommended version).
-    3. Iteratively adjusts versions (downgrading sources or constraining
-       targets) until a conflict-free set is found or the iteration limit
-       is reached.
-    4. Applies the final resolved versions to the requirements file.
+    Options not explicitly provided on the command line fall back to values
+    from the configuration file (depkeeper.toml or pyproject.toml), then
+    to built-in defaults.
+    \f
 
     Args:
         ctx: Depkeeper context with configuration and verbosity settings.
@@ -149,20 +115,21 @@ def update(
         backup: Create a timestamped backup before modifying the file.
         packages: Only update these packages (empty = update all).
         strict_version_matching: Don't infer current versions from
-            constraints; only use exact pins (``==``).
-        check_conflicts: Enable dependency conflict resolution. When enabled,
-            the command will adjust recommended versions to avoid conflicts.
+            constraints; only use exact pins (``==``). Falls back to the
+            ``strict_version_matching`` config option.
+        check_conflicts: Enable dependency conflict resolution. Falls
+            back to the ``check_conflicts`` config option.
 
     Exits:
         0 if updates were applied successfully or no updates needed,
         1 if an error occurred.
-
-    Example::
-
-        >>> # CLI invocation
-        $ depkeeper update requirements.txt --dry-run
-        $ depkeeper update -p flask -p click --backup -y
     """
+    cfg = ctx.config
+    if strict_version_matching is None:
+        strict_version_matching = cfg.strict_version_matching if cfg else False
+    if check_conflicts is None:
+        check_conflicts = cfg.check_conflicts if cfg else True
+
     try:
         asyncio.run(
             _update_async(

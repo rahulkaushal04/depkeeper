@@ -1,33 +1,7 @@
 """Check command implementation for depkeeper.
 
-Analyzes a ``requirements.txt`` file to identify packages with available
-updates, dependency conflicts, and Python version compatibility issues.
-
-The command orchestrates three core components:
-
-1. **RequirementsParser** — parses the requirements file into structured
-   :class:`Requirement` objects.
-2. **VersionChecker** — queries PyPI concurrently to fetch latest versions
-   and compute recommendations.
-3. **DependencyAnalyzer** — cross-validates all recommended versions and
-   resolves conflicts through iterative downgrading/constraining.
-
-All components share a single :class:`PyPIDataStore` instance to guarantee
-that each package's metadata is fetched at most once per invocation.
-
-Typical usage::
-
-    # Show all packages with available updates
-    $ depkeeper check requirements.txt --outdated-only
-
-    # Machine-readable JSON output
-    $ depkeeper check --format json > report.json
-
-    # Enable conflict resolution (adjusts recommendations to be mutually compatible)
-    $ depkeeper check --check-conflicts
-
-    # Strict mode: only use pinned versions, don't infer from constraints
-    $ depkeeper check --strict-version-matching
+Analyzes requirements files to identify available updates, dependency
+conflicts, and Python version compatibility issues.
 """
 
 from __future__ import annotations
@@ -37,7 +11,7 @@ import json
 import click
 import asyncio
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from depkeeper.models import Package
 from depkeeper.exceptions import DepKeeperError, ParseError
@@ -84,22 +58,23 @@ logger = get_logger("commands.check")
 @click.option(
     "--strict-version-matching",
     is_flag=True,
+    default=None,
     help="Only use exact version pins, don't infer from constraints.",
 )
 @click.option(
-    "--check-conflicts",
-    is_flag=True,
-    default=True,
+    "--check-conflicts/--no-check-conflicts",
+    default=None,
     help="Check for dependency conflicts between packages.",
 )
 @pass_context
+@click.pass_context
 def check(
     ctx: DepKeeperContext,
     file: Path,
     outdated_only: bool,
     format: str,
-    strict_version_matching: bool,
-    check_conflicts: bool,
+    strict_version_matching: Optional[bool],
+    check_conflicts: Optional[bool],
 ) -> None:
     """Check requirements file for available updates.
 
@@ -108,16 +83,18 @@ def check(
     Optionally performs dependency conflict analysis to ensure recommended
     updates are compatible with each other.
 
-    When ``--check-conflicts`` is enabled, the command:
+    \b
+    When --check-conflicts is enabled (the default), the command:
+      1. Fetches initial recommendations for every package.
+      2. Cross-validates all recommendations to detect conflicts.
+      3. Iteratively adjusts versions until a conflict-free set is found.
+      4. Displays the final resolved versions along with any unresolved
+         conflicts.
 
-    1. Fetches initial recommendations for every package.
-    2. Cross-validates all recommendations to detect conflicts (package A's
-       dependency on B is incompatible with B's recommended version).
-    3. Iteratively adjusts versions (downgrading sources or constraining
-       targets) until a conflict-free set is found or the iteration limit
-       is reached.
-    4. Displays the final resolved versions along with any unresolved
-       conflicts.
+    Options not explicitly provided on the command line fall back to values
+    from the configuration file (depkeeper.toml or pyproject.toml), then
+    to built-in defaults.
+    \f
 
     Args:
         ctx: Depkeeper context with configuration and verbosity settings.
@@ -126,17 +103,20 @@ def check(
         format: Output format (``table``, ``simple``, or ``json``).
         strict_version_matching: Don't infer current versions from
             constraints like ``>=2.0``; only use exact pins (``==``).
-        check_conflicts: Enable cross-package conflict resolution.
+            Falls back to the ``strict_version_matching`` config option.
+        check_conflicts: Enable cross-package conflict resolution. Falls
+            back to the ``check_conflicts`` config option.
 
     Exits:
         0 if the command completed successfully (whether or not updates
         are available), 1 if an error occurred.
-
-    Example::
-
-        >>> # CLI invocation
-        $ depkeeper check requirements.txt --check-conflicts --format table
     """
+    cfg = ctx.config
+    if strict_version_matching is None:
+        strict_version_matching = cfg.strict_version_matching if cfg else False
+    if check_conflicts is None:
+        check_conflicts = cfg.check_conflicts if cfg else True
+
     try:
         asyncio.run(
             _check_async(

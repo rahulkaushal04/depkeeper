@@ -1,16 +1,17 @@
 """
 Shared context object for depkeeper CLI commands.
 
-This module defines the global Click context used to share configuration
-and runtime options across CLI subcommands.
+This module defines the global Click context used to share configuration,
+loaded file-based settings, and runtime options across CLI subcommands.
 """
 
 from __future__ import annotations
 
+import click
 from pathlib import Path
 from typing import Optional
 
-import click
+from depkeeper.config import DepKeeperConfig
 
 
 class DepKeeperContext:
@@ -23,14 +24,18 @@ class DepKeeperContext:
         config_path: Path to the depkeeper configuration file, if provided.
         verbose: Verbosity level (0=WARNING, 1=INFO, 2+=DEBUG).
         color: Whether colored terminal output is enabled.
+        config: Loaded and validated configuration from the configuration
+            file.  ``None`` until :func:`~depkeeper.config.load_config`
+            is called during CLI initialization.
     """
 
-    __slots__ = ("config_path", "verbose", "color")
+    __slots__ = ("config_path", "verbose", "color", "config")
 
     def __init__(self) -> None:
         self.config_path: Optional[Path] = None
         self.verbose: int = 0
         self.color: bool = True
+        self.config: Optional["DepKeeperConfig"] = None
 
 
 #: Click decorator for injecting :class:`DepKeeperContext` into commands.
