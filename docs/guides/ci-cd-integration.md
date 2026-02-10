@@ -50,26 +50,17 @@ jobs:
       - name: Install depkeeper
         run: pip install depkeeper
 
-      - name: Check dependencies
-        run: depkeeper check --format json > deps-report.json
-
-      - name: Check for outdated
-        id: outdated
+      - name: Check dependencies and report
         run: |
-          OUTDATED=$(depkeeper check --outdated-only --format simple | wc -l)
-          echo "count=$OUTDATED" >> $GITHUB_OUTPUT
+          echo "Checking for outdated dependencies:"
+          depkeeper check src/requirements.txt --outdated-only --format table
 
-      - name: Report status
-        if: steps.outdated.outputs.count > 0
-        run: |
-          echo "⚠️ Found ${{ steps.outdated.outputs.count }} outdated dependencies"
-          depkeeper check --outdated-only --format table
-
-      - name: Upload report
-        uses: actions/upload-artifact@v4
-        with:
-          name: dependency-report
-          path: deps-report.json
+          # Fail if outdated dependencies are found
+          if depkeeper check src/requirements.txt --outdated-only --format json 2>/dev/null | grep -q '"status": "outdated"'; then
+            echo ""
+            echo "❌ Build failed: Outdated dependencies detected. Please update them."
+            exit 1
+          fi
 ```
 
 ### Automated Dependency Updates
@@ -90,8 +81,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -100,54 +89,77 @@ jobs:
 
       - name: Install dependencies
         run: |
+          sudo apt-get update && sudo apt-get install -y jq
           pip install depkeeper
-          pip install -r requirements.txt
+          pip install -r src/requirements.txt
 
       - name: Check for updates
         id: check
         run: |
-          depkeeper check --outdated-only --format json > outdated.json
-          UPDATES=$(cat outdated.json | jq length)
-          echo "count=$UPDATES" >> $GITHUB_OUTPUT
+          depkeeper check src/requirements.txt --outdated-only --format json > outdated.json
+          echo "count=$(cat outdated.json | jq length)" >> $GITHUB_OUTPUT
 
       - name: Update dependencies
         if: steps.check.outputs.count > 0
-        run: depkeeper update --backup -y
+        run: depkeeper update src/requirements.txt -y
 
       - name: Run tests
         if: steps.check.outputs.count > 0
-        run: pytest
+        run: |
+          cd src
+          pytest
+
+      - name: Generate update report
+        if: steps.check.outputs.count > 0
+        run: |
+          echo "UPDATES_LIST<<EOF" >> $GITHUB_ENV
+          cat outdated.json | jq -r '.[] | "- **\(.name)**: \(.versions.current) → \(.versions.recommended)"'
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Commit and push changes
+        if: steps.check.outputs.count > 0
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b deps/automated-updates
+          git add src/requirements.txt
+          git commit -m "chore(deps): update dependencies"
+          git push -f origin deps/automated-updates
 
       - name: Create Pull Request
         if: steps.check.outputs.count > 0
-        uses: peter-evans/create-pull-request@v6
+        uses: actions/github-script@v7
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: 'chore(deps): update dependencies'
-          title: '⬆️ Update dependencies'
-          body: |
-            Automated dependency updates by depkeeper.
+          script: |
+            const { data: pulls } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:deps/automated-updates`,
+              state: 'open'
+            });
+
+            const prBody = `Automated dependency updates by depkeeper.
 
             ## Updated packages
-            $(depkeeper check --format simple)
-          branch: deps/automated-updates
-          delete-branch: true
-```
+            ${process.env.UPDATES_LIST}`;
 
-### Fail on Outdated (Strict Mode)
-
-For strict dependency policies:
-
-```yaml
-- name: Check dependencies (strict)
-  run: |
-    OUTDATED=$(depkeeper check --outdated-only --format json | jq length)
-    if [ "$OUTDATED" -gt 0 ]; then
-      echo "❌ $OUTDATED outdated dependencies found!"
-      depkeeper check --outdated-only
-      exit 1
-    fi
-    echo "✅ All dependencies up to date"
+            if (pulls.length === 0) {
+              await github.rest.pulls.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: '⬆️ Update dependencies',
+                head: 'deps/automated-updates',
+                base: 'master',
+                body: prBody
+              });
+            } else {
+              await github.rest.pulls.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pulls[0].number,
+                body: prBody
+              });
+            }
 ```
 
 ---
@@ -169,11 +181,9 @@ dependency-check:
   image: python:${PYTHON_VERSION}
   script:
     - pip install depkeeper
-    - depkeeper check --format json > deps-report.json
-    - depkeeper check --outdated-only
+    - depkeeper check src/requirements.txt --outdated-only --format json > deps-report.json || true
+    - depkeeper check src/requirements.txt --outdated-only --format table || true
   artifacts:
-    reports:
-      dotenv: deps-report.json
     paths:
       - deps-report.json
   rules:
@@ -182,18 +192,27 @@ dependency-check:
 
 dependency-update:
   stage: update
+  dependencies: [dependency-check]
   image: python:${PYTHON_VERSION}
   script:
-    - pip install depkeeper
-    - depkeeper update --backup -y
-    - pip install -r requirements.txt
-    - pytest
+    - pip install depkeeper pytest
+    - |
+      COUNT=$(python -c "import json,sys; data=open('deps-report.json').read().strip(); print(len(json.loads(data)) if data else 0)" 2>/dev/null || echo "0")
+      if [ "$COUNT" -eq 0 ]; then
+        echo "No outdated dependencies. Skipping update."
+        exit 0
+      fi
+    - depkeeper update src/requirements.txt --backup -y
+    - pip install -r src/requirements.txt
+    - cd src && pytest
   artifacts:
     paths:
-      - requirements.txt
-      - requirements.txt.backup.*
+      - src/requirements.txt
+      - src/requirements.txt.backup.*
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: manual
+    - if: $CI_PIPELINE_SOURCE == "web"
       when: manual
 ```
 
@@ -224,15 +243,19 @@ steps:
   - script: pip install depkeeper
     displayName: Install depkeeper
 
-  - script: depkeeper check --format json > $(Build.ArtifactStagingDirectory)/deps.json
-    displayName: Check dependencies
+  - script: |
+      depkeeper check src/requirements.txt --outdated-only --format json \
+        > $(Build.ArtifactStagingDirectory)/deps.json || true
+    displayName: Check dependencies (JSON report)
 
-  - script: depkeeper check --outdated-only --format table
+  - script: |
+      depkeeper check src/requirements.txt --outdated-only --format table || true
     displayName: Show outdated packages
 
   - task: PublishBuildArtifacts@1
+    condition: always()
     inputs:
-      pathToPublish: $(Build.ArtifactStagingDirectory)/deps.json
+      pathToPublish: '$(Build.ArtifactStagingDirectory)'
       artifactName: dependency-report
 ```
 
@@ -257,20 +280,24 @@ pipeline {
     stages {
         stage('Setup') {
             steps {
+                sh 'apt-get update && apt-get install -y jq'
                 sh 'pip install depkeeper'
             }
         }
 
         stage('Check Dependencies') {
             steps {
-                sh 'depkeeper check --format json > deps-report.json'
-                sh 'depkeeper check --outdated-only'
+                sh '''
+                    depkeeper check src/requirements.txt --outdated-only --format json \
+                        > deps-report.json || echo "[]" > deps-report.json
+                '''
+                sh 'depkeeper check src/requirements.txt --outdated-only --format table || true'
             }
         }
 
         stage('Archive Report') {
             steps {
-                archiveArtifacts artifacts: 'deps-report.json'
+                archiveArtifacts allowEmptyArchive: true, artifacts: 'deps-report.json'
             }
         }
     }
@@ -278,13 +305,17 @@ pipeline {
     post {
         always {
             script {
-                def outdated = sh(
-                    script: 'depkeeper check --outdated-only --format simple | wc -l',
-                    returnStdout: true
-                ).trim()
+                if (fileExists('deps-report.json')) {
+                    def outdated = sh(
+                        script: 'jq length deps-report.json || echo 0',
+                        returnStdout: true
+                    ).trim()
 
-                if (outdated.toInteger() > 0) {
-                    currentBuild.description = "⚠️ ${outdated} outdated dependencies"
+                    if (outdated.toInteger() > 0) {
+                        currentBuild.description = "⚠️ ${outdated} outdated dependencies"
+                    }
+                } else {
+                    echo "deps-report.json not found — skipping outdated count."
                 }
             }
         }
@@ -311,12 +342,14 @@ jobs:
           name: Install depkeeper
           command: pip install depkeeper
       - run:
-          name: Check dependencies
-          command: |
-            depkeeper check --format json > deps-report.json
-            depkeeper check --outdated-only
+          name: Export outdated deps as JSON
+          command: depkeeper check src/requirements.txt --outdated-only --format json > deps-report.json || true
+      - run:
+          name: Show outdated deps as table
+          command: depkeeper check src/requirements.txt --outdated-only --format table || true
       - store_artifacts:
           path: deps-report.json
+          destination: deps-report.json
 
 workflows:
   weekly-check:
@@ -343,10 +376,10 @@ repos:
     hooks:
       - id: depkeeper-check
         name: Check dependencies
-        entry: depkeeper check --outdated-only --format simple
+        entry: depkeeper check src/requirements.txt --outdated-only --format table
         language: system
         pass_filenames: false
-        files: requirements.*\.txt$
+        files: requirements\.txt$
 ```
 
 ---
@@ -375,7 +408,10 @@ Always run your test suite after automated updates:
 
 ```yaml
 - name: Update
-  run: depkeeper update -y
+  run: depkeeper update src/requirements.txt -y
+
+- name: Install updated packages
+  run: pip install -r src/requirements.txt
 
 - name: Test
   run: pytest
@@ -396,7 +432,7 @@ Don't push directly to main. Create PRs for review:
 Use `--format json` when you need to process the output:
 
 ```bash
-depkeeper check --format json | jq '.[] | select(.update_type == "patch")'
+depkeeper check src/requirements.txt --format json | jq '.[] | select(.update_type == "patch")'
 ```
 
 ### 6. Notifications
@@ -426,7 +462,7 @@ Use exit codes for CI logic:
 Example:
 
 ```bash
-depkeeper check || echo "Check failed with code $?"
+depkeeper check src/requirements.txt || echo "Check failed with code $?"
 ```
 
 ---
