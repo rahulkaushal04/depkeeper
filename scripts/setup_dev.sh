@@ -12,6 +12,15 @@ set -e  # Exit immediately on error
 
 
 # ================================================================
+# Navigate to project root
+# ================================================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+cd "$PROJECT_ROOT"
+
+
+# ================================================================
 # Colors & Pretty Printing
 # ================================================================
 GREEN="\033[0;32m"
@@ -67,8 +76,8 @@ success "Using Python $PY_VERSION"
 # ================================================================
 info "Creating virtual environment..."
 
-if [[ ! -d venv ]]; then
-    $PYTHON -m venv venv
+if [[ ! -d .venv ]]; then
+    $PYTHON -m venv .venv
     success "Virtual environment created"
 else
     warn "Virtual environment already exists"
@@ -81,9 +90,9 @@ fi
 info "Activating virtual environment..."
 
 # shellcheck source=/dev/null
-if ! source venv/bin/activate 2>/dev/null; then
+if ! source .venv/bin/activate 2>/dev/null; then
     # Windows Git Bash fallback
-    if ! source venv/Scripts/activate 2>/dev/null; then
+    if ! source .venv/Scripts/activate 2>/dev/null; then
         error "Failed to activate virtual environment"
         exit 1
     fi
@@ -141,13 +150,13 @@ cat <<EOF
 Next steps:
 
 1. Activate the virtual environment:
-   • macOS/Linux:  source venv/bin/activate
-   • Windows:      venv\\Scripts\\activate
+   • macOS/Linux:  source .venv/bin/activate
+   • Windows:      .venv\\Scripts\\activate
 
 2. Useful commands:
-   • make test        — Run tests
-   • make typecheck   — Mypy type checking
-   • make all         — Run all quality checks
+   • make test        - Run tests
+   • make typecheck   - Mypy type checking
+   • make all         - Run all quality checks
 
 3. Try depkeeper:
    • python -m depkeeper
