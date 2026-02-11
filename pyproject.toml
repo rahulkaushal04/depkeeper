@@ -165,6 +165,7 @@ addopts = [
 ]
 
 markers = [
+    "unit: unit tests",
     "slow: slow tests",
     "integration: integration tests",
     "e2e: end-to-end tests",

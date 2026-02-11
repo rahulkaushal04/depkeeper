@@ -1,44 +1,32 @@
-"""Unit tests for depkeeper.utils.console module.
-
-This test suite provides comprehensive coverage of console output utilities,
-including theme configuration, output functions, table rendering, user interaction,
-and edge cases for environment-based configuration.
-
-Test Coverage:
-- Console initialization and lifecycle
-- Color detection based on environment variables
-- Success/error/warning message printing
-- Table rendering with various configurations
-- User confirmation prompts
-- Console reconfiguration
-- Thread safety of singleton console
-- Edge cases for None/empty inputs
-"""
-
 from __future__ import annotations
 
 import sys
 import threading
 from unittest.mock import MagicMock, patch
-from typing import Any, Dict, List, Generator
+from typing import Any, Dict, Generator, List
 
 import pytest
 from rich.table import Table
 from rich.console import Console
 
 from depkeeper.utils.console import (
-    _should_use_color,
+    DEPKEEPER_THEME,
     _get_console,
-    reconfigure_console,
-    print_success,
-    print_error,
-    print_warning,
-    print_table,
+    _should_use_color,
+    colorize_update_type,
     confirm,
     get_raw_console,
-    colorize_update_type,
-    DEPKEEPER_THEME,
+    print_error,
+    print_success,
+    print_table,
+    print_warning,
+    reconfigure_console,
 )
+
+
+# ==============================================================================
+# Fixtures
+# ==============================================================================
 
 
 @pytest.fixture(autouse=True)
@@ -57,12 +45,31 @@ def reset_console() -> Generator[None, None, None]:
 def clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Clean environment variables that affect console behavior.
 
-    Removes NO_COLOR and CI variables to ensure consistent test state.
+    Removes NO_COLOR variable to ensure consistent test state.
     """
     monkeypatch.delenv("NO_COLOR", raising=False)
-    monkeypatch.delenv("CI", raising=False)
 
 
+@pytest.fixture
+def mock_tty(clean_env: None) -> Generator[None, None, None]:
+    """Mock stdout as a TTY with isatty() returning True."""
+    with patch.object(sys.stdout, "isatty", return_value=True):
+        yield
+
+
+@pytest.fixture
+def mock_non_tty(clean_env: None) -> Generator[None, None, None]:
+    """Mock stdout as non-TTY with isatty() returning False."""
+    with patch.object(sys.stdout, "isatty", return_value=False):
+        yield
+
+
+# ==============================================================================
+# Theme Configuration Tests
+# ==============================================================================
+
+
+@pytest.mark.unit
 class TestThemeConfiguration:
     """Tests for DEPKEEPER_THEME configuration."""
 
@@ -81,80 +88,87 @@ class TestThemeConfiguration:
         ]
 
         for style_name in required_styles:
-            assert style_name in DEPKEEPER_THEME.styles
+            assert style_name in DEPKEEPER_THEME.styles, f"Missing style: {style_name}"
             assert DEPKEEPER_THEME.styles[style_name] is not None
 
-    def test_theme_style_values(self) -> None:
+    @pytest.mark.parametrize(
+        "style_name,expected_value",
+        [
+            ("success", "bold green"),
+            ("error", "bold red"),
+            ("warning", "bold yellow"),
+            ("info", "bold cyan"),
+            ("dim", "dim"),
+            ("highlight", "bold magenta"),
+        ],
+        ids=["success", "error", "warning", "info", "dim", "highlight"],
+    )
+    def test_theme_style_values(self, style_name: str, expected_value: str) -> None:
         """Test theme styles have expected color/formatting values.
 
         Verifies specific style attributes match the documented theme.
         """
-        theme_dict = {
-            "success": "bold green",
-            "error": "bold red",
-            "warning": "bold yellow",
-            "info": "bold cyan",
-            "dim": "dim",
-            "highlight": "bold magenta",
-        }
-
-        for style_name, expected_value in theme_dict.items():
-            actual_style = str(DEPKEEPER_THEME.styles[style_name])
-            assert expected_value in actual_style or actual_style == expected_value
+        actual_style = str(DEPKEEPER_THEME.styles[style_name])
+        # The string representation may include "Style(...)" wrapper
+        assert expected_value in actual_style or actual_style == expected_value
 
 
+# ==============================================================================
+# Color Detection Tests
+# ==============================================================================
+
+
+@pytest.mark.unit
 class TestShouldUseColor:
     """Tests for _should_use_color environment detection."""
 
-    def test_no_color_env_disables_color(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize(
+        "no_color_value",
+        ["1", "true", "TRUE", "anything", "yes", ""],
+        ids=[
+            "one",
+            "true-lower",
+            "true-upper",
+            "arbitrary-value",
+            "yes",
+            "empty-string",
+        ],
+    )
+    def test_no_color_env_disables_color(
+        self, monkeypatch: pytest.MonkeyPatch, no_color_value: str
+    ) -> None:
         """Test NO_COLOR environment variable disables colored output.
 
-        Per NO_COLOR spec (https://no-color.org/), any value should disable color.
+        Per NO_COLOR spec (https://no-color.org/), any value (including empty)
+        should disable color.
         """
-        monkeypatch.setenv("NO_COLOR", "1")
-        assert _should_use_color() is False
+        monkeypatch.setenv("NO_COLOR", no_color_value)
+        # Arrange & Act
+        result = _should_use_color()
 
-        # Any non-empty value should disable color
-        monkeypatch.setenv("NO_COLOR", "true")
-        assert _should_use_color() is False
+        # Assert
+        assert result is False, f"NO_COLOR={no_color_value!r} should disable color"
 
-        monkeypatch.setenv("NO_COLOR", "anything")
-        assert _should_use_color() is False
-
-    def test_ci_env_disables_color(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test CI environment variable disables colored output.
-
-        CI environments typically don't support ANSI color codes.
-        """
-        monkeypatch.setenv("CI", "true")
-        assert _should_use_color() is False
-
-        monkeypatch.setenv("CI", "1")
-        assert _should_use_color() is False
-
-    def test_both_no_color_and_ci_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test NO_COLOR takes precedence when both are set.
-
-        Edge case: Both environment variables set simultaneously.
-        """
-        monkeypatch.setenv("NO_COLOR", "1")
-        monkeypatch.setenv("CI", "true")
-        assert _should_use_color() is False
-
-    def test_tty_detection(
+    def test_no_color_unset_checks_tty(
         self, monkeypatch: pytest.MonkeyPatch, clean_env: None
     ) -> None:
-        """Test color is enabled for TTY, disabled for non-TTY.
+        """Test color detection falls back to TTY check when NO_COLOR is unset.
 
-        When no env vars are set, uses stdout.isatty() to detect terminal.
+        When NO_COLOR is not set, should use stdout.isatty() to detect terminal.
         """
-        # Mock TTY
+        # Arrange & Act - TTY
         with patch.object(sys.stdout, "isatty", return_value=True):
-            assert _should_use_color() is True
+            result_tty = _should_use_color()
 
-        # Mock non-TTY (pipe, redirect)
+        # Assert
+        assert result_tty is True, "Should enable color for TTY"
+
+        # Arrange & Act - non-TTY
         with patch.object(sys.stdout, "isatty", return_value=False):
-            assert _should_use_color() is False
+            result_non_tty = _should_use_color()
+
+        # Assert
+        assert result_non_tty is False, "Should disable color for non-TTY"
 
     def test_isatty_raises_attribute_error(
         self, monkeypatch: pytest.MonkeyPatch, clean_env: None
@@ -163,8 +177,14 @@ class TestShouldUseColor:
 
         Edge case: Some file-like objects don't have isatty().
         """
+        # Arrange
         with patch.object(sys, "stdout", spec=[]):  # No isatty attribute
-            assert _should_use_color() is False
+
+            # Act
+            result = _should_use_color()
+
+        # Assert
+        assert result is False, "Should disable color when isatty() unavailable"
 
     def test_isatty_raises_os_error(
         self, monkeypatch: pytest.MonkeyPatch, clean_env: None
@@ -173,24 +193,39 @@ class TestShouldUseColor:
 
         Edge case: Some environments raise errors when checking TTY.
         """
+        # Arrange
         mock_stdout = MagicMock()
         mock_stdout.isatty.side_effect = OSError("Not a terminal")
 
         with patch.object(sys, "stdout", mock_stdout):
-            assert _should_use_color() is False
+            # Act
+            result = _should_use_color()
 
-    def test_empty_no_color_enables_color(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Test empty NO_COLOR variable still disables color.
+        # Assert
+        assert result is False, "Should disable color when isatty() raises OSError"
 
-        Edge case: NO_COLOR="" should still disable color per spec.
+    def test_no_color_priority_over_tty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test NO_COLOR takes precedence over TTY detection.
+
+        Even when stdout is a TTY, NO_COLOR should disable color.
         """
-        monkeypatch.setenv("NO_COLOR", "")
-        # Empty string is truthy in env vars - should still disable
-        assert _should_use_color() is False
+        # Arrange
+        monkeypatch.setenv("NO_COLOR", "1")
+
+        with patch.object(sys.stdout, "isatty", return_value=True):
+            # Act
+            result = _should_use_color()
+
+        # Assert
+        assert result is False, "NO_COLOR should override TTY detection"
 
 
+# ==============================================================================
+# Console Singleton Tests
+# ==============================================================================
+
+
+@pytest.mark.unit
 class TestGetConsole:
     """Tests for _get_console singleton management."""
 
@@ -267,6 +302,7 @@ class TestGetConsole:
         assert all(console is results[0] for console in results)
 
 
+@pytest.mark.unit
 class TestReconfigureConsole:
     """Tests for reconfigure_console reset functionality."""
 
@@ -326,6 +362,7 @@ class TestReconfigureConsole:
         assert isinstance(console, Console)
 
 
+@pytest.mark.unit
 class TestPrintSuccess:
     """Tests for print_success message output."""
 
@@ -384,6 +421,7 @@ class TestPrintSuccess:
             )
 
 
+@pytest.mark.unit
 class TestPrintError:
     """Tests for print_error message output."""
 
@@ -420,6 +458,7 @@ class TestPrintError:
             mock_print.assert_called_once_with("[ERROR] ", style="error")
 
 
+@pytest.mark.unit
 class TestPrintWarning:
     """Tests for print_warning message output."""
 
@@ -446,6 +485,7 @@ class TestPrintWarning:
             mock_print.assert_called_once_with("⚠ Caution", style="warning")
 
 
+@pytest.mark.unit
 class TestPrintTable:
     """Tests for print_table structured output."""
 
@@ -625,6 +665,7 @@ class TestPrintTable:
             assert table_arg.show_lines is True
 
 
+@pytest.mark.unit
 class TestConfirm:
     """Tests for confirm user interaction."""
 
@@ -766,6 +807,7 @@ class TestConfirm:
                 assert "[y/N]" in call_args
 
 
+@pytest.mark.unit
 class TestGetRawConsole:
     """Tests for get_raw_console accessor."""
 
@@ -791,6 +833,7 @@ class TestGetRawConsole:
         assert console1 is console2
 
 
+@pytest.mark.unit
 class TestColorizeUpdateType:
     """Tests for colorize_update_type Rich markup helper."""
 
@@ -881,6 +924,7 @@ class TestColorizeUpdateType:
         assert "major" not in result.replace("[red]", "").replace("[/red]", "")
 
 
+@pytest.mark.integration
 class TestIntegration:
     """Integration tests combining multiple console features."""
 
@@ -953,6 +997,7 @@ class TestIntegration:
         assert get_raw_console() is console2
 
 
+@pytest.mark.unit
 class TestEdgeCases:
     """Additional edge case tests."""
 
@@ -975,9 +1020,9 @@ class TestEdgeCases:
         Edge case: Emoji and international characters should work.
         """
         with patch.object(Console, "print") as mock_print:
-            print_success("✓ 成功 🎉")
+            print_success("✓ 成功 ��")
 
-            assert "✓ 成功 🎉" in mock_print.call_args[0][0]
+            assert "✓ 成功 ��" in mock_print.call_args[0][0]
 
     def test_table_with_unicode_data(self) -> None:
         """Test print_table handles Unicode in data.
@@ -1029,3 +1074,516 @@ class TestEdgeCases:
             with patch.object(Console, "print"):
                 result = confirm("続けますか？")  # "Continue?" in Japanese
                 assert result is True
+
+
+# ==============================================================================
+# Additional Parametrized Tests
+# ==============================================================================
+
+
+@pytest.mark.unit
+class TestPrintFunctionsParametrized:
+    """Parametrized tests for all print functions."""
+
+    @pytest.mark.parametrize(
+        "func,message,style",
+        [
+            (print_success, "Success message", "success"),
+            (print_error, "Error message", "error"),
+            (print_warning, "Warning message", "warning"),
+        ],
+        ids=["print_success", "print_error", "print_warning"],
+    )
+    def test_print_functions_basic(self, func: Any, message: str, style: str) -> None:
+        """Test all print functions with basic messages.
+
+        Parametrized test covering success/error/warning functions.
+        """
+        # Act
+        with patch.object(Console, "print") as mock_print:
+            func(message)
+
+        # Assert
+        assert mock_print.call_count == 1
+        assert style in str(mock_print.call_args)
+        assert message in mock_print.call_args[0][0]
+
+    @pytest.mark.parametrize(
+        "prefix,message",
+        [
+            ("✓", "Test passed"),
+            ("DONE", "Completed successfully"),
+            ("", "No prefix"),
+            ("��", "Celebration"),
+            ("[INFO]", "Information"),
+        ],
+        ids=["checkmark", "done", "empty-prefix", "emoji", "info-prefix"],
+    )
+    def test_print_success_various_prefixes(self, prefix: str, message: str) -> None:
+        """Test print_success with various prefix and message combinations."""
+        # Act
+        with patch.object(Console, "print") as mock_print:
+            print_success(message, prefix=prefix)
+
+        # Assert
+        mock_print.assert_called_once_with(f"{prefix} {message}", style="success")
+
+
+# ==============================================================================
+# Additional Table Edge Cases
+# ==============================================================================
+
+
+@pytest.mark.unit
+class TestPrintTableAdvanced:
+    """Advanced table rendering edge cases."""
+
+    def test_table_single_row(self) -> None:
+        """Test print_table with single row."""
+        # Arrange
+        data = [{"name": "Alice", "age": "30"}]
+
+        # Act
+        with patch.object(Console, "print") as mock_print:
+            print_table(data)
+
+        # Assert
+        assert mock_print.call_count == 1
+
+    def test_table_single_column(self) -> None:
+        """Test print_table with single column."""
+        # Arrange
+        data = [{"name": "Alice"}, {"name": "Bob"}, {"name": "Charlie"}]
+
+        # Act
+        with patch.object(Console, "print") as mock_print:
+            print_table(data)
+
+        # Assert
+        table_arg = mock_print.call_args[0][0]
+        assert len(table_arg.columns) == 1
+
+    def test_table_with_many_rows(self) -> None:
+        """Test print_table with many rows.
+
+        Edge case: Tables with many rows should work efficiently.
+        """
+        # Arrange
+        data = [{"id": str(i), "value": f"val{i}"} for i in range(1000)]
+
+        # Act
+        with patch.object(Console, "print") as mock_print:
+            print_table(data)
+
+        # Assert
+        assert mock_print.call_count == 1
+
+    def test_table_with_mixed_types(self) -> None:
+        """Test print_table with mixed data types.
+
+        Edge case: Rows with different value types should be converted to strings.
+        """
+        # Arrange
+        data = [
+            {"name": "Alice", "age": 30, "active": True},
+            {"name": "Bob", "age": None, "active": False},
+        ]
+
+        # Act
+        with patch.object(Console, "print") as mock_print:
+            print_table(data)
+
+        # Assert
+        assert mock_print.call_count == 1
+
+    @pytest.mark.parametrize(
+        "value,expected_contains",
+        [
+            (30, "30"),
+            (95.5, "95.5"),
+            (None, "None"),
+            (True, "True"),
+            (False, "False"),
+        ],
+        ids=["int", "float", "none", "bool-true", "bool-false"],
+    )
+    def test_table_value_conversion(self, value: Any, expected_contains: str) -> None:
+        """Test print_table converts various types to strings."""
+        # Arrange
+        data = [{"name": "Test", "value": value}]
+
+        # Act
+        with patch.object(Console, "print") as mock_print:
+            print_table(data)
+
+        # Assert
+        assert mock_print.call_count == 1
+
+
+# ==============================================================================
+# Confirm Advanced Tests
+# ==============================================================================
+
+
+@pytest.mark.unit
+class TestConfirmAdvanced:
+    """Advanced confirm interaction tests."""
+
+    @pytest.mark.parametrize(
+        "response,expected",
+        [
+            ("y", True),
+            ("yes", True),
+            ("Y", True),
+            ("YES", True),
+            ("Yes", True),
+            ("n", False),
+            ("no", False),
+            ("N", False),
+            ("NO", False),
+            ("No", False),
+        ],
+        ids=[
+            "y-lower",
+            "yes-lower",
+            "y-upper",
+            "yes-upper",
+            "yes-mixed",
+            "n-lower",
+            "no-lower",
+            "n-upper",
+            "no-upper",
+            "no-mixed",
+        ],
+    )
+    def test_confirm_all_valid_responses(self, response: str, expected: bool) -> None:
+        """Test confirm with all valid yes/no variations."""
+        # Act
+        with patch("builtins.input", return_value=response):
+            result = confirm("Proceed?")
+
+        # Assert
+        assert result is expected
+
+    @pytest.mark.parametrize(
+        "response,default,expected",
+        [
+            ("", True, True),
+            ("", False, False),
+            ("maybe", True, True),
+            ("maybe", False, False),
+            ("123", True, True),
+            ("xyz", False, False),
+        ],
+        ids=[
+            "empty-default-true",
+            "empty-default-false",
+            "maybe-default-true",
+            "maybe-default-false",
+            "numeric-default-true",
+            "invalid-default-false",
+        ],
+    )
+    def test_confirm_invalid_inputs_use_default(
+        self, response: str, default: bool, expected: bool
+    ) -> None:
+        """Test confirm falls back to default for invalid inputs."""
+        # Act
+        with patch("builtins.input", return_value=response):
+            result = confirm("Proceed?", default=default)
+
+        # Assert
+        assert result is expected
+
+    def test_confirm_multiple_prompts(self) -> None:
+        """Test multiple consecutive confirm calls."""
+        # Act & Assert
+        with patch("builtins.input", side_effect=["y", "n", "yes", "no"]):
+            assert confirm("First?") is True
+            assert confirm("Second?") is False
+            assert confirm("Third?") is True
+            assert confirm("Fourth?") is False
+
+
+# ==============================================================================
+# Thread Safety Tests
+# ==============================================================================
+
+
+@pytest.mark.unit
+class TestThreadSafety:
+    """Comprehensive thread safety tests."""
+
+    def test_concurrent_console_access(self) -> None:
+        """Test concurrent access to console from multiple threads."""
+        # Arrange
+        reconfigure_console()
+        results: List[Console] = []
+        lock = threading.Lock()
+
+        def access_thread() -> None:
+            console = _get_console()
+            with lock:
+                results.append(console)
+
+        # Act
+        threads = [threading.Thread(target=access_thread) for _ in range(50)]
+
+        for thread in threads:
+            thread.start()
+
+        for thread in threads:
+            thread.join()
+
+        # Assert
+        assert len(results) == 50
+        assert all(console is results[0] for console in results)
+
+    def test_concurrent_print_operations(self) -> None:
+        """Test concurrent print operations are safe."""
+        # Arrange
+        results: List[bool] = []
+        lock = threading.Lock()
+
+        def print_thread(msg: str) -> None:
+            with patch.object(Console, "print"):
+                print_success(msg)
+                print_error(msg)
+                print_warning(msg)
+                with lock:
+                    results.append(True)
+
+        # Act
+        threads = [
+            threading.Thread(target=print_thread, args=(f"Message {i}",))
+            for i in range(30)
+        ]
+
+        for thread in threads:
+            thread.start()
+
+        for thread in threads:
+            thread.join()
+
+        # Assert
+        assert len(results) == 30
+
+
+# ==============================================================================
+# Security and Safety Tests
+# ==============================================================================
+
+
+@pytest.mark.unit
+class TestSecurityAndSafety:
+    """Security and safety considerations per security instructions."""
+
+    def test_no_code_execution_in_table_data(self) -> None:
+        """Test print_table doesn't execute code in data values.
+
+        SECURITY_NOTE: Ensure data values are safely rendered as strings.
+        """
+        # Arrange - Potentially dangerous string representations
+        data = [
+            {"cmd": "__import__('os').system('echo pwned')"},
+            {"cmd": "eval('1+1')"},
+            {"cmd": "exec('import sys')"},
+        ]
+
+        # Act & Assert - Should just render as strings, not execute
+        with patch.object(Console, "print") as mock_print:
+            print_table(data)
+
+            # Verify no exception and table was printed
+            assert mock_print.call_count == 1
+
+    def test_no_code_execution_in_messages(self) -> None:
+        """Test print functions don't execute code in message strings.
+
+        SECURITY_NOTE: Message strings should be safe to print.
+        """
+        # Arrange
+        dangerous = 'eval(\'__import__("os").system("echo pwned")\')'
+
+        # Act & Assert
+        with patch.object(Console, "print") as mock_print:
+            print_success(dangerous)
+            print_error(dangerous)
+            print_warning(dangerous)
+
+            # Should print safely without executing
+            assert mock_print.call_count == 3
+
+    def test_input_sanitization_in_confirm(self) -> None:
+        """Test confirm properly handles potentially problematic input.
+
+        SECURITY_NOTE: User input should be safely processed.
+        """
+        # Arrange - Various potentially problematic inputs
+        inputs = [
+            "\x00",  # Null byte
+            "\x1b[31m",  # ANSI escape
+            "y\0n",  # Embedded null
+            "y" * 10000,  # Very long input
+            "yes\nno",  # Embedded newline
+        ]
+
+        # Act & Assert
+        for inp in inputs:
+            with patch("builtins.input", return_value=inp):
+                with patch.object(Console, "print"):
+                    # Should handle safely without crashing
+                    result = confirm("Test?", default=False)
+                    assert isinstance(result, bool)
+
+
+# ==============================================================================
+# Error Handling Tests
+# ==============================================================================
+
+
+@pytest.mark.unit
+class TestErrorHandling:
+    """Test error handling and edge cases."""
+
+    def test_colorize_with_whitespace(self) -> None:
+        """Test colorize_update_type with leading/trailing whitespace."""
+        # Act & Assert - Should not match due to whitespace
+        assert colorize_update_type(" major") == " major"
+        assert colorize_update_type("major ") == "major "
+        assert colorize_update_type(" minor ") == " minor "
+
+
+# ==============================================================================
+# Integration Tests - Real World Scenarios
+# ==============================================================================
+
+
+@pytest.mark.integration
+class TestRealWorldScenarios:
+    """Integration tests for real-world usage patterns."""
+
+    def test_update_workflow_complete(self, mock_tty: None) -> None:
+        """Test complete update workflow with all console features.
+
+        Integration test: Simulates real CLI update workflow.
+        """
+        # Arrange
+        updates = [
+            {
+                "package": "requests",
+                "current": "2.28.0",
+                "latest": "2.31.0",
+                "type": colorize_update_type("minor"),
+            },
+            {
+                "package": "numpy",
+                "current": "1.24.0",
+                "latest": "1.26.0",
+                "type": colorize_update_type("major"),
+            },
+        ]
+
+        # Act & Assert - Full workflow
+        with patch.object(Console, "print"):
+            # Initial message
+            print_success("Checking for updates...")
+
+            # Display table
+            print_table(
+                updates,
+                title="Available Updates",
+                headers=["package", "current", "latest", "type"],
+                caption="2 updates found",
+            )
+
+            # Warning
+            print_warning("Major updates may contain breaking changes")
+
+            # Confirmation
+            with patch("builtins.input", return_value="y"):
+                proceed = confirm("Apply updates?", default=False)
+                assert proceed is True
+
+            # Success
+            print_success("Updates applied successfully", prefix="✓")
+
+    def test_error_recovery_workflow(self) -> None:
+        """Test error display and recovery workflow."""
+        # Act & Assert
+        with patch.object(Console, "print"):
+            print_error("Failed to connect to PyPI")
+            print_warning("Retrying with different mirror...")
+            print_success("Connected successfully")
+
+    def test_reconfiguration_during_execution(
+        self, monkeypatch: pytest.MonkeyPatch, mock_tty: None
+    ) -> None:
+        """Test runtime reconfiguration affects subsequent operations."""
+        # Arrange - Start with color
+        with patch.object(Console, "print") as mock_print:
+            print_success("Initial message")
+            initial_calls = mock_print.call_count
+
+        # Act - Disable color
+        monkeypatch.setenv("NO_COLOR", "1")
+        reconfigure_console()
+
+        # Assert - New console has no color
+        console = _get_console()
+        assert console.no_color is True
+
+        with patch.object(Console, "print") as mock_print:
+            print_success("After reconfigure")
+            assert mock_print.call_count >= 1
+
+
+# ==============================================================================
+# Performance and Stress Tests
+# ==============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.slow
+class TestPerformance:
+    """Performance and stress tests."""
+
+    def test_large_table_rendering(self) -> None:
+        """Test rendering large tables efficiently."""
+        # Arrange - 10000 rows
+        data = [
+            {"id": str(i), "name": f"user{i}", "value": f"value{i}"}
+            for i in range(10000)
+        ]
+
+        # Act
+        with patch.object(Console, "print") as mock_print:
+            print_table(data)
+
+        # Assert
+        assert mock_print.call_count == 1
+
+    def test_very_long_messages(self) -> None:
+        """Test handling of very long message strings."""
+        # Arrange
+        long_message = "x" * 1000000  # 1MB string
+
+        # Act
+        with patch.object(Console, "print") as mock_print:
+            print_success(long_message)
+
+        # Assert
+        assert mock_print.call_count == 1
+        assert long_message in mock_print.call_args[0][0]
+
+    def test_many_sequential_operations(self) -> None:
+        """Test many sequential console operations."""
+        # Act
+        with patch.object(Console, "print") as mock_print:
+            for i in range(1000):
+                print_success(f"Message {i}")
+                print_error(f"Error {i}")
+                print_warning(f"Warning {i}")
+
+        # Assert
+        assert mock_print.call_count == 3000

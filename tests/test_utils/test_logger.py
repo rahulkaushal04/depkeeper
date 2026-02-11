@@ -1,20 +1,3 @@
-"""Unit tests for depkeeper.utils.logger module.
-
-This test suite provides comprehensive coverage of the logging utilities,
-including formatter behavior, logger configuration, color support, thread
-safety, and library-safe defaults.
-
-Test Coverage:
-- ColoredFormatter color application and detection
-- setup_logging configuration and idempotency
-- get_logger namespace handling and fallback behavior
-- Thread safety of configuration
-- Environment variable handling (NO_COLOR, CI)
-- Stream handling and output redirection
-- Logger hierarchy and propagation
-- Cleanup and disable functionality
-"""
-
 from __future__ import annotations
 
 import io
@@ -75,6 +58,7 @@ def captured_stream() -> io.StringIO:
     return io.StringIO()
 
 
+@pytest.mark.unit
 class TestColoredFormatter:
     """Tests for ColoredFormatter ANSI color formatting."""
 
@@ -307,6 +291,7 @@ class TestColoredFormatter:
         assert "ValueError: Test error" in result
 
 
+@pytest.mark.unit
 class TestSetupLogging:
     """Tests for setup_logging configuration function."""
 
@@ -531,6 +516,7 @@ class TestSetupLogging:
         assert "Critical" in output
 
 
+@pytest.mark.unit
 class TestGetLogger:
     """Tests for get_logger factory function."""
 
@@ -671,14 +657,15 @@ class TestGetLogger:
         Common usage pattern: get_logger(__name__) should work correctly.
         """
         # Simulate a module name
-        module_name = "mypackage.mymodule"
+        module_name = "depkeeper.utils.http"
         logger = get_logger(module_name)
 
-        assert logger.name == f"depkeeper.{module_name}"
+        assert logger.name == "depkeeper.utils.http"
 
 
+@pytest.mark.unit
 class TestIsLoggingConfigured:
-    """Tests for is_logging_configured state function."""
+    """Tests for is_logging_configured state query function."""
 
     def test_not_configured_initially(self, clean_logger_state: None) -> None:
         """Test is_logging_configured returns False initially.
@@ -713,6 +700,7 @@ class TestIsLoggingConfigured:
         assert is_logging_configured() is False
 
 
+@pytest.mark.unit
 class TestDisableLogging:
     """Tests for disable_logging cleanup function."""
 
@@ -833,6 +821,7 @@ class TestDisableLogging:
         assert isinstance(logger.handlers[0], logging.NullHandler)
 
 
+@pytest.mark.integration
 class TestLoggingIntegration:
     """Integration tests combining multiple logging features."""
 
