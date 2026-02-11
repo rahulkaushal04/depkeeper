@@ -260,12 +260,12 @@ flask==2.0.0
 click>=8.0.0
 
 # After
-requests>=2.32.0
-flask>=2.3.3
-click>=8.1.7
+requests==2.32.0
+flask==2.3.3
+click==8.1.7
 ```
 
-depkeeper updates the version specifier to `>=new_version`.
+depkeeper updates the version specifier to `==new_version`.
 
 ### Preserved Elements
 

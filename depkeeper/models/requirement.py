@@ -99,7 +99,7 @@ class Requirement:
         """
         Return a requirement string updated to the given version.
 
-        All existing version specifiers are replaced with ``>=new_version``.
+        All existing version specifiers are replaced with ``==new_version``.
         Hashes are omitted in the updated output.
 
         Args:
@@ -111,7 +111,7 @@ class Requirement:
         """
         updated = Requirement(
             name=self.name,
-            specs=[(">=", new_version)],
+            specs=[("==", new_version)],
             extras=list(self.extras),
             markers=self.markers,
             url=self.url,

@@ -88,6 +88,10 @@ depkeeper check [OPTIONS] [FILE]
 | `--strict-version-matching` | | Only consider exact version pins (`==`) | `False` |
 | `--check-conflicts / --no-check-conflicts` | | Enable/disable dependency conflict resolution | `True` |
 
+!!! tip "Configuration File Fallback"
+
+    `--strict-version-matching` and `--check-conflicts` fall back to values from your `depkeeper.toml` or `pyproject.toml` when not provided on the command line. See [Configuration](../guides/configuration.md) for details.
+
 ### How It Works
 
 1. **Parse** -- Read and parse the requirements file (PEP 440/508 compliant)
@@ -200,6 +204,10 @@ depkeeper update [OPTIONS] [FILE]
 | `--strict-version-matching` | | Only consider exact version pins | `False` |
 | `--check-conflicts / --no-check-conflicts` | | Enable/disable conflict resolution | `True` |
 
+!!! tip "Configuration File Fallback"
+
+    `--strict-version-matching` and `--check-conflicts` fall back to values from your `depkeeper.toml` or `pyproject.toml` when not provided on the command line. See [Configuration](../guides/configuration.md) for details.
+
 ### Update Process
 
 1. **Parse** -- Read the requirements file
@@ -286,8 +294,6 @@ Commands respect these environment variables:
 | `DEPKEEPER_CONFIG` | `--config` option |
 | `DEPKEEPER_COLOR` | `--color` option |
 | `NO_COLOR` | Disables colors ([standard](https://no-color.org/)) |
-| `DEPKEEPER_LOG_LEVEL` | Logging level (`WARNING`, `INFO`, `DEBUG`) |
-| `DEPKEEPER_TIMEOUT` | HTTP request timeout in seconds |
 
 ---
 

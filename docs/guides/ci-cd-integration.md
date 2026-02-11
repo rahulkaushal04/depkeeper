@@ -20,6 +20,11 @@ depkeeper fits into CI/CD workflows for:
 
 ---
 
+!!! important
+    The examples use `src/requirements.txt` -- replace with your actual requirements file path.
+
+---
+
 ## GitHub Actions
 
 ### Check for Outdated Dependencies
@@ -422,29 +427,36 @@ Always run your test suite after automated updates:
 Don't push directly to main. Create PRs for review:
 
 ```yaml
-- uses: peter-evans/create-pull-request@v6
+- name: Commit and push changes
+  run: |
+    git config --global user.name "github-actions[bot]"
+    git config --global user.email "github-actions[bot]@users.noreply.github.com"
+    git checkout -b deps/automated-updates
+    git add src/requirements.txt
+    git commit -m "chore(deps): update dependencies"
+    git push -f origin deps/automated-updates
+
+- name: Create Pull Request
+  uses: actions/github-script@v7
   with:
-    branch: deps/updates
-```
+    script: |
+      const { data: pulls } = await github.rest.pulls.list({
+        owner: context.repo.owner,
+        repo: context.repo.repo,
+        head: `${context.repo.owner}:deps/automated-updates`,
+        state: 'open'
+      });
 
-### 5. Use JSON for Processing
-
-Use `--format json` when you need to process the output:
-
-```bash
-depkeeper check src/requirements.txt --format json | jq '.[] | select(.update_type == "patch")'
-```
-
-### 6. Notifications
-
-Send notifications for outdated dependencies:
-
-```yaml
-- name: Notify Slack
-  if: steps.check.outputs.count > 0
-  uses: slackapi/slack-github-action@v1
-  with:
-    slack-message: "⚠️ ${{ steps.check.outputs.count }} dependencies need updates"
+      if (pulls.length === 0) {
+        await github.rest.pulls.create({
+          owner: context.repo.owner,
+          repo: context.repo.repo,
+          title: '⬆️ Update dependencies',
+          head: 'deps/automated-updates',
+          base: 'master',
+          body: 'Automated dependency updates by depkeeper.'
+        });
+      }
 ```
 
 ---
@@ -458,12 +470,6 @@ Use exit codes for CI logic:
 | `0` | Success | Continue |
 | `1` | Error | Fail build |
 | `2` | Usage error | Fail build |
-
-Example:
-
-```bash
-depkeeper check src/requirements.txt || echo "Check failed with code $?"
-```
 
 ---
 
