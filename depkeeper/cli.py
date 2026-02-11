@@ -1,8 +1,8 @@
 """
 Command-line interface for depkeeper.
 
-This module defines the main Click entry point, global options, command
-registration, and top-level error handling for the depkeeper CLI.
+This module provides the main CLI entry point and handles global options,
+configuration loading, and command registration.
 """
 
 from __future__ import annotations
@@ -15,11 +15,12 @@ from typing import Optional
 
 import click
 
+from depkeeper.config import load_config
 from depkeeper.__version__ import __version__
 from depkeeper.context import DepKeeperContext
-from depkeeper.exceptions import DepKeeperError
-from depkeeper.utils.console import print_error, print_warning
+from depkeeper.exceptions import ConfigError, DepKeeperError
 from depkeeper.utils.logger import get_logger, setup_logging
+from depkeeper.utils.console import print_error, print_warning
 
 logger = get_logger("cli")
 
@@ -73,10 +74,19 @@ def cli(
     """
     _configure_logging(verbose)
 
+    try:
+        loaded_config = load_config(config)
+    except ConfigError as exc:
+        print_error(str(exc))
+        raise SystemExit(1) from exc
+
     depkeeper_ctx = DepKeeperContext()
-    depkeeper_ctx.config_path = config
-    depkeeper_ctx.verbose = verbose
+    depkeeper_ctx.config_path = config or (
+        loaded_config.source_path if loaded_config.source_path else None
+    )
     depkeeper_ctx.color = color
+    depkeeper_ctx.verbose = verbose
+    depkeeper_ctx.config = loaded_config
     ctx.obj = depkeeper_ctx
 
     # Respect NO_COLOR for downstream libraries
@@ -86,7 +96,9 @@ def cli(
         os.environ["NO_COLOR"] = "1"
 
     logger.debug("depkeeper v%s", __version__)
-    logger.debug("Config path: %s", config)
+    logger.debug("Config path: %s", depkeeper_ctx.config_path)
+    if loaded_config.source_path:
+        logger.debug("Loaded configuration: %s", loaded_config.to_log_dict())
     logger.debug("Verbosity: %s | Color: %s", verbose, color)
 
 

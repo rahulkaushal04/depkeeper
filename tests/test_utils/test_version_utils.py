@@ -1,24 +1,7 @@
-"""Unit tests for depkeeper.utils.version module.
-
-This test suite provides comprehensive coverage of version comparison utilities,
-including edge cases, PEP 440 compliance, error handling, and semantic versioning
-classification.
-
-Test Coverage:
-- Version update type classification (major, minor, patch)
-- New installation detection
-- Version downgrade detection
-- Same version handling
-- Invalid version handling
-- PEP 440 compliance (pre-release, post-release, dev, local versions)
-- Edge cases (None values, malformed versions, single-digit versions)
-- Normalization behavior
-"""
-
 from __future__ import annotations
 
 import pytest
-from packaging.version import InvalidVersion, Version
+from packaging.version import Version
 
 from depkeeper.utils.version_utils import (
     get_update_type,
@@ -27,6 +10,7 @@ from depkeeper.utils.version_utils import (
 )
 
 
+@pytest.mark.unit
 class TestGetUpdateType:
     """Tests for get_update_type main classification function."""
 
@@ -178,6 +162,7 @@ class TestGetUpdateType:
         assert result == "downgrade"
 
 
+@pytest.mark.unit
 class TestGetUpdateTypePEP440:
     """Tests for PEP 440 version format handling."""
 
@@ -290,6 +275,7 @@ class TestGetUpdateTypePEP440:
         assert get_update_type("1.0", "1.0.1") == "patch"
 
 
+@pytest.mark.unit
 class TestGetUpdateTypeEdgeCases:
     """Tests for edge cases and unusual version formats."""
 
@@ -364,6 +350,7 @@ class TestGetUpdateTypeEdgeCases:
         assert result in ("update", "patch", "same")
 
 
+@pytest.mark.unit
 class TestClassifyUpgrade:
     """Tests for _classify_upgrade internal function."""
 
@@ -448,7 +435,10 @@ class TestClassifyUpgrade:
         assert result == "major"
 
 
+@pytest.mark.unit
 class TestNormalizeRelease:
+    """Tests for _normalize_release internal helper function."""
+
     """Tests for _normalize_release internal function."""
 
     def test_normalize_full_version(self) -> None:
@@ -554,6 +544,7 @@ class TestNormalizeRelease:
         assert result == (1, 2, 3)
 
 
+@pytest.mark.integration
 class TestGetUpdateTypeIntegration:
     """Integration tests combining various version scenarios."""
 

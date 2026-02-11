@@ -187,3 +187,32 @@ class FileOperationError(DepKeeperError):
         self.file_path = file_path
         self.operation = operation
         self.original_error = original_error
+
+
+class ConfigError(DepKeeperError):
+    """Raised when a configuration file is invalid or cannot be loaded.
+
+    Args:
+        message: Human-readable description of the configuration problem.
+        config_path: Path to the configuration file that caused the error.
+        option: The specific configuration option that is invalid, if
+            applicable.
+    """
+
+    __slots__ = ("config_path", "option")
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        config_path: Optional[str] = None,
+        option: Optional[str] = None,
+    ) -> None:
+        details: MutableMapping[str, Any] = {}
+        _add_if(details, "config_path", config_path)
+        _add_if(details, "option", option)
+
+        super().__init__(message, details)
+
+        self.config_path = config_path
+        self.option = option

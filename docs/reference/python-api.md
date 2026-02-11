@@ -334,9 +334,9 @@ req = Requirement(
 # Convert to string
 print(req.to_string())  # requests[security]>=2.28.0,<3.0.0; python_version >= '3.8'
 
-# Update version (replaces all specifiers with >=new_version)
+# Update version (replaces all specifiers with ==new_version)
 updated = req.update_version("2.31.0")
-print(updated)  # requests[security]>=2.31.0; python_version >= '3.8'
+print(updated)  # requests[security]==2.31.0; python_version >= '3.8'
 ```
 
 #### Attributes
@@ -754,8 +754,55 @@ if __name__ == "__main__":
 
 ---
 
+## Configuration
+
+### DepKeeperConfig
+
+Dataclass representing a parsed and validated configuration file. All fields carry defaults, so an empty or missing configuration file produces a fully usable config object.
+
+```python
+from depkeeper.config import load_config, discover_config_file
+
+# Auto-discover and load (depkeeper.toml or pyproject.toml)
+config = load_config()
+
+# Load from explicit path
+config = load_config(Path("/project/depkeeper.toml"))
+
+# Access values
+print(config.check_conflicts)           # True
+print(config.strict_version_matching)   # False
+```
+
+#### Functions
+
+::: depkeeper.config
+    options:
+      show_root_heading: false
+      members:
+        - discover_config_file
+        - load_config
+
+#### Class
+
+::: depkeeper.config.DepKeeperConfig
+    options:
+      show_root_heading: true
+      members:
+        - to_log_dict
+
+#### Exception
+
+::: depkeeper.config.ConfigError
+    options:
+      show_root_heading: true
+
+---
+
 ## See Also
 
 - [Getting Started](../getting-started/quickstart.md) -- Quick start guide
 - [CLI Reference](cli-commands.md) -- Command-line interface
+- [Configuration Guide](../guides/configuration.md) -- Configuration guide
+- [Configuration Options](configuration-options.md) -- Full options reference
 - [Contributing](../contributing/development-setup.md) -- Development guide

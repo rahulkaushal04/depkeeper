@@ -1,21 +1,3 @@
-"""Unit tests for depkeeper.utils.http module.
-
-This test suite provides comprehensive coverage of the HTTPClient class,
-including edge cases, error handling, retry logic, rate limiting, and
-concurrency control.
-
-Test Coverage:
-- Client initialization and configuration
-- Async context manager lifecycle
-- Rate limiting enforcement
-- Retry logic with exponential backoff
-- HTTP status code handling (2xx, 4xx, 5xx)
-- Network error recovery
-- JSON parsing and validation
-- Batch request processing
-- Concurrency control
-"""
-
 from __future__ import annotations
 
 import json
@@ -46,6 +28,7 @@ def http_client() -> Generator[HTTPClient, None, None]:
         asyncio.get_event_loop().run_until_complete(client.close())
 
 
+@pytest.mark.unit
 class TestHTTPClientInit:
     """Tests for HTTPClient initialization and configuration."""
 
@@ -127,6 +110,7 @@ class TestHTTPClientInit:
         assert client.rate_limit_delay == -1.0
 
 
+@pytest.mark.unit
 class TestHTTPClientContextManager:
     """Tests for HTTPClient async context manager protocol."""
 
@@ -195,6 +179,7 @@ class TestHTTPClientContextManager:
         assert first_client is not second_client
 
 
+@pytest.mark.unit
 class TestHTTPClientEnsureClient:
     """Tests for HTTPClient._ensure_client internal method."""
 
@@ -245,6 +230,7 @@ class TestHTTPClientEnsureClient:
         await client.close()
 
 
+@pytest.mark.unit
 class TestHTTPClientClose:
     """Tests for HTTPClient.close cleanup method."""
 
@@ -291,6 +277,7 @@ class TestHTTPClientClose:
         assert client._client is None
 
 
+@pytest.mark.unit
 class TestHTTPClientRateLimit:
     """Tests for HTTPClient._rate_limit rate limiting mechanism."""
 
@@ -390,6 +377,7 @@ class TestHTTPClientRateLimit:
         assert elapsed < 0.05
 
 
+@pytest.mark.unit
 class TestHTTPClientRequestWithRetry:
     """Tests for HTTPClient._request_with_retry core retry logic."""
 
@@ -852,6 +840,7 @@ class TestHTTPClientRequestWithRetry:
             assert response.status_code == 200
 
 
+@pytest.mark.unit
 class TestHTTPClientGet:
     """Tests for HTTPClient.get convenience method."""
 
@@ -905,6 +894,7 @@ class TestHTTPClientGet:
             assert "headers" in call_kwargs
 
 
+@pytest.mark.unit
 class TestHTTPClientPost:
     """Tests for HTTPClient.post convenience method."""
 
@@ -962,6 +952,7 @@ class TestHTTPClientPost:
             assert mock_request.call_count == 3
 
 
+@pytest.mark.unit
 class TestHTTPClientGetJson:
     """Tests for HTTPClient.get_json JSON parsing method."""
 
@@ -1073,6 +1064,7 @@ class TestHTTPClientGetJson:
             assert data["info"]["meta"]["version"] == "1.0"
 
 
+@pytest.mark.unit
 class TestHTTPClientBatchGetJson:
     """Tests for HTTPClient.batch_get_json concurrent fetch method."""
 
@@ -1276,6 +1268,7 @@ class TestHTTPClientBatchGetJson:
             assert len(results) == 50
 
 
+@pytest.mark.unit
 class TestHTTPClientConcurrency:
     """Tests for HTTPClient concurrency control and semaphore."""
 
@@ -1376,6 +1369,8 @@ class TestHTTPClientConcurrency:
         assert concurrent_count[0] == 0
 
 
+@pytest.mark.integration
+@pytest.mark.network
 class TestHTTPClientIntegration:
     """Integration tests combining multiple features."""
 

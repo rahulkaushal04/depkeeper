@@ -13,7 +13,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "depkeeper"
-version = "0.1.0.dev3"
+version = "0.1.0"
 description = "Modern Python dependency management for requirements.txt files"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -53,6 +53,7 @@ dependencies = [
     "packaging>=23.2",
     "httpx[http2]>=0.24.1",
     "rich>=13.9.4",
+    "tomli>=2.4.0",
 ]
 
 
@@ -165,6 +166,7 @@ addopts = [
 ]
 
 markers = [
+    "unit: unit tests",
     "slow: slow tests",
     "integration: integration tests",
     "e2e: end-to-end tests",

@@ -92,3 +92,13 @@ LOG_DEFAULT_FORMAT: Final[str] = "%(levelname)s: %(message)s"
 
 #: Verbose log format including timestamp and logger name.
 LOG_VERBOSE_FORMAT: Final[str] = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# ---------------------------------------------------------------------------
+# Configuration defaults
+# ---------------------------------------------------------------------------
+
+#: Default setting for dependency conflict checking.
+DEFAULT_CHECK_CONFLICTS: Final[bool] = True
+
+#: Default setting for strict version matching (only exact pins).
+DEFAULT_STRICT_VERSION_MATCHING: Final[bool] = False

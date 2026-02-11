@@ -65,10 +65,20 @@ depkeeper check path/to/requirements.txt
     ```
 
     ```
-    Package       Current    Latest     Recommended  Status
-    ─────────────────────────────────────────────────────────
-    requests      2.28.0     2.32.0     2.32.0       Outdated (minor)
-    flask         2.0.0      3.0.1      2.3.3        Outdated (patch)
+                                        Dependency Status
+
+      Status       Package    Current   Latest   Recommended   Update Type   Conflicts   Python Support
+
+      ✓ OK         django      3.2.0     5.0.2        -             -           -        Current: >=3.8
+                                                                                         Latest: >=3.10
+
+      ⬆ OUTDATED   requests    2.28.0    2.32.0     2.32.0        minor         -        Current: >=3.7
+                                                                                         Latest: >=3.8
+
+      ⬆ OUTDATED   flask       2.0.0     3.0.1      2.3.3         patch         -        Current: >=3.7
+                                                                                         Latest: >=3.8
+
+    [WARNING] 2 package(s) have updates available
     ```
 
 === "Simple"
@@ -78,9 +88,15 @@ depkeeper check path/to/requirements.txt
     ```
 
     ```
-    requests: 2.28.0 -> 2.32.0 (minor)
-    flask: 2.0.0 -> 2.3.3 (patch)
+     requests             2.28.0     → 2.32.0     (recommended: 2.32.0)
+           Python: installed: >=3.7, latest: >=3.8
+     flask                2.0.0      → 3.0.1      (recommended: 2.3.3)
+           Python: installed: >=3.7, latest: >=3.8, recommended: >=3.7
+     celery               5.3.0      → 5.3.6
+           Python: installed: >=3.8, latest: >=3.8
     ```
+
+    Each line shows the package name, installed version, latest version, and a recommended version when it differs from the latest. The indented Python line shows the required Python version for each relevant release.
 
 === "JSON"
 
@@ -92,14 +108,51 @@ depkeeper check path/to/requirements.txt
     [
       {
         "name": "requests",
-        "current_version": "2.28.0",
-        "latest_version": "2.32.0",
-        "recommended_version": "2.32.0",
+        "status": "latest",
+        "versions": {
+          "current": "2.32.5",
+          "latest": "2.32.5",
+          "recommended": "2.32.5"
+        },
+        "python_requirements": {
+          "current": ">=3.9",
+          "latest": ">=3.9",
+          "recommended": ">=3.9"
+        }
+      },
+      {
+        "name": "polars",
+        "status": "outdated",
+        "versions": {
+          "current": "1.37.1",
+          "latest": "1.38.1",
+          "recommended": "1.38.1"
+        },
         "update_type": "minor",
-        "has_conflicts": false
+        "python_requirements": {
+          "current": ">=3.10",
+          "latest": ">=3.10",
+          "recommended": ">=3.10"
+        }
+      },
+      {
+        "name": "setuptools",
+        "status": "latest",
+        "versions": {
+          "current": "80.10.2",
+          "latest": "82.0.0",
+          "recommended": "80.10.2"
+        },
+        "python_requirements": {
+          "current": ">=3.9",
+          "latest": ">=3.9",
+          "recommended": ">=3.9"
+        }
       }
     ]
     ```
+
+    Each object includes the package `name`, its `status` (`latest` or `outdated`), a `versions` block with `current`, `latest`, and `recommended` versions, and a `python_requirements` block showing the required Python version for each release. Outdated packages also include an `update_type` field (`patch`, `minor`, or `major`).
 
 ### Filter to Outdated Only
 
@@ -217,13 +270,20 @@ When checking or updating, depkeeper:
 ### Example
 
 ```
-Package       Current    Recommended  Status
-───────────────────────────────────────────────
-requests      2.28.0     2.31.0       Outdated
-urllib3       1.26.0     1.26.18      Constrained
+                                         Dependency Status
 
-ℹ urllib3 constrained by requests (requires urllib3<2.0)
+  Status       Package           Current   Latest   Recommended   Update Type   Conflicts                        Python Support
+
+  ⬆ OUTDATED   pytest-asyncio     0.3.0     1.3.0     0.23.8        minor         -                             Latest: >=3.10
+                                                                                                                Recommended: >=3.8
+
+  ⬆ OUTDATED   pytest             7.0.2     9.0.2     7.4.4         minor    pytest-asyncio needs >= 7.0.0,<9      Latest: >=3.10
+                                                                                                                Recommended: >=3.7
+
+[WARNING] 2 package(s) have updates available
 ```
+
+In this example, `pytest` is constrained by `pytest-asyncio` which requires `pytest>=8.2,<9`. depkeeper detects this conflict and adjusts the recommended version of `pytest` to stay within safe boundaries.
 
 ### Disabling Conflict Checking
 

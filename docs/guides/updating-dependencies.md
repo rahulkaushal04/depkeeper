@@ -34,18 +34,24 @@ depkeeper update --dry-run
 ```
 
 ```
-Checking requirements.txt...
+Update Plan (Dry Run)
 
-Updates available:
+  Package    Current   New Version   Change   Python Requires
 
-Package       Current    →  Recommended  Type
-─────────────────────────────────────────────
-requests      2.28.0     →  2.32.0       minor
-flask         2.0.0      →  2.3.3        patch
-click         8.0.0      →  8.1.7        minor
-
-ℹ 3 packages would be updated (dry run - no changes made)
+  requests    2.28.0      2.32.0      minor   >=3.8
+  flask       2.0.0       2.3.3       patch   >=3.7
+  click       8.0.0       8.1.7       minor   >=3.7
 ```
+
+**Columns explained:**
+
+| Column | Description |
+|---|---|
+| **Package** | Normalized package name |
+| **Current** | Version from your requirements file |
+| **New Version** | The safe recommended version to update to |
+| **Change** | Severity of the update (`patch`, `minor`, or `major`) |
+| **Python Requires** | Required Python version for the new version |
 
 !!! tip "Best Practice"
     Always run `--dry-run` first to review changes before applying them.
@@ -140,20 +146,18 @@ This prevents unexpected breaking changes.
 
 ## Conflict Resolution
 
-When updating, depkeeper automatically resolves conflicts:
+When updating, depkeeper automatically resolves conflicts. Constrained packages show the dependency that restricts them in the check output, and the update plan reflects the safe resolved version:
 
 ```
-Checking requirements.txt...
+Update Plan (Dry Run)
 
-Updates available:
+  Package          Current   New Version   Change   Python Requires
 
-Package       Current    →  Recommended  Type
-─────────────────────────────────────────────
-requests      2.28.0     →  2.31.0       minor
-urllib3       1.26.0     →  1.26.18      constrained
-
-ℹ urllib3 version constrained by requests dependency
+  pytest-asyncio    0.3.0      0.23.8       minor   >=3.8
+  pytest            7.0.2      7.4.4        minor   >=3.7
 ```
+
+In this example, `pytest` is constrained by `pytest-asyncio` and depkeeper adjusts both recommendations to stay within compatible boundaries.
 
 ### Disable Conflict Checking
 
@@ -256,12 +260,12 @@ flask==2.0.0
 click>=8.0.0
 
 # After
-requests>=2.32.0
-flask>=2.3.3
-click>=8.1.7
+requests==2.32.0
+flask==2.3.3
+click==8.1.7
 ```
 
-depkeeper updates the version specifier to `>=new_version`.
+depkeeper updates the version specifier to `==new_version`.
 
 ### Preserved Elements
 

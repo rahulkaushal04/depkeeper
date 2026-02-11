@@ -4,6 +4,8 @@
 [![Coverage](https://codecov.io/gh/rahulkaushal04/depkeeper/branch/main/graph/badge.svg)](https://codecov.io/gh/rahulkaushal04/depkeeper)
 [![PyPI version](https://badge.fury.io/py/depkeeper.svg)](https://badge.fury.io/py/depkeeper)
 [![Python versions](https://img.shields.io/pypi/pyversions/depkeeper.svg)](https://pypi.org/project/depkeeper/)
+[![Downloads](https://static.pepy.tech/badge/depkeeper)](https://pepy.tech/project/depkeeper)
+[![Downloads per month](https://static.pepy.tech/badge/depkeeper/month)](https://pepy.tech/project/depkeeper)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 Modern, intelligent Python dependency management for `requirements.txt` files.

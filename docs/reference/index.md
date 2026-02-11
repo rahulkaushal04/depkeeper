@@ -84,9 +84,6 @@ depkeeper check --format json
 |---|---|
 | `DEPKEEPER_CONFIG` | Configuration file path |
 | `DEPKEEPER_COLOR` | Enable/disable colors |
-| `DEPKEEPER_CACHE_DIR` | Cache directory |
-| `DEPKEEPER_LOG_LEVEL` | Logging level |
-| `DEPKEEPER_TIMEOUT` | HTTP timeout in seconds |
 
 ### Exit Codes
 

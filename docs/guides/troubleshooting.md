@@ -83,20 +83,15 @@ Get-Content requirements.txt | Set-Content -Encoding UTF8 requirements_utf8.txt
 
 ### Connection timeout
 
-**Error**: `ConnectionError: Connection to pypi.org timed out`
+**Error**: `NetworkError: Connection to pypi.org timed out`
 
 **Solutions**:
 ```bash
-# Configure timeout via depkeeper.toml
-# [depkeeper.pypi]
-# timeout = 60
-
-# Use a mirror via configuration file
-# [depkeeper.pypi]
-# index_url = "https://pypi.tuna.tsinghua.edu.cn/simple"
-
 # Check network connectivity
 ping pypi.org
+
+# If behind a firewall, ensure pypi.org is accessible
+curl -I https://pypi.org
 ```
 
 ### SSL certificate errors
@@ -130,7 +125,9 @@ pip config set global.proxy http://proxy.example.com:8080
 
 ### Conflict detected
 
-**Error**: `ConflictError: package-a requires package-b<2.0, but package-c requires package-b>=2.0`
+**Warning**: Dependency conflicts shown in check output
+
+**Example**: `package-a requires package-b<2.0, but package-c requires package-b>=2.0`
 
 **Solutions:**
 
@@ -179,9 +176,9 @@ pip install package-a
 
 ## Update Issues
 
-### Update fails with rollback
+### Update fails with error
 
-**Error**: `UpdateError: Failed to update requirements, changes rolled back`
+**Error**: `FileOperationError: Cannot write to requirements.txt`
 
 **Common causes:**
 
@@ -195,7 +192,7 @@ pip install package-a
 ls -la requirements.txt
 
 # Close editors that might lock the file
-# Try with elevated permissions if needed
+# Try with elevated permissions if needed (Unix/macOS)
 sudo depkeeper update
 ```
 
@@ -203,12 +200,14 @@ sudo depkeeper update
 
 **Issue**: Unwanted alpha/beta versions suggested
 
-depkeeper excludes pre-releases by default. To explicitly configure this, add the following to your configuration file:
+depkeeper automatically excludes pre-release versions (alpha, beta, rc, dev) by default. If you're seeing pre-releases, this may indicate:
 
-```toml
-# depkeeper.toml
-[depkeeper.filters]
-include_pre_release = false
+- The package only has pre-release versions available
+- The package's versioning scheme doesn't follow PEP 440
+
+```bash
+# Check available versions on PyPI directly
+pip index versions package-name
 ```
 
 ---
@@ -236,41 +235,6 @@ export DEPKEEPER_COLOR=false
 ```bash
 # Redirect stderr to get clean JSON output
 depkeeper check --format json 2>/dev/null
-```
-
----
-
-## Cache Issues
-
-### Stale data
-
-**Issue**: depkeeper showing old versions
-
-**Solution**:
-```bash
-# Remove cache directory manually
-# Unix/macOS:
-rm -rf ~/.cache/depkeeper
-
-# Windows (PowerShell):
-Remove-Item -Recurse -Force "$env:LOCALAPPDATA\depkeeper\cache"
-
-# Or set a custom cache directory
-export DEPKEEPER_CACHE_DIR=/tmp/depkeeper-cache
-```
-
-### Cache corruption
-
-**Error**: `CacheError: Failed to read cache`
-
-**Solution**:
-```bash
-# Remove cache directory
-# Unix/macOS:
-rm -rf ~/.cache/depkeeper
-
-# Windows:
-rmdir /s /q %LOCALAPPDATA%\depkeeper\cache
 ```
 
 ---

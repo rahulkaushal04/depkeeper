@@ -1,11 +1,11 @@
 ---
 title: Configuration
-description: Configure depkeeper behavior via CLI options and environment variables
+description: Configure depkeeper behavior via CLI options, environment variables, and configuration files
 ---
 
 # Configuration
 
-depkeeper can be configured through CLI options, environment variables, and configuration files.
+depkeeper can be configured through CLI options, environment variables, and configuration files. When a CLI flag is not explicitly provided, depkeeper reads the value from the configuration file. If no configuration file is found, built-in defaults apply.
 
 ---
 
@@ -48,22 +48,12 @@ All environment variables are prefixed with `DEPKEEPER_`:
 |---|---|---|
 | `DEPKEEPER_CONFIG` | Path to configuration file | `/path/to/config.toml` |
 | `DEPKEEPER_COLOR` | Enable/disable colors | `true`, `false` |
-| `DEPKEEPER_CACHE_DIR` | Cache directory path | `~/.cache/depkeeper` |
-| `DEPKEEPER_LOG_LEVEL` | Logging level | `DEBUG`, `INFO`, `WARNING` |
 
 ### Examples
 
 ```bash
 # Disable colors
 export DEPKEEPER_COLOR=false
-depkeeper check
-
-# Set custom cache directory
-export DEPKEEPER_CACHE_DIR=/tmp/depkeeper-cache
-depkeeper check
-
-# Enable debug logging
-export DEPKEEPER_LOG_LEVEL=DEBUG
 depkeeper check
 ```
 
@@ -72,7 +62,6 @@ depkeeper check
 ```yaml
 env:
   DEPKEEPER_COLOR: false
-  DEPKEEPER_LOG_LEVEL: INFO
 
 steps:
   - run: depkeeper check
@@ -96,39 +85,11 @@ depkeeper looks for configuration in:
 # depkeeper.toml
 
 [depkeeper]
-# Default update strategy
-update_strategy = "minor"
-
 # Enable conflict checking by default
 check_conflicts = true
 
-# Cache settings
-cache_ttl = 3600  # seconds
-
-# Number of concurrent PyPI requests
-concurrent_requests = 10
-
-[depkeeper.filters]
-# Packages to exclude from updates
-exclude = [
-    "django",  # Pin major version manually
-    "numpy",   # Requires specific testing
-]
-
-# Include pre-release versions
-include_pre_release = false
-
-[depkeeper.pypi]
-# Custom PyPI index
-index_url = "https://pypi.org/simple"
-
-# Additional indexes
-extra_index_urls = [
-    "https://private.pypi.example.com/simple"
-]
-
-# Request timeout in seconds
-timeout = 30
+# Only consider exact version pins (==)
+strict_version_matching = false
 ```
 
 ### pyproject.toml Format
@@ -137,101 +98,28 @@ timeout = 30
 # pyproject.toml
 
 [tool.depkeeper]
-update_strategy = "minor"
 check_conflicts = true
-
-[tool.depkeeper.filters]
-exclude = ["django", "numpy"]
-include_pre_release = false
+strict_version_matching = false
 ```
 
 ---
 
 ## Configuration Options Reference
 
-### General Options
-
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `update_strategy` | string | `"minor"` | Default update strategy |
-| `check_conflicts` | bool | `true` | Enable dependency resolution |
-| `strict_version_matching` | bool | `false` | Only consider exact pins |
-| `cache_ttl` | int | `3600` | Cache TTL in seconds |
-| `concurrent_requests` | int | `10` | Max concurrent PyPI requests |
-
-### Filter Options
-
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `exclude` | list | `[]` | Packages to skip |
-| `include_pre_release` | bool | `false` | Include alpha/beta versions |
-
-### PyPI Options
-
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `index_url` | string | PyPI URL | Primary package index |
-| `extra_index_urls` | list | `[]` | Additional indexes |
-| `timeout` | int | `30` | Request timeout (seconds) |
-
----
-
-## Update Strategies
-
-Configure how depkeeper recommends updates:
-
-| Strategy | Description | Risk Level |
-|---|---|---|
-| `patch` | Only patch updates (x.x.PATCH) | Lowest |
-| `minor` | Minor + patch updates (x.MINOR.x) | Low |
-| `major` | All updates including major | Higher |
-
-```toml
-[depkeeper]
-update_strategy = "minor"  # Default: safe updates only
-```
-
-!!! note "Major Version Boundary"
-    Even with `update_strategy = "major"`, depkeeper respects major version boundaries for safety. To cross a major version, update your requirements manually.
+| `check_conflicts` | bool | `true` | Enable dependency conflict resolution |
+| `strict_version_matching` | bool | `false` | Only consider exact version pins (`==`) |
 
 ---
 
 ## Excluding Packages
 
-Skip specific packages from updates:
-
-```toml
-[depkeeper.filters]
-exclude = [
-    "django",      # Pin manually
-    "tensorflow",  # Requires GPU testing
-    "numpy",       # Version-sensitive
-]
-```
-
-Or via CLI:
+Use the `--packages` / `-p` CLI option to update only specific packages:
 
 ```bash
-# Update all except django
-depkeeper update -p requests -p flask  # Only update specified packages
-```
-
----
-
-## Private Package Indexes
-
-Configure custom PyPI indexes:
-
-```toml
-[depkeeper.pypi]
-# Replace the default index
-index_url = "https://private.pypi.example.com/simple"
-
-# Or add additional indexes
-extra_index_urls = [
-    "https://private.pypi.example.com/simple",
-    "https://another.index.com/simple",
-]
+# Update only specific packages
+depkeeper update -p requests -p flask
 ```
 
 ---
@@ -244,17 +132,8 @@ extra_index_urls = [
 # depkeeper.toml - Production-safe settings
 
 [depkeeper]
-update_strategy = "patch"
 check_conflicts = true
 strict_version_matching = true
-
-[depkeeper.filters]
-exclude = [
-    "django",
-    "celery",
-    "redis",
-]
-include_pre_release = false
 ```
 
 ### Active Development
@@ -263,25 +142,8 @@ include_pre_release = false
 # depkeeper.toml - Development settings
 
 [depkeeper]
-update_strategy = "minor"
 check_conflicts = true
-
-[depkeeper.filters]
-include_pre_release = false
-```
-
-### CI/CD Pipeline
-
-```toml
-# depkeeper.toml - CI/CD optimized
-
-[depkeeper]
-update_strategy = "minor"
-check_conflicts = true
-concurrent_requests = 20  # Faster in CI
-
-[depkeeper.pypi]
-timeout = 60  # Longer timeout for reliability
+strict_version_matching = false
 ```
 
 ---
@@ -323,7 +185,7 @@ depkeeper -vv check 2>&1 | grep -i config
 
 ```
 DEBUG: Config path: /project/depkeeper.toml
-DEBUG: Loaded configuration: {'update_strategy': 'minor', ...}
+DEBUG: Loaded configuration: {'check_conflicts': True, 'strict_version_matching': False}
 DEBUG: Effective check_conflicts: True
 ```
 

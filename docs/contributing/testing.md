@@ -674,16 +674,16 @@ Test CLI behavior using Click's test runner:
                 assert result.exit_code == 0
                 assert "requests" in result.output
 
-        def test_check_returns_exit_code_on_outdated(self, runner):
-            """Check returns non-zero exit when updates available."""
+        def test_check_returns_success_with_outdated(self, runner):
+            """Check returns exit code 0 even when updates are available."""
             with runner.isolated_filesystem():
                 with open("requirements.txt", "w") as f:
                     f.write("requests==2.28.0\n")
 
-                result = runner.invoke(cli, ["check", "--exit-code"])
+                result = runner.invoke(cli, ["check"])
 
-                # Exit code 1 indicates updates available
-                assert result.exit_code in (0, 1)
+                # Exit code 0 indicates successful execution
+                assert result.exit_code == 0
 
         def test_check_missing_file_shows_error(self, runner):
             """Check command shows helpful error for missing file."""

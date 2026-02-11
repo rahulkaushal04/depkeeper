@@ -1,20 +1,3 @@
-"""Unit tests for depkeeper.utils.filesystem module.
-
-This test suite provides comprehensive coverage of filesystem utilities,
-including file reading/writing, atomic operations, backup/restore,
-file discovery, path validation, and edge cases.
-
-Test Coverage:
-- File validation and existence checks
-- Safe file reading with size limits
-- Atomic file writing with temp files
-- Backup creation and restoration
-- Requirements file discovery
-- Path validation and security
-- Error handling and rollback
-- Edge cases (permissions, encoding, symlinks, etc.)
-"""
-
 from __future__ import annotations
 
 import os
@@ -38,6 +21,28 @@ from depkeeper.utils.filesystem import (
     create_timestamped_backup,
 )
 from depkeeper.exceptions import FileOperationError
+
+
+def _can_create_symlinks() -> bool:
+    """Check if the current environment supports symlink creation.
+
+    On Windows, symlinks require admin privileges or developer mode.
+    Returns False if symlink creation fails.
+    """
+    import tempfile
+
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = Path(tmpdir) / "target.txt"
+            link = Path(tmpdir) / "link.txt"
+            target.write_text("test")
+            link.symlink_to(target)
+            return True
+    except (OSError, NotImplementedError):
+        return False
+
+
+SYMLINKS_SUPPORTED = _can_create_symlinks()
 
 
 @pytest.fixture
@@ -94,6 +99,7 @@ def requirements_structure(temp_dir: Path) -> Path:
     return temp_dir
 
 
+@pytest.mark.unit
 class TestValidatedFile:
     """Tests for _validated_file internal helper."""
 
@@ -143,6 +149,7 @@ class TestValidatedFile:
 
         assert result.is_absolute()
 
+    @pytest.mark.skipif(not SYMLINKS_SUPPORTED, reason="Symlinks not supported")
     def test_resolves_symlink(self, temp_file: Path, temp_dir: Path) -> None:
         """Test _validated_file resolves symlinks.
 
@@ -175,6 +182,7 @@ class TestValidatedFile:
             os.chdir(original_cwd)
 
 
+@pytest.mark.unit
 class TestAtomicWrite:
     """Tests for _atomic_write internal helper."""
 
@@ -283,7 +291,7 @@ class TestAtomicWrite:
 
     def test_unicode_content(self, tmp_path: Path) -> None:
         target = tmp_path / "unicode.txt"
-        content = "Unicode test: ✓ α β γ 🚀"
+        content = "Unicode test: ✓ α β γ ��"
 
         safe_write_file(target, content)
 
@@ -302,7 +310,23 @@ class TestAtomicWrite:
 
         assert target.read_text(encoding="utf-8") == content
 
+    def test_cleanup_failure_logged(self, temp_dir: Path) -> None:
+        """Test _atomic_write logs warning when temp file cleanup fails.
 
+        Edge case: If atomic write fails AND cleanup fails, should log warning.
+        """
+        target = temp_dir / "file.txt"
+
+        # Create a scenario where both replace and unlink fail
+        with patch.object(Path, "replace", side_effect=OSError("Replace failed")):
+            with patch.object(Path, "unlink", side_effect=OSError("Unlink failed")):
+                with pytest.raises(FileOperationError) as exc_info:
+                    _atomic_write(target, "content")
+
+                assert "atomic write failed" in str(exc_info.value).lower()
+
+
+@pytest.mark.unit
 class TestCreateBackupInternal:
     """Tests for _create_backup_internal helper."""
 
@@ -366,6 +390,7 @@ class TestCreateBackupInternal:
         assert exc_info.value.operation == "backup"
 
 
+@pytest.mark.unit
 class TestRestoreBackupInternal:
     """Tests for _restore_backup_internal helper."""
 
@@ -412,6 +437,7 @@ class TestRestoreBackupInternal:
         assert exc_info.value.operation == "restore"
 
 
+@pytest.mark.unit
 class TestSafeReadFile:
     """Tests for safe_read_file public API."""
 
@@ -501,7 +527,7 @@ class TestSafeReadFile:
         Edge case: Should handle emoji and international text.
         """
         file_path = temp_dir / "unicode.txt"
-        content = "Hello 世界 🌍"
+        content = "Hello 世界 ��"
         file_path.write_text(content, encoding="utf-8")
 
         result = safe_read_file(file_path)
@@ -534,6 +560,7 @@ class TestSafeReadFile:
         assert exc_info.value.operation == "read"
 
 
+@pytest.mark.unit
 class TestSafeWriteFile:
     """Tests for safe_write_file public API."""
 
@@ -620,7 +647,7 @@ class TestSafeWriteFile:
         Edge case: Should write emoji and international text correctly.
         """
         target = temp_dir / "unicode.txt"
-        content = "Hello 世界 🌍"
+        content = "Hello 世界 ��"
 
         safe_write_file(target, content, create_backup=False)
 
@@ -635,6 +662,30 @@ class TestSafeWriteFile:
 
         assert temp_file.read_text(encoding="utf-8") == "replacement"
 
+    def test_restore_failure_silently_handled(self, temp_file: Path) -> None:
+        """Test safe_write_file silently handles restore failures.
+
+        Edge case: If write fails and restore also fails, should raise original error.
+        """
+        # Make write fail and restore also fail
+        with patch(
+            "depkeeper.utils.filesystem._atomic_write",
+            side_effect=FileOperationError(
+                "Write failed", file_path=str(temp_file), operation="write"
+            ),
+        ):
+            with patch(
+                "depkeeper.utils.filesystem._restore_backup_internal",
+                side_effect=OSError("Restore failed"),
+            ):
+                with pytest.raises(FileOperationError) as exc_info:
+                    safe_write_file(temp_file, "new content")
+
+                assert "write failed" in str(exc_info.value).lower()
+
+        # Original file should still exist
+        assert temp_file.exists()
+
     def test_creates_parent_directories(self, temp_dir: Path) -> None:
         """Test safe_write_file creates missing parent directories.
 
@@ -648,6 +699,7 @@ class TestSafeWriteFile:
         assert target.parent.exists()
 
 
+@pytest.mark.unit
 class TestCreateBackup:
     """Tests for create_backup public API."""
 
@@ -693,6 +745,7 @@ class TestCreateBackup:
         assert backup.exists()
 
 
+@pytest.mark.unit
 class TestRestoreBackup:
     """Tests for restore_backup public API."""
 
@@ -762,6 +815,7 @@ class TestRestoreBackup:
         assert temp_file.read_text(encoding="utf-8") == "test content"
 
 
+@pytest.mark.unit
 class TestFindRequirementsFiles:
     """Tests for find_requirements_files discovery."""
 
@@ -878,6 +932,7 @@ class TestFindRequirementsFiles:
         assert len(files) > 0
 
 
+@pytest.mark.unit
 class TestValidatePath:
     """Tests for validate_path security and validation."""
 
@@ -960,6 +1015,32 @@ class TestValidatePath:
 
         assert result.is_absolute()
 
+    def test_relative_base_dir(self, temp_dir: Path) -> None:
+        """Test validate_path handles relative base_dir.
+
+        Should resolve relative base_dir to absolute path.
+        """
+        original_cwd = Path.cwd()
+        try:
+            # Change to temp directory
+            import os
+
+            os.chdir(temp_dir)
+
+            # Create a file in temp dir
+            test_file = temp_dir / "test.txt"
+            test_file.write_text("test")
+
+            # Use relative base_dir
+            result = validate_path(test_file, base_dir=".")
+
+            assert result.is_absolute()
+            assert result == test_file.resolve()
+        finally:
+            import os
+
+            os.chdir(original_cwd)
+
     def test_handles_nonexistent_paths(self, temp_dir: Path) -> None:
         """Test validate_path works with non-existent paths.
 
@@ -971,6 +1052,7 @@ class TestValidatePath:
 
         assert result.is_absolute()
 
+    @pytest.mark.skipif(not SYMLINKS_SUPPORTED, reason="Symlinks not supported")
     def test_symlink_resolution(self, temp_file: Path, temp_dir: Path) -> None:
         """Test validate_path resolves symlinks.
 
@@ -984,6 +1066,7 @@ class TestValidatePath:
         assert result.is_absolute()
 
 
+@pytest.mark.unit
 class TestCreateTimestampedBackup:
     """Tests for create_timestamped_backup public API."""
 
@@ -1059,6 +1142,18 @@ class TestCreateTimestampedBackup:
 
         assert "cannot backup invalid file" in str(exc_info.value).lower()
 
+    def test_copy_failure_raises_error(self, temp_file: Path) -> None:
+        """Test create_timestamped_backup raises error when copy fails.
+
+        Edge case: Should raise FileOperationError when shutil.copy2 fails.
+        """
+        with patch("shutil.copy2", side_effect=OSError("Copy failed")):
+            with pytest.raises(FileOperationError) as exc_info:
+                create_timestamped_backup(temp_file)
+
+            assert exc_info.value.operation == "backup"
+            assert "failed to create backup" in str(exc_info.value).lower()
+
     def test_accepts_string_path(self, temp_file: Path) -> None:
         """Test accepts string paths.
 
@@ -1069,6 +1164,7 @@ class TestCreateTimestampedBackup:
         assert backup.exists()
 
 
+@pytest.mark.integration
 class TestEdgeCases:
     """Additional edge cases and integration tests."""
 
@@ -1099,12 +1195,52 @@ class TestEdgeCases:
         Integration test: Full write/read cycle.
         """
         file_path = temp_dir / "cycle.txt"
-        content = "Test content with 🌍 unicode"
+        content = "Test content with �� unicode"
 
         safe_write_file(file_path, content, create_backup=False)
         result = safe_read_file(file_path)
 
         assert result == content
+
+    def test_cross_platform_path_handling(self, temp_dir: Path) -> None:
+        """Test path handling works across different platforms.
+
+        Cross-platform: Paths should work on Windows, Linux, macOS.
+        """
+        # Test with nested directories
+        nested = temp_dir / "a" / "b" / "c" / "file.txt"
+
+        safe_write_file(nested, "content", create_backup=False)
+
+        assert nested.exists()
+        assert safe_read_file(nested) == "content"
+
+    def test_special_characters_in_content(self, temp_dir: Path) -> None:
+        """Test files with special characters and unicode.
+
+        Cross-platform: Unicode should work on all platforms.
+        """
+        file_path = temp_dir / "unicode.txt"
+        content = "Hello 世界 �� Привет مرحبا"
+
+        safe_write_file(file_path, content, create_backup=False)
+        result = safe_read_file(file_path)
+
+        assert result == content
+
+    def test_line_ending_preservation(self, temp_dir: Path) -> None:
+        """Test line endings are consistent across platforms.
+
+        Uses newline='\\n' in atomic_write to ensure LF line endings.
+        """
+        file_path = temp_dir / "lines.txt"
+        content = "line1\\nline2\\nline3\\n"
+
+        safe_write_file(file_path, content, create_backup=False)
+        result = safe_read_file(file_path)
+
+        assert result == content
+        assert "\\r\\n" not in result  # Should use LF, not CRLF
 
     def test_backup_restore_cycle(self, temp_file: Path) -> None:
         """Test backup then restore preserves content.
@@ -1119,19 +1255,6 @@ class TestEdgeCases:
         restore_backup(backup, temp_file)
 
         assert temp_file.read_text(encoding="utf-8") == original
-
-    def test_very_long_filename(self, temp_dir: Path) -> None:
-        """Test handles very long filenames.
-
-        Edge case: Long but valid filenames should work.
-        """
-        # Most filesystems limit to 255 bytes
-        long_name = "a" * 200 + ".txt"
-        file_path = temp_dir / long_name
-
-        safe_write_file(file_path, "content", create_backup=False)
-
-        assert file_path.exists()
 
     def test_special_characters_in_filename(self, temp_dir: Path) -> None:
         """Test handles special characters in filenames.

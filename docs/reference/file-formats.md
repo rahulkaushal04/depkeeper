@@ -157,22 +157,8 @@ Project configuration file for depkeeper settings.
 
 ```toml
 [depkeeper]
-update_strategy = "minor"
 check_conflicts = true
 strict_version_matching = false
-cache_ttl = 3600
-concurrent_requests = 10
-
-[depkeeper.filters]
-exclude = ["Django", "celery"]
-include_pre_release = false
-
-[depkeeper.pypi]
-index_url = "https://pypi.org/simple"
-extra_index_urls = [
-    "https://private.pypi.example.com/simple"
-]
-timeout = 30
 ```
 
 For the full list of options and their descriptions, see [Configuration Options](configuration-options.md).
@@ -199,11 +185,8 @@ dev = [
 ]
 
 [tool.depkeeper]
-update_strategy = "minor"
 check_conflicts = true
-
-[tool.depkeeper.filters]
-exclude = ["django"]
+strict_version_matching = false
 ```
 
 ---
