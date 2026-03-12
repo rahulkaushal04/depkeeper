@@ -167,8 +167,8 @@ class RequirementsParser:
             ['my-local-package']
         """
         resolved_path = self._resolve_file_path(
-            file_path=Path(file_path),
-            parent_directory=_parent_directory_path,
+            filepath=Path(file_path),
+            parent_file=_parent_directory_path,
         )
 
         self.logger.debug(
@@ -471,7 +471,7 @@ class RequirementsParser:
         line_number: int,
         source_file_path: Optional[str],
         current_directory: Optional[Path],
-    ) -> Optional[List[Requirement]]:
+    ) -> List[Requirement]:
         """Process a ``-r`` or ``--requirement`` include directive.
 
         Recursively parses the referenced file and returns its requirements
@@ -481,31 +481,44 @@ class RequirementsParser:
             directive_line: The full line text (e.g., ``"-r base.txt"``).
             line_number: Line number for error messages.
             source_file_path: Source file path for error context.
-            current_directory: Directory of the current file (used to
+            current_directory: The file currently being parsed (used to
                 resolve relative paths).
 
         Returns:
-            List of requirements from the included file, or ``None`` if the
-            directive is malformed (a warning is logged).
+            List of requirements from the included file.
 
         Raises:
-            ParseError: The included file cannot be read or contains a
-                circular reference.
+            ParseError: The directive is malformed, the included file cannot
+                be read, no base file is available for path resolution, or
+                the include chain is circular.
         """
         line_parts = directive_line.split(maxsplit=1)
         if len(line_parts) < 2:
-            self.logger.warning(
-                "Line %d: Include directive missing file path", line_number
+            raise ParseError(
+                "Include directive is missing a file path (e.g. '-r base.txt')",
+                line_number=line_number,
+                line_content=directive_line,
+                file_path=source_file_path,
             )
-            return None
 
         included_file_path = line_parts[1].strip()
 
-        if not current_directory:
-            self.logger.warning(
-                "Line %d: Cannot resolve include path without base file", line_number
+        if not included_file_path:
+            raise ParseError(
+                "Include directive has an empty file path",
+                line_number=line_number,
+                line_content=directive_line,
+                file_path=source_file_path,
             )
-            return None
+
+        if not current_directory:
+            raise ParseError(
+                "Cannot resolve include path without a base file — "
+                "use an absolute path or parse from a file",
+                line_number=line_number,
+                line_content=directive_line,
+                file_path=source_file_path,
+            )
 
         try:
             return self.parse_file(
@@ -779,8 +792,8 @@ class RequirementsParser:
             raise ValueError("Path component is required")
 
         resolved_path = self._resolve_file_path(
-            file_path=Path(path_value),
-            parent_directory=current_directory,
+            filepath=Path(path_value),
+            parent_file=current_directory,
         )
 
         # Extract package name from #egg= or infer from filename
@@ -806,31 +819,32 @@ class RequirementsParser:
     # ------------------------------------------------------------------
 
     def _resolve_file_path(
-        self, file_path: Path, parent_directory: Optional[Path]
+        self, filepath: Path, parent_file: Optional[Path] = None
     ) -> Path:
         """Resolve a file path to absolute form.
 
-        Relative paths are resolved relative to *parent_directory* if
-        provided; otherwise they are resolved relative to the current
+        Relative paths are resolved relative to the directory containing
+        ``parent_file`` if provided; otherwise resolved from the current
         working directory.
 
         Args:
-            file_path: Path object (may be relative or absolute).
-            parent_directory: Optional parent directory (typically the
-                directory containing the file currently being parsed).
+            filepath: Path object — may be relative or absolute.
+            parent_file: The file that contains the include/constraint
+                directive (e.g. ``Path('/project/requirements.txt')``).
+                Its *parent directory* is used as the base for resolution.
+                Pass ``None`` to resolve relative to cwd.
 
         Returns:
             Absolute :class:`Path`.
 
         Example (internal)::
 
-            >>> self._resolve_file_path(Path("base.txt"), Path("/project/requirements.txt"))
-            Path('/project/base.txt')
+            self._resolve_file_path(Path('base.txt'), Path('/project/requirements.txt'))
+            # -> Path('/project/base.txt')
         """
-        if parent_directory and not file_path.is_absolute():
-            # Resolve relative to parent's directory (not parent itself)
-            return (parent_directory.parent / file_path).resolve()
-        return file_path.resolve()
+        if parent_file and not filepath.is_absolute():
+            return parent_file.parent / filepath
+        return filepath.resolve()
 
     def _parse_direct_url(
         self, requirement_line: str
@@ -1080,33 +1094,34 @@ class RequirementsParser:
     def _apply_constraint_to_requirement(self, requirement: Requirement) -> Requirement:
         """Apply stored constraints to a requirement if a match exists.
 
-        When a requirement has no version specs (``specs == []``) and a
-        constraint for the same package name exists in
-        :attr:`_constraint_requirements`, the constraint's specs are copied
-        to the requirement.
-
-        **Side-effect:** Mutates *requirement.specs* in place when a
-        constraint is applied.
+        When a requirement has no version specs and a constraint for the same
+        package name exists in _constraint_requirements, returns a new
+        Requirement with the constraint's specs applied.
 
         Args:
             requirement: Requirement to potentially constrain.
 
         Returns:
-            The same :class:`Requirement` object (possibly modified).
-
-        Example (internal)::
-
-            >>> # After loading constraint: django==3.2
-            >>> req = Requirement(name="django", specs=[], ...)
-            >>> constrained = self._apply_constraint_to_requirement(req)
-            >>> constrained.specs
-            [('==', '3.2')]
+            A new Requirement with constraint specs applied, or the original
+            Requirement unchanged if no constraint applies.
         """
-        if requirement.name in self._constraint_requirements:
-            constraint = self._constraint_requirements[requirement.name]
-            if constraint.specs and not requirement.specs:
-                # Mutate in place (caller already holds a reference)
-                requirement.specs = constraint.specs
+        constraint = self._constraint_requirements.get(requirement.name)
+        if not constraint:
+            return requirement
+
+        if constraint.specs and not requirement.specs:
+            return Requirement(
+                name=requirement.name,
+                specs=list(constraint.specs),
+                extras=list(requirement.extras),
+                markers=requirement.markers,
+                url=requirement.url,
+                editable=requirement.editable,
+                hashes=list(requirement.hashes),
+                comment=requirement.comment,
+                line_number=requirement.line_number,
+                raw_line=requirement.raw_line,
+            )
 
         return requirement
 

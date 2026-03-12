@@ -455,7 +455,14 @@ class PyPIDataStore:
             PyPIError: On 404 (package not found) or any non-200 status.
         """
         url = PYPI_JSON_API.format(package=name)
-        response = await self.http_client.get(url)
+
+        try:
+            response = await self.http_client.get(url)
+        except Exception as exc:
+            raise PyPIError(
+                f"Failed to fetch '{name}' from PyPI",
+                package_name=name,
+            ) from exc
 
         if response.status_code == 404:
             raise PyPIError(
@@ -468,7 +475,13 @@ class PyPIDataStore:
                 package_name=name,
             )
 
-        return response.json()
+        try:
+            return response.json()
+        except (ValueError, TypeError) as exc:
+            raise PyPIError(
+                f"Invalid JSON response from PyPI for '{name}'",
+                package_name=name,
+            ) from exc
 
     async def _fetch_version_dependencies(
         self,

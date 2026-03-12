@@ -175,7 +175,10 @@ class VersionChecker:
             >>> [p.name for p in packages if p.recommended_version]
             ['flask', 'requests', 'click']
         """
-        tasks = [self._create_package_check_task(req) for req in requirements]
+        tasks = [
+            asyncio.create_task(self._create_package_check_task(req))
+            for req in requirements
+        ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         return self._process_check_results(requirements, results)
 
@@ -271,22 +274,21 @@ class VersionChecker:
     def _create_package_check_task(
         self,
         requirement: Requirement,
-    ) -> asyncio.Task[Package]:
-        """Spawn an async task to check a single requirement.
+    ) -> asyncio.coroutine:
+        """Build the coroutine to check a single requirement.
 
-        Extracts the current version from *requirement* and delegates to
-        :meth:`get_package_info`.
+        Returns a coroutine (not a scheduled Task) so that scheduling
+        decisions remain with the async caller. This allows the method
+        to be called and tested without a running event loop.
 
         Args:
             requirement: A parsed requirement.
 
         Returns:
-            An :class:`asyncio.Task` that will resolve to a :class:`Package`.
+            A coroutine that resolves to a :class:`Package` when awaited.
         """
         current_version = self.extract_current_version(requirement)
-        return asyncio.create_task(
-            self.get_package_info(requirement.name, current_version)
-        )
+        return self.get_package_info(requirement.name, current_version)
 
     def _process_check_results(
         self,

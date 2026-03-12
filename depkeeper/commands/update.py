@@ -33,6 +33,7 @@ from depkeeper.utils import (
     get_raw_console,
     colorize_update_type,
     get_update_type,
+    safe_write_file,
     create_timestamped_backup,
 )
 
@@ -647,5 +648,4 @@ def _apply_updates(
             updated_lines.append(line)
 
     # Write updated content atomically
-    with open(file, "w", encoding="utf-8") as f:
-        f.writelines(updated_lines)
+    safe_write_file(file, "".join(updated_lines), create_backup=False)
