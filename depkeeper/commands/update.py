@@ -6,7 +6,6 @@ maintaining major version boundaries and Python compatibility.
 
 from __future__ import annotations
 
-import sys
 import click
 import shutil
 import asyncio
@@ -144,15 +143,12 @@ def update(
                 check_conflicts=check_conflicts,
             )
         )
-        sys.exit(0)
 
-    except DepKeeperError as e:
-        print_error(f"{e}")
-        sys.exit(1)
-    except Exception as e:
-        print_error(f"Unexpected error: {e}")
+    except DepKeeperError:
+        raise
+    except Exception:
         logger.exception("Error in update command")
-        sys.exit(1)
+        raise
 
 
 # ---------------------------------------------------------------------------

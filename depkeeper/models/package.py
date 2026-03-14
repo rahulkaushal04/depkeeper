@@ -308,7 +308,7 @@ class Package:
         if self.has_update():
             rec_req = self.get_version_python_req("recommended")
             if rec_req:
-                parts.append(f"Recommended:{rec_req}")
+                parts.append(f"Recommended: {rec_req}")
 
         return "\n".join(parts) if parts else "[dim]-[/dim]"
 

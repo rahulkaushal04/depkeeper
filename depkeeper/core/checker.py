@@ -41,8 +41,8 @@ Typical usage::
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List, Optional
 from packaging.version import InvalidVersion, parse
+from typing import Any, Coroutine, Dict, List, Optional
 
 from depkeeper.exceptions import PyPIError
 from depkeeper.models.package import Package
@@ -274,7 +274,7 @@ class VersionChecker:
     def _create_package_check_task(
         self,
         requirement: Requirement,
-    ) -> asyncio.coroutine:
+    ) -> Coroutine[Any, Any, Package]:
         """Build the coroutine to check a single requirement.
 
         Returns a coroutine (not a scheduled Task) so that scheduling

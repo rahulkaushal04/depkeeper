@@ -308,7 +308,7 @@ def create_timestamped_backup(file_path: PathLike) -> Path:
 
     unique = uuid4().hex[:8]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    backup_name = f"{path.stem}.{timestamp}_{unique}.backup{path.suffix}"
+    backup_name = f"{path.name}.{timestamp}_{unique}.backup"
     backup_path = path.with_name(backup_name)
 
     try:

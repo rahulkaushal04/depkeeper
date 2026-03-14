@@ -24,6 +24,9 @@ USER_AGENT_TEMPLATE: Final[str] = (
 #: Base URL for the PyPI JSON API.
 PYPI_JSON_API: Final[str] = "https://pypi.org/pypi/{package}/json"
 
+#: URL for the PyPI version-specific JSON API.
+PYPI_VERSION_API: Final[str] = "https://pypi.org/pypi/{package}/{version}/json"
+
 # ---------------------------------------------------------------------------
 # HTTP configuration
 # ---------------------------------------------------------------------------

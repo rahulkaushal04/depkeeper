@@ -6,7 +6,6 @@ conflicts, and Python version compatibility issues.
 
 from __future__ import annotations
 
-import sys
 import json
 import click
 import asyncio
@@ -27,7 +26,6 @@ from depkeeper.utils import (
     HTTPClient,
     get_logger,
     print_success,
-    print_error,
     print_warning,
     print_table,
     get_raw_console,
@@ -127,15 +125,12 @@ def check(
                 check_conflicts=check_conflicts,
             )
         )
-        sys.exit(0)
 
-    except DepKeeperError as e:
-        print_error(f"{e}")
-        sys.exit(1)
-    except Exception as e:
-        print_error(f"Unexpected error: {e}")
+    except DepKeeperError:
+        raise
+    except Exception:
         logger.exception("Error in check command")
-        sys.exit(1)
+        raise
 
 
 # ---------------------------------------------------------------------------

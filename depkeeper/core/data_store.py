@@ -28,10 +28,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from packaging.version import InvalidVersion, Version, parse
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
-from depkeeper.exceptions import PyPIError
 from depkeeper.utils.http import HTTPClient
 from depkeeper.utils.logger import get_logger
-from depkeeper.constants import PYPI_JSON_API
+from depkeeper.exceptions import NetworkError, PyPIError
+from depkeeper.constants import PYPI_JSON_API, PYPI_VERSION_API
 
 logger = get_logger("data_store")
 
@@ -452,28 +452,27 @@ class PyPIDataStore:
         """Hit ``/pypi/{name}/json`` and return the raw JSON body.
 
         Raises:
-            PyPIError: On 404 (package not found) or any non-200 status.
+            PyPIError: On 404 (package not found) or any network/HTTP failure.
         """
         url = PYPI_JSON_API.format(package=name)
 
         try:
             response = await self.http_client.get(url)
+        except NetworkError as exc:
+            if exc.status_code == 404:
+                raise PyPIError(
+                    f"Package '{name}' not found on PyPI",
+                    package_name=name,
+                ) from exc
+            raise PyPIError(
+                f"Failed to fetch '{name}' from PyPI",
+                package_name=name,
+            ) from exc
         except Exception as exc:
             raise PyPIError(
                 f"Failed to fetch '{name}' from PyPI",
                 package_name=name,
             ) from exc
-
-        if response.status_code == 404:
-            raise PyPIError(
-                f"Package '{name}' not found on PyPI",
-                package_name=name,
-            )
-        if response.status_code != 200:
-            raise PyPIError(
-                f"PyPI returned status {response.status_code} for '{name}'",
-                package_name=name,
-            )
 
         try:
             return response.json()
@@ -494,13 +493,10 @@ class PyPIDataStore:
         an empty list is returned so that one broken version does not
         break the whole analysis.
         """
-        url = f"https://pypi.org/pypi/{name}/{version}/json"
+        url = PYPI_VERSION_API.format(package=name, version=version)
 
         try:
             response = await self.http_client.get(url)
-            if response.status_code != 200:
-                return []
-
             info = response.json().get("info", {})
             return self._extract_dependencies(info)
 

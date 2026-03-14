@@ -15,7 +15,7 @@ from typing import Any, Optional, Dict, Iterable, Callable, cast
 
 from depkeeper.utils.logger import get_logger
 from depkeeper.__version__ import __version__
-from depkeeper.exceptions import NetworkError, PyPIError
+from depkeeper.exceptions import NetworkError
 from depkeeper.constants import (
     DEFAULT_TIMEOUT,
     DEFAULT_MAX_RETRIES,
@@ -62,7 +62,6 @@ class HTTPClient:
         self._last_request_time: float = 0.0
         self._rate_limit_lock = asyncio.Lock()
         self._semaphore = asyncio.Semaphore(max_concurrency)
-        self._max_429_retries: int = 5
 
     async def __aenter__(self) -> "HTTPClient":
         await self._ensure_client()
@@ -127,24 +126,18 @@ class HTTPClient:
 
                 if response.status_code == 429:
                     retry_429_count += 1
-                    if retry_429_count > self._max_429_retries:
-                        raise NetworkError(
-                            f"Rate limit exceeded after {self._max_429_retries} retries",
-                            url=clean_url,
-                            status_code=429,
-                        )
                     retry_after = int(response.headers.get("Retry-After", "1"))
                     logger.warning(
-                        "Rate limited (429), retrying after %ds (%d/%d)",
+                        "Rate limited (429), retrying after %ds (attempt %d/%d)",
                         retry_after,
                         retry_429_count,
-                        self._max_429_retries,
+                        self.max_retries + 1,
                     )
                     await asyncio.sleep(retry_after)
                     continue
 
                 if response.status_code == 404:
-                    raise PyPIError(
+                    raise NetworkError(
                         f"Resource not found: {clean_url}",
                         url=clean_url,
                         status_code=404,

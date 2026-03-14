@@ -1075,7 +1075,7 @@ class RequirementsParser:
 
             # Skip URL fragments (#egg=, #subdirectory=, #sha256=, etc.)
             if text_after_hash.startswith(
-                ("egg=", "subdirectory=", "sha1=", "sha256=")
+                ("egg=", "subdirectory=", "sha1=", "sha256=", "sha512=", "md5=")
             ):
                 continue
 

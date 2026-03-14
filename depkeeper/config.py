@@ -29,7 +29,10 @@ Example (``depkeeper.toml``)::
 from __future__ import annotations
 
 
-import tomli as tomllib
+try:
+    import tomli as tomllib
+except ImportError:  # pragma: no cover
+    import tomllib  # type: ignore[no-redef]  # stdlib on Python 3.11+
 from pathlib import Path
 from typing import Any, Dict, Optional
 from dataclasses import dataclass, field
@@ -207,13 +210,6 @@ def _read_toml(path: Path) -> Dict[str, Any]:
     Raises:
         ConfigError: File cannot be read, invalid TOML, or no parser available.
     """
-    if tomllib is None:
-        raise ConfigError(
-            "TOML support requires Python 3.11+ or the 'tomli' package. "
-            "Install it with: pip install tomli",
-            config_path=str(path),
-        )
-
     try:
         with open(path, "rb") as fh:
             return tomllib.load(fh)
