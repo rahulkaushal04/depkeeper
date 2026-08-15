@@ -127,14 +127,15 @@ def _atomic_write(
         content: Text to write. Line endings are written verbatim.
         encoding: Text encoding. Pass ``utf-8-sig`` to emit a byte order mark.
     """
-    # Replace the file a symlink points at, rather than the symlink itself.
-    if target.is_symlink():
-        target = Path(os.path.realpath(target))
-
-    target.parent.mkdir(parents=True, exist_ok=True)
     temp_path: Optional[Path] = None
 
     try:
+        # Replace the file a symlink points at, rather than the symlink itself.
+        if target.is_symlink():
+            target = Path(os.path.realpath(target))
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+
         # ``newline=""`` disables newline translation, so CRLF/LF endings in
         # *content* reach the disk byte-for-byte on every platform.
         tmp = tempfile.NamedTemporaryFile(

@@ -8,6 +8,7 @@ receives a corrupted document.
 
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 from typing import Any, Iterator, List, Optional
@@ -25,6 +26,17 @@ from depkeeper.core.dependency_analyzer import (
 )
 from depkeeper.models import Package
 from depkeeper.utils import console as console_module
+
+# Click < 8.2 defaults CliRunner to mix_stderr=True; only pass it when supported.
+_CLIRUNNER_SUPPORTS_MIX_STDERR = "mix_stderr" in inspect.signature(
+    CliRunner.__init__
+).parameters
+
+
+def _make_runner() -> CliRunner:
+    if _CLIRUNNER_SUPPORTS_MIX_STDERR:
+        return CliRunner(mix_stderr=False)
+    return CliRunner()
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +126,7 @@ def _run_check(
             )
         ]
 
-    runner = CliRunner()
+    runner = _make_runner()
     with mock.patch("depkeeper.commands.check.HTTPClient", _FakeHTTPClient), mock.patch(
         "depkeeper.commands.check.PyPIDataStore", _FakeDataStore
     ), mock.patch(

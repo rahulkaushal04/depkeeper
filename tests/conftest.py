@@ -67,6 +67,27 @@ def _isolate_console() -> Iterator[None]:
         console_module.reconfigure_console()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_event_loop_policy() -> Iterator[None]:
+    """Restore a usable event loop after ``asyncio.run()`` clears it.
+
+    ``CliRunner``-driven tests call ``asyncio.run()`` (via the ``check``/
+    ``update`` commands), which unsets the main thread's current loop. On
+    Python < 3.10, building an ``asyncio.Lock``/``Semaphore`` outside a
+    running loop (as ``HTTPClient``/``PyPIDataStore`` do in ``__init__``)
+    needs that loop and raises once it's been unset, breaking any later test
+    that constructs those objects directly.
+    """
+    yield
+    try:
+        loop = asyncio.get_event_loop()
+        closed = loop.is_closed()
+    except RuntimeError:
+        closed = True
+    if closed:
+        asyncio.set_event_loop(asyncio.new_event_loop())
+
+
 @pytest.fixture
 def no_color(monkeypatch: pytest.MonkeyPatch) -> None:
     """Force colourless Rich output so assertions can match plain text."""
