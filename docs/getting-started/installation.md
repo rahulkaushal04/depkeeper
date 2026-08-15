@@ -63,10 +63,10 @@ description: Install depkeeper with pip or pipx, verify the install, and underst
 === "CI (ephemeral)"
 
     ```bash
-    python -m pip install --no-cache-dir depkeeper==0.1.0
+    python -m pip install --no-cache-dir depkeeper==0.1.1
     ```
 
-    Pin the version in CI. depkeeper is alpha software; an unpinned install can change
+    Pin the version in CI. depkeeper is still `0.x`, so an unpinned install can change
     recommendation behaviour between pipeline runs.
 
 ---
@@ -93,7 +93,7 @@ Optional extras: `depkeeper[dev]`, `depkeeper[test]`, `depkeeper[docs]`. See
 
 ```bash
 depkeeper --version
-# depkeeper 0.1.0
+# depkeeper 0.1.1
 
 depkeeper --help
 python -m depkeeper --version   # equivalent module entry point

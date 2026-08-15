@@ -190,10 +190,12 @@ Asserted as *current* behaviour so a change is deliberate, and documented in
   (`test_parser.py::test_line_continuations_are_not_joined`).
 - URL name inference is unreliable
   (`test_inference_from_an_archive_url_is_unreliable`).
-- `confirm(default=False)`'s `[y/N]` suffix is swallowed by Rich markup — a strict `xfail` in
-  `test_console.py`.
 - `--allow-hash-removal` yields a partially hashed lockfile that `pip --require-hashes` rejects —
   asserted in `tests/integration/test_update_workflow.py`.
+
+`confirm(default=False)`'s `[y/N]` suffix used to be swallowed by Rich markup; the fix
+(`markup=False`) is pinned by a regression test,
+`test_console.py::test_the_prompt_advertises_a_default_of_no`, not an `xfail`.
 
 ---
 

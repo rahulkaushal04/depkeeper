@@ -131,7 +131,7 @@ Note what did **not** happen:
 
 ## Project status
 
-depkeeper is at version **0.1.0** and is classified `Development Status :: 3 - Alpha`.
+depkeeper is at version **0.1.1** and is classified `Development Status :: 4 - Beta`.
 
 - Supported Python: **3.8+**. The interpreter running depkeeper is also the interpreter it
   filters candidate versions against — see [Python compatibility](concepts/version-recommendation.md#python-compatibility-filtering).

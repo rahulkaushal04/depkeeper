@@ -27,6 +27,36 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). depkee
 
 ---
 
+## 0.1.1
+
+### Changed
+
+- **Impact:** Duplicate declarations of the same package (e.g. the same distribution pulled in
+  via two `-r` includes with different constraints) are now resolved independently instead of
+  collapsing to one shared recommendation.
+- **Impact:** PEP 440 wildcard version bands (`pkg==2.*`) are now parsed leniently, so a
+  wildcard-pinned requirement participates correctly in major-boundary and update-availability
+  checks instead of appearing unparseable.
+- `check`'s table output changed its status badges from Unicode symbols (`✓`, `⬆`, `⚠`, `✗`) to
+  bracketed text labels (`[OK]`, `[OUTDATED]`, `[CONFLICT]`, `[INCOMP]`, `[ERROR]`), matching
+  `--format simple`'s existing labels. Scripts matching on the old symbols must be updated.
+- `tomli` is now used unconditionally for TOML parsing, on every supported Python version,
+  instead of preferring the standard-library `tomllib` on 3.11+.
+- A configuration file carrying a leading byte-order mark is now decoded correctly.
+
+### Fixed
+
+- A `Retry-After` header on a `429` response is now clamped to a maximum of 120 seconds, and
+  both the delay-seconds and HTTP-date header forms are parsed correctly.
+- The interactive confirmation prompt's `[y/N]` / `[Y/n]` suffix is no longer swallowed by Rich
+  markup interpretation.
+- `_find_updates` no longer risks pairing a requirement with an unrelated package when the
+  parsed requirements and checked packages lists fall out of step.
+
+Full detail: [CHANGELOG.md](https://github.com/rahulkaushal04/depkeeper/blob/main/CHANGELOG.md#011---2026-08-15).
+
+---
+
 ## 0.1.0
 
 Initial release.

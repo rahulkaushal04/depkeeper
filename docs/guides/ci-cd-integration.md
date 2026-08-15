@@ -37,7 +37,7 @@ Recommendation logic is behaviour. An unpinned install can change your pipeline'
 any change to your repository.
 
 ```bash
-python -m pip install --no-cache-dir "depkeeper==0.1.0"
+python -m pip install --no-cache-dir "depkeeper==0.1.1"
 ```
 
 ### Match the interpreter
@@ -96,7 +96,7 @@ jobs:
           python-version: "3.12"     # must match the project's target
 
       - name: Install depkeeper
-        run: python -m pip install --no-cache-dir "depkeeper==0.1.0"
+        run: python -m pip install --no-cache-dir "depkeeper==0.1.1"
 
       - name: Generate report
         env:
@@ -137,7 +137,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install --no-cache-dir "depkeeper==0.1.0"
+      - run: python -m pip install --no-cache-dir "depkeeper==0.1.1"
 
       - name: Fail on unresolved conflicts
         env:
@@ -183,7 +183,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install --no-cache-dir "depkeeper==0.1.0"
+      - run: python -m pip install --no-cache-dir "depkeeper==0.1.1"
 
       - name: Apply safe updates
         env:
@@ -225,7 +225,7 @@ dependency-report:
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
   before_script:
-    - pip install --no-cache-dir "depkeeper==0.1.0" jq
+    - pip install --no-cache-dir "depkeeper==0.1.1" jq
   script:
     - depkeeper -v check --format json > report.json 2> depkeeper.log
     - jq -r '.[] | select(.status=="outdated") | "\(.name) \(.versions.current) -> \(.versions.recommended)"' report.json
@@ -247,7 +247,7 @@ pipeline {
     stage('Dependency drift') {
       steps {
         sh '''
-          python -m pip install --no-cache-dir "depkeeper==0.1.0"
+          python -m pip install --no-cache-dir "depkeeper==0.1.1"
           depkeeper -v check --format json > report.json 2> depkeeper.log
         '''
         script {
@@ -292,7 +292,7 @@ block a commit.
 
 ```dockerfile
 FROM python:3.12-slim
-RUN pip install --no-cache-dir "depkeeper==0.1.0"
+RUN pip install --no-cache-dir "depkeeper==0.1.1"
 WORKDIR /work
 ENV NO_COLOR=1
 ENTRYPOINT ["depkeeper"]

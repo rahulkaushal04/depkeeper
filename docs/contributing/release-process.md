@@ -71,9 +71,11 @@ version = "0.2.0"
 
 ### 3. Update the changelog
 
-Add a dated section to `docs/community/changelog.md` following Keep a Changelog. Every
-user-visible change belongs in it, grouped under `Added` / `Changed` / `Fixed` / `Removed` /
-`Security`.
+Add a dated section to the root `CHANGELOG.md` — the canonical file, linked from `pyproject.toml`
+and PyPI — following Keep a Changelog. Every user-visible change belongs in it, grouped under
+`Added` / `Changed` / `Fixed` / `Removed` / `Security`. Mirror the same section into
+`docs/community/changelog.md`; that copy may summarise rather than repeat verbatim, but must not
+diverge in substance.
 
 Call out behavioural changes explicitly, with a "how this affects you" note:
 
@@ -96,57 +98,73 @@ Behavioural changes must already be reflected in:
 - [JSON output](../reference/json-output.md) — new fields
 - [Known limitations](../reference/limitations.md) — entries fixed or added
 
-### 5. Tag
+### 5. Commit and push to `main`
 
 ```bash
 git commit -am "chore(release): 0.2.0"
-git tag -a v0.2.0 -m "Release 0.2.0"
-git push origin main --follow-tags
+git push origin main
 ```
 
-### 6. Build
+At this point PyPI has **not** been touched — publishing is triggered only by the tag in the
+next step.
+
+### 6. Build and verify locally, before tagging
+
+Catch a packaging problem before it reaches CI, not after.
 
 ```bash
 python -m pip install --upgrade build twine
 rm -rf dist build *.egg-info
 python -m build
-python -m twine check dist/*
-```
+python -m twine check dist/*                            # must report PASSED for both artefacts
 
-`twine check` must report `PASSED` for both the sdist and the wheel.
-
-### 7. Verify the artefact before publishing
-
-```bash
 python -m venv /tmp/verify && source /tmp/verify/bin/activate
 pip install dist/depkeeper-0.2.0-py3-none-any.whl
-depkeeper --version                     # must print 0.2.0
+depkeeper --version                                      # must print 0.2.0
 printf 'requests==2.28.0\n' > /tmp/r.txt
 depkeeper check /tmp/r.txt --format json | jq -e 'length == 1'
 deactivate
+rm -rf dist build *.egg-info /tmp/verify
 ```
 
-### 8. Publish
+### 7. Tag and push — this publishes to PyPI
 
 ```bash
-python -m twine upload --repository testpypi dist/*     # rehearse
-python -m twine upload dist/*                           # publish
+git tag -a v0.2.0 -m "Release 0.2.0"
+git push origin v0.2.0
 ```
 
-### 9. Publish the documentation
+Pushing a `v*` tag triggers
+[`.github/workflows/publish.yml`](https://github.com/rahulkaushal04/depkeeper/blob/main/.github/workflows/publish.yml),
+which:
 
-```bash
-mkdocs gh-deploy --force
-```
+1. Verifies the tag matches `__version__` in `depkeeper/__version__.py` **and** `version` in
+   `pyproject.toml` — a mismatch fails the workflow before anything is built.
+2. Builds the sdist and wheel and runs `twine check`.
+3. Publishes to PyPI via [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) (OIDC) —
+   there is no long-lived API token in repository secrets.
 
-The site uses `mike` as its version provider, so a versioned deployment is possible:
+Trusted Publishing requires a one-time setup on PyPI: on the `depkeeper` project's **Publishing**
+settings page, add a trusted publisher for this repository, workflow file `publish.yml` and
+environment `pypi`. Until that is configured, the `publish` job fails at the PyPI upload step —
+build and verification still run, so the failure is isolated and nothing partial is published.
+
+Watch the run under **Actions** and confirm the `pypi.org/project/depkeeper/` page shows the new
+version before moving on.
+
+### 8. Publish the documentation
+
+`.github/workflows/docs.yml` deploys automatically on every push to `main` that touches
+`docs/**` or `mkdocs.yml` — no manual step is required for the unversioned site. If you also want
+a versioned snapshot (the site's `mike` version provider supports this, but the deploy workflow
+does not invoke `mike` itself):
 
 ```bash
 mike deploy --push --update-aliases 0.2 latest
 mike set-default --push latest
 ```
 
-### 10. Announce
+### 9. Announce
 
 Create a GitHub release from the tag, using the changelog section as the body. Link the
 documentation for the new version.

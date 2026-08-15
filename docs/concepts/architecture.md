@@ -166,7 +166,7 @@ already written. See [Write safety](write-safety.md).
 | Resolution passes | 100 | `_MAX_RESOLUTION_ITERATIONS` |
 | Source candidates evaluated per conflict | 50 | `_MAX_SOURCE_CANDIDATES` |
 
-None of these are user-configurable in 0.1.0; they are module constants. See
+None of these are user-configurable in 0.1.x; they are module constants. See
 [Operations](../guides/operations.md#tuning-and-limits) for the practical implications and
 [Known limitations](../reference/limitations.md#no-runtime-tuning).
 

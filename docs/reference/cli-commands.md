@@ -239,7 +239,7 @@ Detail and scripting patterns: [Exit codes](exit-codes.md).
 
 ---
 
-## Not available in 0.1.0
+## Not available in 0.1.x
 
 There is no command or flag for: initialising a config file, adding or removing a requirement,
 scanning for security advisories, generating a lock file, selecting a package index, overriding

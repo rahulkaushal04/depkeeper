@@ -138,7 +138,7 @@ Each candidate's `requires_python` specifier is evaluated against
     support is invisible to depkeeper, and recommendations will silently lag. Install depkeeper
     into the environment whose requirements file it manages, or use
     `pipx install --python python3.12 depkeeper`. There is no flag to override the target
-    interpreter in 0.1.0 — see [Limitations](../reference/limitations.md#no-target-python-override).
+    interpreter in 0.1.x — see [Limitations](../reference/limitations.md#no-target-python-override).
 
 ### Metadata source caveat
 

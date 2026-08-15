@@ -90,7 +90,7 @@ Requires **Python 3.8+**.
 Verify:
 
 ```bash
-depkeeper --version        # depkeeper 0.1.0
+depkeeper --version        # depkeeper 0.1.1
 python -m depkeeper --help # equivalent module entry point
 ```
 
@@ -378,7 +378,7 @@ Repository documents: [ARCHITECTURE.md](ARCHITECTURE.md) ·
 
 ## Project status
 
-Version **0.1.0**, classified `Development Status :: 3 - Alpha`.
+Version **0.1.1**, classified `Development Status :: 4 - Beta`.
 
 The write path is defensive — atomic replacement, two-phase commit, rollback, optional backups —
 and behaviour is documented and covered by tests across Linux, macOS and Windows on Python

@@ -26,6 +26,42 @@ Sections used: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
 
 ---
 
+## [0.1.1] - 2026-08-15
+
+### Changed
+
+- **Impact:** Duplicate declarations of the same package — for example the same distribution
+  pulled in via two `-r` includes with different constraints — are now resolved independently
+  instead of collapsing to one shared recommendation. A name-level adjustment made during
+  conflict resolution only reaches a given declaration's `recommended_version` when a real
+  conflict was recorded for that declaration.
+- **Impact:** PEP 440 wildcard version bands (`pkg==2.*`) are now parsed leniently, resolving to
+  their release-prefix floor. A wildcard-pinned requirement now participates correctly in
+  major-boundary and update-availability checks instead of being treated as unparseable.
+- `depkeeper check`'s table output changed its status badges from Unicode symbols (`✓`, `⬆`,
+  `⚠`, `✗`) to bracketed text labels (`[OK]`, `[OUTDATED]`, `[CONFLICT]`, `[INCOMP]`,
+  `[ERROR]`), so the table renders identically regardless of terminal font, and matches
+  `--format simple`'s existing label style. Scripts that pattern-match on the old symbols must
+  be updated; scripts that already match on `--format json` or `--format simple` are unaffected.
+- `tomli` is now used unconditionally for TOML parsing on every supported Python version,
+  rather than preferring the standard-library `tomllib` on 3.11+. Configuration parsing behaves
+  identically across Python 3.8–3.12.
+- A configuration file carrying a leading byte-order mark is now decoded correctly instead of
+  failing TOML parsing.
+
+### Fixed
+
+- A `Retry-After` header on a `429` response is now clamped to a maximum of 120 seconds, and
+  both the delay-seconds and HTTP-date header forms are parsed correctly, so a misconfigured or
+  slow-to-recover upstream cannot stall a run indefinitely.
+- The interactive confirmation prompt's `[y/N]` / `[Y/n]` suffix is no longer swallowed by Rich
+  markup interpretation.
+- `_find_updates` no longer risks pairing a requirement with an unrelated package when the
+  parsed requirements and checked packages lists fall out of step; the mismatch is now logged
+  and the affected entries are skipped.
+
+---
+
 ## [0.1.0]
 
 Initial public release.
@@ -150,5 +186,6 @@ Documented in full at
 
 ---
 
-[Unreleased]: https://github.com/rahulkaushal04/depkeeper/compare/v0.1.0...main
+[Unreleased]: https://github.com/rahulkaushal04/depkeeper/compare/v0.1.1...main
+[0.1.1]: https://github.com/rahulkaushal04/depkeeper/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/rahulkaushal04/depkeeper/releases/tag/v0.1.0

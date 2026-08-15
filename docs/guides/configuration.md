@@ -205,7 +205,7 @@ depkeeper -vv check 2>&1 | head -n 5
 ```
 
 ```text
-DEBUG: depkeeper v0.1.0
+DEBUG: depkeeper v0.1.1
 DEBUG: Config path: /path/to/depkeeper.toml
 DEBUG: Loaded configuration: {'check_conflicts': True, 'strict_version_matching': False}
 DEBUG: Verbosity: 2 | Color: True

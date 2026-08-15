@@ -8,4 +8,4 @@ packaging, docs) to query the version reliably.
 from __future__ import annotations
 
 #: Current depkeeper version (PEP 440 compliant).
-__version__: str = "0.1.0"
+__version__: str = "0.1.1"

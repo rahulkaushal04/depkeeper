@@ -75,7 +75,7 @@ All network access goes through `utils/http.py` and is cached by `core/data_stor
 
 ## Support another requirements format
 
-This is a **refactor**, not a plugin. As of 0.1.0 there is no parser interface, no strategy
+This is a **refactor**, not a plugin. As of 0.1.x there is no parser interface, no strategy
 pattern and no format-selection configuration. The coupling points are:
 
 | Location | Coupling |

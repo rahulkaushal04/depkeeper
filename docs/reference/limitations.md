@@ -1,11 +1,11 @@
 ---
 title: Known Limitations
-description: Documented behaviours that are surprising, constrained or not yet implemented in 0.1.0
+description: Documented behaviours that are surprising, constrained or not yet implemented in 0.1.x
 ---
 
 # Known Limitations
 
-Every entry here is verified against the 0.1.0 implementation. They are documented rather than
+Every entry here is verified against the 0.1.x implementation. They are documented rather than
 hidden, because each one has bitten someone and each has a workaround.
 
 ---
@@ -26,7 +26,7 @@ In automated pipelines this step is mandatory.
 `--index-url`, `--extra-index-url`, `-i` and `--find-links` lines are recognised and ignored.
 Packages published only to a private index always report as `[ERROR]`.
 
-**Workaround:** none in 0.1.0. Split private packages into a separate file that you do not run
+**Workaround:** none in 0.1.x. Split private packages into a separate file that you do not run
 depkeeper against, or accept the error rows.
 
 ### Only pip requirements files are supported

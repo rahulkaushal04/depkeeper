@@ -22,7 +22,7 @@ depkeeper -vv check --format json > report.json 2> debug.log
 resolution decision. Most questions are answered by its first twenty lines:
 
 ```text
-DEBUG: depkeeper v0.1.0
+DEBUG: depkeeper v0.1.1
 DEBUG: Config path: /path/to/depkeeper.toml
 DEBUG: Loaded configuration: {'check_conflicts': True, 'strict_version_matching': False}
 DEBUG: Verbosity: 2 | Color: True

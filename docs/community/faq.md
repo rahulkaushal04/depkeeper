@@ -220,7 +220,7 @@ Too many requests from one egress IP — usually many CI jobs sharing it. Stagge
 
 ### Is it production-ready?
 
-It is `0.1.0`, classified alpha. The write path is defensive (atomic writes, rollback, backups)
+It is in the `0.1.x` series, classified beta. The write path is defensive (atomic writes, rollback, backups)
 and the behaviour is documented and tested, but pin the version and review changes before
 merging.
 
