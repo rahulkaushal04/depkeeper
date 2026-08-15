@@ -81,6 +81,9 @@ class FakeStore(PyPIDataStore):
         data = self.available.get(name)
         return data.all_versions if data else []
 
+    def get_cached_package(self, name: str) -> Optional[PyPIPackageData]:
+        return self.available.get(name)
+
 
 @pytest.mark.unit
 class TestParserProducesCanonicalNames:

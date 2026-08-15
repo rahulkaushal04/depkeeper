@@ -19,6 +19,7 @@ from typing import List, Tuple
 
 import pytest
 
+from depkeeper.core.checker import VersionChecker
 from depkeeper.core.dependency_analyzer import (
     DependencyAnalyzer,
     ResolutionResult,
@@ -29,8 +30,8 @@ from depkeeper.core.dependency_analyzer import (
 )
 from depkeeper.models.conflict import Conflict
 from depkeeper.models.package import Package
-from tests.support.factories import make_conflict
-from tests.support.pypi import FakePyPIStore, package_data as _pkg_data
+from tests.support.factories import make_conflict, make_requirement
+from tests.support.pypi import FakePyPIStore, package_data as _pkg_data, store_for
 
 
 def _conflict(
@@ -422,3 +423,187 @@ class TestNonPep440VersionNeverFabricatesAConflict:
         assert _satisfies_all("1.0.0.RELEASE", [
             make_conflict("pkg-a", ">=1.0", "pkg-b", conflicting_version="1.0.0.RELEASE")
         ]) is True
+
+
+# ---------------------------------------------------------------------------
+# Duplicate declarations must resolve independently
+# ---------------------------------------------------------------------------
+#
+# `resolve_and_annotate_conflicts` keys its bookkeeping (`update_set`,
+# `original_versions`, `conflict_tracking`) by bare package *name*. Two
+# `Package` instances sharing a name (the same distribution declared twice,
+# e.g. via separate `-r` includes with different constraints) must never
+# collapse onto whichever instance happens to be last in the input list --
+# each declaration's independently and correctly computed recommendation
+# must survive, even when there is no real cross-package conflict at all.
+
+
+@pytest.mark.unit
+class TestDuplicateDeclarationsResolveIndependently:
+    """A name declared twice must never let one declaration's constraint
+    silently override the other's recommendation."""
+
+    def _store(self) -> FakePyPIStore:
+        return FakePyPIStore(
+            {"pkg-a": _pkg_data("pkg-a", ["1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.9.0"])}
+        )
+
+    async def test_each_declaration_keeps_its_own_recommendation(self) -> None:
+        # Mirrors two `-r` includes for the same distribution: one with no
+        # upper bound (checker already picked the true highest, 1.9.0), one
+        # capped by its own declared range (checker picked 1.2.0).
+        unconstrained = Package(
+            name="pkg-a", current_version="1.0.0", recommended_version="1.9.0"
+        )
+        constrained = Package(
+            name="pkg-a", current_version="1.0.0", recommended_version="1.2.0"
+        )
+
+        result = await DependencyAnalyzer(
+            data_store=self._store()
+        ).resolve_and_annotate_conflicts([unconstrained, constrained])
+
+        assert unconstrained.recommended_version == "1.9.0"
+        assert constrained.recommended_version == "1.2.0"
+        assert result.packages_with_conflicts == 0
+        assert result.converged is True
+
+    async def test_outcome_does_not_depend_on_declaration_order(self) -> None:
+        unconstrained = Package(
+            name="pkg-a", current_version="1.0.0", recommended_version="1.9.0"
+        )
+        constrained = Package(
+            name="pkg-a", current_version="1.0.0", recommended_version="1.2.0"
+        )
+
+        # Same two declarations, reversed order -- the ordering must not
+        # change which one keeps which recommendation.
+        await DependencyAnalyzer(
+            data_store=self._store()
+        ).resolve_and_annotate_conflicts([constrained, unconstrained])
+
+        assert unconstrained.recommended_version == "1.9.0"
+        assert constrained.recommended_version == "1.2.0"
+
+    async def test_a_real_conflict_still_applies_to_every_declaration(self) -> None:
+        """When a *genuine* cross-package conflict forces a name to move,
+        every declaration of that name should reflect the negotiated
+        version -- this is the pre-existing, still-correct behaviour for a
+        singly-declared package, extended unchanged to duplicates."""
+        store = FakePyPIStore(
+            {
+                # A single major-2 release, so the source side of the
+                # conflict has no alternative version to try (strategy 1
+                # fails) and resolution must constrain the target instead.
+                "pkg-a": _pkg_data("pkg-a", ["2.0.0"]),
+                "pkg-b": _pkg_data("pkg-b", ["1.0.0", "1.5.0", "1.8.0"]),
+            },
+            dependencies={"pkg-a==2.0.0": ["pkg-b<1.6"]},
+        )
+        source = Package(name="pkg-a", current_version="2.0.0", recommended_version="2.0.0")
+        target_one = Package(name="pkg-b", current_version="1.0.0", recommended_version="1.8.0")
+        target_two = Package(name="pkg-b", current_version="1.0.0", recommended_version="1.8.0")
+
+        result = await DependencyAnalyzer(data_store=store).resolve_and_annotate_conflicts(
+            [source, target_one, target_two]
+        )
+
+        # pkg-b must not exceed <1.6 while pkg-a==2.0.0 is proposed -- both
+        # declarations of pkg-b move together, matching the single-instance
+        # behaviour this scenario would have had without duplication.
+        assert target_one.recommended_version == target_two.recommended_version == "1.5.0"
+        assert result.converged is True
+
+
+# ---------------------------------------------------------------------------
+# recommended_metadata must track recommended_version
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestRecommendedMetadataStaysInSyncWithResolvedVersion:
+    """``python_requirements.recommended`` must describe the version
+    actually being recommended, even after conflict resolution reverts it
+    away from the checker's initial (higher) proposal."""
+
+    async def test_metadata_matches_the_final_reverted_version(self) -> None:
+        # Real flask/werkzeug histories: flask 3.0.3 requires Werkzeug>=3.0.0,
+        # which nothing in werkzeug's 2.x major can satisfy, so the resolver
+        # falls back to reverting both to their current, pinned versions.
+        store = store_for("flask", "werkzeug")
+        requirements = [
+            make_requirement("flask", specs=[("==", "3.0.3")]),
+            make_requirement("werkzeug", specs=[("==", "2.0.3")]),
+        ]
+        packages = await VersionChecker(data_store=store).check_packages(requirements)
+
+        await DependencyAnalyzer(data_store=store).resolve_and_annotate_conflicts(
+            packages
+        )
+
+        werkzeug = next(p for p in packages if p.name == "werkzeug")
+        assert werkzeug.recommended_version == "2.0.3"
+        # Before the fix this stayed at whatever the checker's *original*
+        # (higher, since-reverted) proposal required -- disagreeing with the
+        # "current" requirement for the very same version string.
+        assert (
+            werkzeug.get_version_python_req("recommended")
+            == werkzeug.get_version_python_req("current")
+            == ">=3.6"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Displayed conflicts must reflect the resolved state
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestDisplayedConflictsReflectTheFinalState:
+    """``Package.conflicts`` (what ``check``/``update`` actually display)
+    must never cite a source/target version pairing that was abandoned
+    during resolution."""
+
+    async def test_a_fallback_revert_clears_the_stale_conflict_from_display(
+        self,
+    ) -> None:
+        # flask has a higher major-3 release (3.1.3) whose Werkzeug floor is
+        # even stricter than 3.0.3's -- neither is satisfiable by werkzeug's
+        # own proposal, so both packages fall back to their *current*
+        # versions. The conflict recorded during detection cites flask's
+        # abandoned 3.1.3 proposal, which the live source (now back at
+        # 3.0.3) has moved away from.
+        store = FakePyPIStore(
+            {
+                "flask": _pkg_data("flask", ["3.0.3", "3.1.3"]),
+                "werkzeug": _pkg_data("werkzeug", ["2.0.3", "2.3.8"]),
+            },
+            dependencies={
+                "flask==3.1.3": ["werkzeug>=3.1.0"],
+                "flask==3.0.3": ["werkzeug>=3.0.0"],
+            },
+        )
+        flask = Package(name="flask", current_version="3.0.3", recommended_version="3.1.3")
+        werkzeug = Package(
+            name="werkzeug", current_version="2.0.3", recommended_version="2.3.8"
+        )
+
+        result = await DependencyAnalyzer(data_store=store).resolve_and_annotate_conflicts(
+            [flask, werkzeug]
+        )
+
+        assert flask.recommended_version == "3.0.3"
+        assert werkzeug.recommended_version == "2.0.3"
+
+        # The resolver fell back to reverting both packages, so no live
+        # conflict should be attributed to the abandoned 3.1.3 pairing on
+        # the Package object users actually see...
+        assert werkzeug.conflicts == []
+
+        # ...but the run is still surfaced as having had an unresolved
+        # conflict, and the full resolution history (citing the 3.1.3
+        # proposal that actually triggered it) remains available for anyone
+        # inspecting `ResolutionResult` directly.
+        assert result.packages_with_conflicts == 1
+        assert result.resolved_versions["werkzeug"].conflicts != []
+        assert result.resolved_versions["werkzeug"].conflicts[0].source_version == "3.1.3"

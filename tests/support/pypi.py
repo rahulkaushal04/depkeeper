@@ -401,6 +401,9 @@ class FakePyPIStore(PyPIDataStore):
         data = self.available.get(name)
         return data.all_versions if data else []
 
+    def get_cached_package(self, name: str) -> Optional[PyPIPackageData]:
+        return self.available.get(name)
+
 
 def store_for(
     *names: str,

@@ -417,6 +417,61 @@ class TestConflictDrivenResolution:
 
 
 # ---------------------------------------------------------------------------
+# Duplicate declarations of the same distribution
+# ---------------------------------------------------------------------------
+
+
+class TestDuplicateDeclarationIsolation:
+    """The same distribution declared twice via separate ``-r`` includes,
+    each with its own constraint, must be resolved independently -- with
+    conflict resolution enabled (the default).
+    """
+
+    @pytest.fixture
+    def store(self) -> FakePyPIStore:
+        return store_for("click")
+
+    async def _project(self, tmp_path: Path, include_order: str) -> Path:
+        (tmp_path / "base.txt").write_text("click==8.0.4\n", encoding="utf-8")
+        (tmp_path / "dev.txt").write_text(
+            "click>=8.0.4,<8.1.5\n", encoding="utf-8"
+        )
+        path = tmp_path / "requirements.txt"
+        path.write_text(include_order, encoding="utf-8")
+        return path
+
+    async def test_the_unbounded_declaration_is_not_capped_by_the_others_bound(
+        self, tmp_path: Path, store: FakePyPIStore
+    ) -> None:
+        """``base.txt`` has no upper bound and must reach click's true
+        highest 8.x release (8.1.7 in the fixture history), not the ceiling
+        ``dev.txt`` happens to declare for itself."""
+        path = await self._project(tmp_path, "-r base.txt\n-r dev.txt\n")
+
+        await run_update(path, store)
+
+        assert (tmp_path / "base.txt").read_text(encoding="utf-8") == "click==8.1.7\n"
+        assert (tmp_path / "dev.txt").read_text(encoding="utf-8") == (
+            "click>=8.1.3,<8.1.5\n"
+        )
+
+    async def test_the_bounded_declaration_still_gets_its_own_safe_update(
+        self, tmp_path: Path, store: FakePyPIStore
+    ) -> None:
+        """Reversing the include order must not change either outcome, and
+        ``dev.txt`` must not be starved of its own legitimate update by a
+        target contaminated from ``base.txt``."""
+        path = await self._project(tmp_path, "-r dev.txt\n-r base.txt\n")
+
+        await run_update(path, store)
+
+        assert (tmp_path / "base.txt").read_text(encoding="utf-8") == "click==8.1.7\n"
+        assert (tmp_path / "dev.txt").read_text(encoding="utf-8") == (
+            "click>=8.1.3,<8.1.5\n"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Hash-pinned lockfiles
 # ---------------------------------------------------------------------------
 

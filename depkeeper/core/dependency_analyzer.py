@@ -51,6 +51,7 @@ from depkeeper.exceptions import NetworkError
 from depkeeper.models.package import Package
 from depkeeper.utils.logger import get_logger
 from depkeeper.utils.naming import normalize_package_name
+from depkeeper.utils.version_utils import parse_version_lenient
 from depkeeper.core.data_store import PyPIDataStore, PyPIPackageData
 from depkeeper.models.conflict import Conflict, ConflictSet
 
@@ -238,6 +239,39 @@ def _get_major_version(version: Optional[str]) -> Optional[int]:
         return parsed.release[0] if parsed.release else None
     except InvalidVersion:
         return None
+
+
+def _lower_proposal(a: Optional[str], b: Optional[str]) -> Optional[str]:
+    """Return whichever of *a*/*b* is the lower version.
+
+    Seeds a single name-level working proposal when the same package name
+    is declared more than once, so conflict detection has one conservative
+    starting point without discarding either declaration's own proposal.
+    ``None``/unparseable values are treated as "no preference".
+
+    Args:
+        a: One candidate version string, or ``None``.
+        b: The other candidate version string, or ``None``.
+
+    Returns:
+        The lower of the two parseable versions, or whichever operand is
+        usable when the other is ``None``/unparseable, or ``None`` when
+        neither is.
+    """
+    if a is None:
+        return b
+    if b is None:
+        return a
+
+    parsed_a = parse_version_lenient(a)
+    parsed_b = parse_version_lenient(b)
+
+    if parsed_a is None:
+        return b if parsed_b is not None else a
+    if parsed_b is None:
+        return a
+
+    return a if parsed_a <= parsed_b else b
 
 
 def _satisfies(version: Optional[str], required_spec: str) -> bool:
@@ -428,6 +462,28 @@ class DependencyAnalyzer:
             )
             return None
 
+    def _refresh_recommended_metadata(self, pkg: Package, resolved: str) -> None:
+        """Keep ``recommended_metadata`` in sync with the version being applied.
+
+        ``VersionChecker`` populates ``recommended_metadata`` once, for its
+        initial proposal. When conflict resolution moves
+        ``recommended_version`` elsewhere, that metadata otherwise keeps
+        describing the abandoned proposal. Recomputed from the data store's
+        cache only, so this never triggers new network I/O; left untouched
+        when *pkg* isn't cached (unavailable package).
+
+        Args:
+            pkg: The package whose ``recommended_version`` was just set.
+            resolved: The version now stored in ``pkg.recommended_version``.
+        """
+        cached = self.data_store.get_cached_package(pkg.name)
+        if cached is None:
+            return
+
+        pkg.metadata["recommended_metadata"] = {
+            "requires_python": cached.python_requirements.get(resolved),
+        }
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -460,14 +516,28 @@ class DependencyAnalyzer:
         4. For packages the loop could not fix, adopt the best version that
            satisfies every conflict at once, when one exists.
         5. Annotate each :class:`Package` with its final version and any
-           recorded :class:`Conflict` objects.
+           conflicts still live against that final version.
         6. Return a :class:`ResolutionResult` with complete details.
 
         Invariant: after this call, ``pkg.recommended_version`` equals
-        ``result.resolved_versions[pkg.name].resolved`` for every package.
-        :class:`ResolutionResult` is therefore the single source of truth —
-        the version reported in the summary is always the version applied by
+        ``result.resolved_versions[pkg.name].resolved`` for every package
+        declared **once**. :class:`ResolutionResult` is therefore the
+        single source of truth for a singly-declared package — the version
+        reported in the summary is always the version applied by
         ``depkeeper update``.
+
+        Duplicate declarations (the same normalized package name appearing
+        more than once in *packages*, e.g. the same distribution pulled in
+        via two ``-r`` includes with different constraints) are each
+        resolved **independently**: cross-package conflict detection still
+        reasons about the name as a whole, but a name-level adjustment only
+        reaches a given declaration's ``recommended_version`` when a *real*
+        conflict was recorded for that name. Absent one, each declaration
+        keeps the recommendation it already had. ``resolved_versions``
+        still holds one summary entry per *name*, so for a duplicated name
+        it reports a single representative outcome — consult each
+        :class:`Package.recommended_version` directly for the authoritative
+        per-declaration outcome.
 
         Args:
             packages: Mutable list of :class:`Package` objects. Each
@@ -487,10 +557,22 @@ class DependencyAnalyzer:
         # proposed even after update_set has been rewritten in place.
         original_versions: Dict[str, Optional[str]] = {}
 
-        for pkg in packages:
+        # Each package instance's own pre-resolution proposal, captured
+        # positionally (parallel to `packages`) before any name-collapsing,
+        # so a duplicated name's declarations can be told apart later.
+        own_proposals: List[Optional[str]] = [
+            pkg.recommended_version or pkg.current_version for pkg in packages
+        ]
+
+        for pkg, proposed in zip(packages, own_proposals):
             # recommended_version already respects major boundaries; falling
-            # back to current_version means "propose no change".
-            proposed = pkg.recommended_version or pkg.current_version
+            # back to current_version means "propose no change". A name
+            # declared more than once seeds the name-level working value
+            # from the lower of its duplicates' proposals -- bookkeeping
+            # only, it never overrides an individual declaration's own
+            # recommendation unless a real conflict is found for that name.
+            if pkg.name in update_set:
+                proposed = _lower_proposal(update_set[pkg.name], proposed)
             update_set[pkg.name] = proposed
             original_versions[pkg.name] = proposed
 
@@ -601,32 +683,60 @@ class DependencyAnalyzer:
         resolved_versions: Dict[str, PackageResolution] = {}
         packages_with_conflicts = 0
 
-        for pkg in packages:
-            original = original_versions.get(pkg.name)
-            resolved = update_set.get(pkg.name)
-            conflicts = conflict_tracking.get(pkg.name, [])
-            compatible_alt = alternatives.get(pkg.name)
+        for pkg, own_proposal in zip(packages, own_proposals):
+            name = pkg.name
+            original = original_versions.get(name)
+            name_resolved = update_set.get(name)
+            raw_conflicts = conflict_tracking.get(name, [])
+            compatible_alt = alternatives.get(name)
 
-            if conflicts:
+            # A name-level value only reflects a *real* resolution decision
+            # when it moved away from its initial seed -- whether this name
+            # was the target of a conflict, or was adjusted as the source of
+            # one (conflicts are recorded by target only, so
+            # `conflict_tracking` alone can't tell the two apart). Absent
+            # any such move, a divergence between `name_resolved` and this
+            # declaration's own proposal is just the seeding above; it must
+            # not change what THIS declaration recommends.
+            name_changed = name_resolved != original_versions.get(name)
+            if name_resolved is None:
+                instance_resolved: Optional[str] = None
+            elif not name_changed:
+                instance_resolved = own_proposal
+            else:
+                instance_resolved = name_resolved
+
+            # Recomputed against the FINAL update_set (after alternative
+            # adoption above), not the pre-adoption snapshot used only to
+            # decide whether to adopt -- otherwise a conflict the adoption
+            # step just resolved would still be reported as live. Only used
+            # for what `pkg` actually displays: a shown conflict must never
+            # cite a source/target pairing that was never applied.
+            live = _live_conflicts(update_set, name, name_resolved, raw_conflicts)
+
+            # Counts every name a conflict was ever recorded for, not just
+            # the still-live ones: a fallback revert always looks resolved
+            # to `_live_conflicts` even when the reverted pairing is, in
+            # reality, still incompatible.
+            if raw_conflicts:
                 packages_with_conflicts += 1
 
-            status = self._determine_status(pkg, original, resolved, conflicts)
+            status = self._determine_status(pkg, original, name_resolved, raw_conflicts)
 
-            # Update the Package object itself. `recommended_version` is a
-            # projection of `resolved` and nothing else, so the version shown
-            # by `check` and written by `update` is always the version this
-            # method reports in `ResolutionResult`.
-            if resolved is not None:
-                pkg.recommended_version = resolved
-            if conflicts:
-                pkg.set_conflicts(conflicts)
+            # Applies what THIS declaration resolves to, which for a
+            # duplicated name may legitimately differ from the name-level
+            # summary below (see the docstring).
+            if instance_resolved is not None:
+                pkg.recommended_version = instance_resolved
+                self._refresh_recommended_metadata(pkg, instance_resolved)
+            pkg.set_conflicts(live)
 
-            resolved_versions[pkg.name] = PackageResolution(
-                name=pkg.name,
+            resolved_versions[name] = PackageResolution(
+                name=name,
                 original=original,
-                resolved=resolved,
+                resolved=name_resolved,
                 status=status,
-                conflicts=conflicts,
+                conflicts=raw_conflicts,
                 compatible_alternative=compatible_alt,
             )
 
