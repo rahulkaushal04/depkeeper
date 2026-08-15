@@ -508,27 +508,21 @@ class TestConfirm:
 
         assert "[Y/n]" in out.getvalue()
 
-    @pytest.mark.xfail(
-        reason="Rich parses '[y/N]' as markup and drops it; the safe-default "
-        "prompt therefore shows no hint at all. Same defect family as M4.",
-        strict=True,
-    )
     def test_the_prompt_advertises_a_default_of_no(
         self,
         captured_streams: Tuple[io.StringIO, io.StringIO],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Known defect, pinned so the fix is detected when it lands.
+        """Regression: ``confirm`` renders with ``markup=False``.
 
-        ``confirm`` renders through Rich with markup enabled. ``[y/N]`` is
-        swallowed as a (meaningless) style tag, so the user is asked
-        ``Apply 4 updates? :`` with no indication that pressing Enter declines.
-        ``[Y/n]`` survives only by accident of Rich's tag grammar, which is why
-        the ``default=True`` case above passes.
+        ``[y/N]`` used to be swallowed as a (meaningless) Rich style tag, so
+        the user was asked ``Apply 4 updates? :`` with no indication that
+        pressing Enter declines. ``[Y/n]`` survived only by accident of
+        Rich's tag grammar, which is why the ``default=True`` case above
+        always passed.
 
-        Every destructive call site uses ``default=False``, so this is exactly
-        the prompt that matters. The fix is ``markup=False`` on this call, as
-        already applied to ``_display_simple``.
+        Every destructive call site uses ``default=False``, so this is
+        exactly the prompt that matters.
         """
         out, _err = captured_streams
         monkeypatch.setattr("builtins.input", lambda: "")

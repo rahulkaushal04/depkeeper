@@ -244,7 +244,7 @@ def confirm(message: str, *, default: bool = False) -> bool:
     """
     console = _get_console()
     suffix = " [Y/n]: " if default else " [y/N]: "
-    console.print(f"{message}{suffix}", end="", style="info")
+    console.print(f"{message}{suffix}", end="", style="info", markup=False)
 
     try:
         response = input().strip().lower()

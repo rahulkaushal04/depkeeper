@@ -116,12 +116,12 @@ $ depkeeper check
 ┏━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━┓
 ┃   Status   ┃ Package  ┃ Current ┃  Latest   ┃ Recommended ┃ Update Type ┃ Conflicts ┃
 ┡━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━┩
-│ ⬆ OUTDATED │ requests │ 2.28.0  │  2.34.2   │   2.34.2    │    minor    │ -         │
-│ ⬆ OUTDATED │ flask    │   2.0   │   3.1.3   │    2.2.5    │    minor    │ -         │
-│ ⬆ OUTDATED │ celery   │   5.0   │   5.6.3   │    5.6.3    │    minor    │ -         │
-│ ⬆ OUTDATED │ click    │   8.0   │   8.4.2   │    8.4.2    │    minor    │ -         │
-│    ✓ OK    │ certifi  │    -    │ 2026.7.22 │      -      │      -      │ -         │
-│ ⬆ OUTDATED │ urllib3  │ 1.26.0  │   2.7.0   │   1.26.20   │    patch    │ -         │
+│ [OUTDATED] │ requests │ 2.28.0  │  2.34.2   │   2.34.2    │    minor    │ -         │
+│ [OUTDATED] │ flask    │   2.0   │   3.1.3   │    2.2.5    │    minor    │ -         │
+│ [OUTDATED] │ celery   │   5.0   │   5.6.3   │    5.6.3    │    minor    │ -         │
+│ [OUTDATED] │ click    │   8.0   │   8.4.2   │    8.4.2    │    minor    │ -         │
+│    [OK]    │ certifi  │    -    │ 2026.7.22 │      -      │      -      │ -         │
+│ [OUTDATED] │ urllib3  │ 1.26.0  │   2.7.0   │   1.26.20   │    patch    │ -         │
 └────────────┴──────────┴─────────┴───────────┴─────────────┴─────────────┴───────────┘
 [WARNING] 5 package(s) have updates available
 ```

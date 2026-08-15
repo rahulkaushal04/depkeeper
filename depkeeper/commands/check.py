@@ -379,12 +379,15 @@ def _display_table(packages: List[Package]) -> None:
 
     Status indicators:
 
-    - ``✓ OK`` (green): up to date.
-    - ``⬆ OUTDATED`` (yellow): a safe upgrade is available.
-    - ``⚠ CONFLICT`` (red): conflicts block every candidate version.
-    - ``⚠ INCOMP`` (red): the declared version is unusable and the
+    - ``[OK]`` (green): up to date.
+    - ``[OUTDATED]`` (yellow): a safe upgrade is available.
+    - ``[CONFLICT]`` (red): conflicts block every candidate version.
+    - ``[INCOMP]`` (red): the declared version is unusable and the
       recommendation is lower than it.
-    - ``✗ ERROR`` (red): PyPI metadata could not be retrieved.
+    - ``[ERROR]`` (red): PyPI metadata could not be retrieved.
+
+    Bracketed labels, rather than a symbol, so the table renders identically
+    in any font and matches ``--format simple``'s status labels.
 
     Args:
         packages: List of :class:`Package` objects to display.
@@ -428,7 +431,7 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
     # stub), which is a different state from "no update available".
     if not pkg.latest_version:
         return {
-            "Status": "[red]✗ ERROR[/red]",
+            "Status": "[red][ERROR][/red]",
             "Package": pkg.name,
             "Current": pkg.current_version or "[dim]-[/dim]",
             "Latest": "[red]error[/red]",
@@ -461,7 +464,7 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
     # itself is unusable, which the user must see first.
     if display["requires_downgrade"]:
         return {
-            "Status": "[red]⚠ INCOMP[/red]",
+            "Status": "[red][INCOMP][/red]",
             "Package": pkg.name,
             "Current": pkg.current_version or "[dim]-[/dim]",
             "Latest": pkg.latest_version,
@@ -476,7 +479,7 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
         if not pkg.has_update():
             # Conflicts blocked every candidate version.
             return {
-                "Status": "[red]⚠ CONFLICT[/red]",
+                "Status": "[red][CONFLICT][/red]",
                 "Package": pkg.name,
                 "Current": pkg.current_version or "[dim]-[/dim]",
                 "Latest": pkg.latest_version,
@@ -489,7 +492,7 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
             # Conflicts exist, but resolution still found a safe target.
             colored_type = colorize_update_type(display["update_type"] or "update")
             return {
-                "Status": "[yellow]⬆ OUTDATED[/yellow]",
+                "Status": "[yellow][OUTDATED][/yellow]",
                 "Package": pkg.name,
                 "Current": pkg.current_version or "[dim]-[/dim]",
                 "Latest": pkg.latest_version,
@@ -503,7 +506,7 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
     if display["update_available"]:
         colored_type = colorize_update_type(display["update_type"] or "update")
         return {
-            "Status": "[yellow]⬆ OUTDATED[/yellow]",
+            "Status": "[yellow][OUTDATED][/yellow]",
             "Package": pkg.name,
             "Current": pkg.current_version or "[dim]-[/dim]",
             "Latest": pkg.latest_version,
@@ -515,7 +518,7 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
 
     # ── Up-to-date case ────────────────────────────────────────────────
     return {
-        "Status": "[green]✓ OK[/green]",
+        "Status": "[green][OK][/green]",
         "Package": pkg.name,
         "Current": pkg.current_version or "[dim]-[/dim]",
         "Latest": pkg.latest_version or "[dim]-[/dim]",
