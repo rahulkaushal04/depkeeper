@@ -1,219 +1,152 @@
 ---
 title: Exit Codes
-description: depkeeper exit code reference for scripting and CI/CD
+description: Exit code semantics per command, with scripting patterns
 ---
 
 # Exit Codes
 
-depkeeper uses meaningful exit codes for scripting and CI/CD integration. This page documents each exit code, its meaning, and how to handle it in automation scripts.
-
----
-
-## Exit Code Reference
-
-| Code | Name | Description |
+| Code | Name | Meaning |
 |---|---|---|
-| `0` | Success | Command completed successfully |
-| `1` | Error | Application or runtime error |
-| `2` | Usage Error | Invalid arguments or options |
-| `130` | Interrupted | User cancelled (Ctrl+C) |
+| `0` | Success | The command completed. **Not** a statement about what it found. |
+| `1` | Error | An application error occurred; see stderr. |
+| `2` | Usage error | Click rejected the command line before depkeeper ran. |
+| `130` | Interrupted | `Ctrl+C` (`128 + SIGINT`). |
+
+There is no dedicated code for "updates are available". Gate on the payload, not the exit code.
 
 ---
 
-## Detailed Descriptions
+## `0` — Success
 
-### Exit Code 0: Success
+Both commands call `sys.exit(0)` after their asynchronous pipeline returns normally.
 
-The command completed without errors.
-
-- **check** -- Requirements file was parsed and analyzed
-- **update** -- Updates were applied successfully, or no updates were needed
-
-!!! note
-    The `check` command returns 0 even if outdated packages are found. The exit code indicates command success, not whether updates are available.
-
-### Exit Code 1: Error
-
-An application error occurred. Common causes:
-
-- Requirements file not found
-- Parse error in requirements file
-- Network error (PyPI unreachable)
-- File write error (during update)
-- Invalid configuration
-
-### Exit Code 2: Usage Error
-
-Invalid command-line arguments were provided. Common causes:
-
-- Unknown option
-- Missing required argument
-- Invalid option value
-
-### Exit Code 130: Interrupted
-
-The user cancelled the operation with Ctrl+C. This occurs when:
-
-- The user presses Ctrl+C during an update confirmation prompt
-- The user interrupts a long-running network operation
-
----
-
-## Exit Code Behavior by Command
-
-### check
-
-| Scenario | Exit Code |
+| Situation | Exit |
 |---|---|
-| All packages up to date | 0 |
-| Outdated packages found | 0 |
-| Parse error | 1 |
-| Network error | 1 |
-| Invalid arguments | 2 |
-| Interrupted | 130 |
+| `check`: everything up to date | `0` |
+| `check`: outdated packages found | `0` |
+| `check`: unresolved conflicts found | `0` |
+| `check`: some packages unreachable on PyPI | `0` |
+| `update`: updates applied | `0` |
+| `update`: nothing to update | `0` |
+| `update`: user declined at the prompt | `0` |
+| `update`: `--dry-run` | `0` |
+| `update`: `--packages` matched nothing | `0` |
+| `update`: a package skipped because its target violates the declared constraints | `0` |
 
-### update
+## `1` — Error
 
-| Scenario | Exit Code |
+Raised when a `DepKeeperError` (or any unexpected exception) reaches a command boundary. The
+message is printed to **stderr** with an `[ERROR]` prefix.
+
+| Cause | Example message |
 |---|---|
-| Updates applied successfully | 0 |
-| No updates needed | 0 |
-| User declined updates | 0 |
-| Parse error | 1 |
-| Write error | 1 |
-| Network error | 1 |
-| Invalid arguments | 2 |
-| Interrupted | 130 |
+| Parse failure | `Failed to parse requirements.txt: Invalid requirement syntax: ...` |
+| Circular include | `Circular dependency detected: a.txt -> b.txt -> a.txt` |
+| Configuration error | `Unknown configuration keys: check_conflict` |
+| Refused hashed update | `Refusing to update requirement(s) with --hash entries: requests. ...` |
+| Unsatisfiable rewrite | `Cannot update requirement at requirements.txt:3: ...` |
+| Write failure | `Failed to write /path/requirements.txt: ...` |
+| File too large / unreadable | `File too large: 12000000 bytes (max 10485760)` |
+| Unexpected exception | `Unexpected error: <detail>` (full traceback at `-vv`) |
 
----
+## `2` — Usage error
 
-## Usage in Scripts
+Produced by Click, before any depkeeper code runs.
 
-### Basic Error Handling (Bash)
+```text
+Usage: depkeeper check [OPTIONS] [FILE]
+Try 'depkeeper check --help' for help.
 
-```bash
-#!/bin/bash
-set -e
-
-depkeeper check || {
-    echo "depkeeper check failed"
-    exit 1
-}
+Error: Invalid value for '[FILE]': File 'nosuchfile.txt' does not exist.
 ```
 
-### Detailed Exit Code Handling (Bash)
+```text
+Error: No such option: --bogus
+```
+
+Also raised for a `--config` path that does not exist, and for an invalid `--format` value.
+
+## `130` — Interrupted
+
+`Ctrl+C` at any point, including at the confirmation prompt. A warning is written to stderr:
+
+```text
+[WARNING] Operation cancelled by user
+```
+
+Files are left either fully old or fully new; see
+[Write safety](../concepts/write-safety.md#what-still-requires-care).
+
+---
+
+## Gating on results
+
+`check` reports through its payload. The correct pattern separates *did depkeeper work* from
+*what did it find*:
 
 ```bash
-#!/bin/bash
+set -euo pipefail
 
+if ! depkeeper check --format json > report.json 2> depkeeper.log; then
+  echo "depkeeper failed:" >&2
+  cat depkeeper.log >&2
+  exit 1
+fi
+
+OUTDATED=$(jq '[.[] | select(.status == "outdated")] | length' report.json)
+CONFLICTS=$(jq '[.[] | select(.conflicts)] | length' report.json)
+
+if [ "$CONFLICTS" -gt 0 ]; then
+  echo "$CONFLICTS package(s) have dependency conflicts" >&2
+  exit 1
+fi
+
+echo "$OUTDATED package(s) behind"
+```
+
+### Explicit dispatch
+
+```bash
 depkeeper check
-EXIT_CODE=$?
-
-case $EXIT_CODE in
-    0)
-        echo "Check completed successfully"
-        ;;
-    1)
-        echo "Error during check"
-        exit 1
-        ;;
-    2)
-        echo "Invalid arguments"
-        exit 2
-        ;;
-    130)
-        echo "Operation cancelled"
-        exit 130
-        ;;
-    *)
-        echo "Unknown exit code: $EXIT_CODE"
-        exit $EXIT_CODE
-        ;;
+case $? in
+  0)   echo "check completed" ;;
+  1)   echo "application error"; exit 1 ;;
+  2)   echo "usage error"; exit 2 ;;
+  130) echo "cancelled"; exit 130 ;;
+  *)   echo "unexpected exit code $?"; exit 1 ;;
 esac
 ```
 
 ### PowerShell
 
 ```powershell
-depkeeper check
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "Check completed successfully"
-} else {
-    Write-Host "Check failed with code: $LASTEXITCODE"
+depkeeper check --format json > report.json
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "depkeeper failed with code $LASTEXITCODE"
     exit $LASTEXITCODE
 }
+$report = Get-Content report.json | ConvertFrom-Json
+$outdated = @($report | Where-Object { $_.status -eq 'outdated' }).Count
+Write-Host "$outdated package(s) behind"
 ```
 
-### CI/CD Pipeline
+### Make
 
-```bash
-#!/bin/bash
-set -e
-
-# Check for updates (exit 0 even with outdated)
-depkeeper check --format json > report.json
-
-# Determine if updates exist
-OUTDATED=$(jq '[.[] | select(.status == "outdated")] | length' report.json)
-
-if [ "$OUTDATED" -gt 0 ]; then
-    echo "Found $OUTDATED outdated packages"
-
-    # Update with backup
-    depkeeper update --backup -y || {
-        echo "Update failed"
-        exit 1
-    }
-
-    # Run tests
-    pytest || {
-        echo "Tests failed after update"
-        exit 1
-    }
-fi
-```
-
-### GitHub Actions
-
-```yaml
-- name: Check dependencies
-  id: check
-  run: |
-    depkeeper check --format json > report.json
-  continue-on-error: true
-
-- name: Handle check result
-  if: steps.check.outcome == 'failure'
-  run: |
-    echo "::error::Dependency check failed"
-    exit 1
+```make
+.PHONY: deps-check
+deps-check:
+	@depkeeper check --format json > .deps.json
+	@test "$$(jq '[.[] | select(.conflicts)] | length' .deps.json)" -eq 0 \
+	  || { echo "dependency conflicts present"; exit 1; }
 ```
 
 ---
 
-## Strict Mode Pattern
+## Common mistakes
 
-For CI/CD where you want to fail if packages are outdated:
-
-```bash
-#!/bin/bash
-set -e
-
-# Check if any packages are outdated
-OUTDATED=$(depkeeper check --outdated-only --format json | jq 'length')
-
-if [ "$OUTDATED" -gt 0 ]; then
-    echo "$OUTDATED packages are outdated"
-    depkeeper check --outdated-only
-    exit 1
-fi
-
-echo "All packages are up to date"
-```
-
----
-
-## See Also
-
-- [CLI Commands](cli-commands.md) -- Command documentation
-- [CI/CD Integration](../guides/ci-cd-integration.md) -- Pipeline examples
+| Mistake | Consequence |
+|---|---|
+| Treating a `0` exit from `check` as "no updates". | Drift is never detected. |
+| Piping stdout to a parser without checking the exit code. | A failed run produces no payload and the parser sees empty input. |
+| Using `set -e` with `depkeeper check \| jq ...`. | The pipeline's exit status is `jq`'s. Use `set -o pipefail`, or capture to a file first. |
+| Assuming `update` fails when it declines to update a package. | Skips are warnings, not errors; the command still exits `0`. |

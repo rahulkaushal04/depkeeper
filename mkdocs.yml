@@ -16,7 +16,8 @@ edit_uri: edit/main/docs/
 
 copyright: Copyright &copy; 2024-2026 Rahul Kaushal
 
-# Strict mode ensures broken links and references cause build failures
+# Strict mode: broken links and unresolved references fail the build rather
+# than shipping a silently broken site (CI relies on this).
 strict: true
 
 # ============================================================
@@ -27,7 +28,8 @@ theme:
   name: material
   language: en
 
-  # Color palette with automatic dark/light mode toggle
+  # Automatic light/dark switching driven by the OS preference, with a
+  # manual toggle as an override.
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -44,42 +46,42 @@ theme:
         icon: material/brightness-4
         name: Switch to light mode
 
-  # Custom fonts for better readability
+  # JetBrains Mono is used for code so version specifiers such as `>=2.0,<3`
+  # stay legible at small sizes.
   font:
     text: Inter
     code: JetBrains Mono
 
   features:
-    # Navigation enhancements
-    - navigation.instant # Fast page loading without full reload
-    - navigation.instant.prefetch # Prefetch pages on hover
-    - navigation.tracking # Update URL with active anchor
-    - navigation.tabs # Top-level sections in tabs
-    - navigation.tabs.sticky # Keep tabs visible when scrolling
-    - navigation.sections # Render top-level sections as groups
-    - navigation.expand # Expand all collapsible sections by default
-    - navigation.path # Show breadcrumb navigation
-    - navigation.top # Back-to-top button
-    - navigation.footer # Previous/next page navigation in footer
-    - navigation.indexes # Allow section index pages
+    # Navigation
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.top
+    - navigation.footer
+    - navigation.indexes
 
-    # Search improvements
-    - search.suggest # Show search suggestions
-    - search.highlight # Highlight search terms in results
-    - search.share # Share search results via deep link
+    # Search
+    - search.suggest
+    - search.highlight
+    - search.share
 
-    # Content features
-    - content.code.copy # Copy button for code blocks
-    - content.code.annotate # Allow annotations in code blocks
-    - content.tabs.link # Link content tabs across pages
-    - content.tooltips # Improved tooltips for abbreviations
-    - content.action.edit # Edit this page button
-    - content.action.view # View source of this page button
+    # Content
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.tooltips
+    - content.action.edit
+    - content.action.view
 
     # Table of contents
     - toc.follow # Sidebar scrolls with active heading
 
-  # Icons and branding
   icon:
     repo: fontawesome/brands/github
     logo: material/package-variant-closed
@@ -91,12 +93,15 @@ theme:
 # ============================================================
 
 plugins:
-  # Built-in search with custom configuration
+  # The separator additionally splits on dots and brackets so a query for
+  # `parse_file` or `depkeeper.core` matches API identifiers.
   - search:
       separator: '[\s\-\_\.\(\)\[\]\/]+'
       lang: en
 
-  # API documentation from docstrings
+  # API reference generated from the source docstrings. `docstring_style`
+  # must match the project convention documented in
+  # docs/contributing/code-style.md — Google style.
   - mkdocstrings:
       default_handler: python
       handlers:
@@ -112,16 +117,19 @@ plugins:
             heading_level: 2
             docstring_style: google
             docstring_section_style: spacy
+            # __init__ docstrings are folded into the class, so constructor
+            # arguments are documented under `Args:` in the class docstring.
             merge_init_into_class: true
             show_signature_annotations: true
             separate_signature: true
             signature_crossrefs: true
+            # Source order, not alphabetical: modules are written so public
+            # API appears before private helpers.
             members_order: source
             filters:
-              - "!^_" # Exclude private members
-              - "^__init__$" # Include __init__ methods
+              - "!^_"
+              - "^__init__$"
 
-  # Minify HTML output for faster loading
   - minify:
       minify_html: true
       minify_js: true
@@ -134,27 +142,27 @@ plugins:
 # ============================================================
 
 markdown_extensions:
-  # Python Markdown core extensions
-  - abbr # Abbreviations with tooltips
-  - admonition # Call-out boxes (note, warning, etc.)
-  - attr_list # Add HTML attributes to elements
-  - def_list # Definition lists
-  - footnotes # Footnote support
-  - md_in_html # Markdown inside HTML blocks
-  - tables # Table support
-  - toc: # Table of contents
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
       permalink: true
       permalink_title: Link to this section
       toc_depth: 3
 
-  # PyMdown Extensions for enhanced Markdown
   - pymdownx.arithmatex:
       generic: true
   - pymdownx.betterem:
       smart_enable: all
-  - pymdownx.caret # Superscript with ^^text^^
-  - pymdownx.critic # Track changes and comments
-  - pymdownx.details # Collapsible call-outs
+  - pymdownx.caret
+  - pymdownx.critic
+  - pymdownx.details
+  # These `!!python/name:` tags are why mkdocs.yml is excluded from the
+  # check-yaml pre-commit hook: a safe loader rejects them.
   - pymdownx.emoji:
       emoji_generator: !!python/name:material.extensions.emoji.to_svg
       emoji_index: !!python/name:material.extensions.emoji.twemoji
@@ -163,20 +171,24 @@ markdown_extensions:
       line_spans: __span
       pygments_lang_class: true
       auto_title: true
-  - pymdownx.inlinehilite # Inline code highlighting
-  - pymdownx.keys # Keyboard key styling
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  # Turns bare issue/PR references into links against this repository.
   - pymdownx.magiclink:
       normalize_issue_symbols: true
       repo_url_shorthand: true
       user: rahulkaushal04
       repo: depkeeper
-  - pymdownx.mark # Highlight text with ==text==
-  - pymdownx.smartsymbols # Smart symbols (arrows, fractions, etc.)
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  # `check_paths` fails the build on a missing snippet instead of rendering
+  # an empty include; abbreviations are appended to every page.
   - pymdownx.snippets:
       base_path: docs
       auto_append:
         - includes/abbreviations.md
       check_paths: true
+  # Required for the ```mermaid fences used in the architecture docs.
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
@@ -187,17 +199,17 @@ markdown_extensions:
   - pymdownx.tasklist:
       custom_checkbox: true
       clickable_checkbox: false
-  - pymdownx.tilde # Subscript with ~text~ and strikethrough
+  - pymdownx.tilde
 
 # ============================================================
 # Extra Configuration
 # ============================================================
 
 extra:
+  # Enables the version selector; requires deploying with `mike`.
   version:
     provider: mike
 
-  # Social links in footer
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/rahulkaushal04/depkeeper
@@ -209,7 +221,7 @@ extra:
       link: https://github.com/rahulkaushal04/depkeeper/issues
       name: Report an issue
 
-  # Status badge configuration
+  # Labels available to pages via the `status:` front-matter key.
   status:
     new: Recently added
     deprecated: Deprecated
@@ -233,29 +245,41 @@ nav:
       - Quick Start: getting-started/quickstart.md
       - Basic Usage: getting-started/basic-usage.md
 
+  - Concepts:
+      - concepts/index.md
+      - Architecture: concepts/architecture.md
+      - Version Recommendation: concepts/version-recommendation.md
+      - Conflict Resolution: concepts/conflict-resolution.md
+      - Requirements Parsing: concepts/requirements-parsing.md
+      - Write Safety: concepts/write-safety.md
+
   - User Guide:
       - guides/index.md
       - Checking for Updates: guides/checking-updates.md
       - Updating Dependencies: guides/updating-dependencies.md
-      - Dependency Resolution: guides/dependency-resolution.md
-      - CI/CD Integration: guides/ci-cd-integration.md
       - Configuration: guides/configuration.md
+      - CI/CD Integration: guides/ci-cd-integration.md
+      - Operations: guides/operations.md
       - Best Practices: guides/best-practices.md
       - Troubleshooting: guides/troubleshooting.md
 
   - Reference:
       - reference/index.md
       - CLI Commands: reference/cli-commands.md
-      - Python API: reference/python-api.md
       - Configuration Options: reference/configuration-options.md
       - Exit Codes: reference/exit-codes.md
       - File Formats: reference/file-formats.md
+      - JSON Output: reference/json-output.md
+      - Error Reference: reference/errors.md
+      - Known Limitations: reference/limitations.md
+      - Python API: reference/python-api.md
 
   - Contributing:
       - contributing/index.md
       - Development Setup: contributing/development-setup.md
       - Code Style: contributing/code-style.md
       - Testing: contributing/testing.md
+      - Extending depkeeper: contributing/extending.md
       - Release Process: contributing/release-process.md
 
   - Community:
@@ -267,8 +291,10 @@ nav:
       - Security Policy: community/security.md
 
 # ============================================================
-# Validation and Hooks
+# Validation
 # ============================================================
+# Paired with `strict: true` above: anything set to `warn` or `error` here
+# fails the build, while `info` entries stay advisory.
 
 validation:
   nav:

@@ -1,329 +1,248 @@
 ---
 title: Development Setup
-description: Set up your local development environment for depkeeper
+description: Local environment, tooling, verification commands and the change workflow
 ---
 
 # Development Setup
 
-Set up a local development environment for contributing to depkeeper.
-This guide covers prerequisites, installation, workflows, and tooling configuration.
-
----
-
 ## Prerequisites
 
-Install the following tools:
+| Tool | Requirement |
+|---|---|
+| Python | ≥ 3.8 to run; **3.11+ recommended** for development so `mypy` and the async test suite behave predictably. |
+| Git | Any recent version. |
+| Make | Optional; the `Makefile` targets are conveniences over plain commands. |
 
-- **Python** ≥ 3.8
-- **Git** for version control
-- **Make** (optional) for development shortcuts
+---
 
-Verify your Python version:
+## Setup
+
+=== "Scripted"
+
+    ```bash
+    git clone https://github.com/rahulkaushal04/depkeeper.git
+    cd depkeeper
+
+    bash scripts/setup_dev.sh          # macOS / Linux
+    .\scripts\setup_dev.ps1            # Windows PowerShell
+    ```
+
+=== "Manual"
+
+    ```bash
+    git clone https://github.com/rahulkaushal04/depkeeper.git
+    cd depkeeper
+
+    python -m venv venv
+    source venv/bin/activate           # Windows: venv\Scripts\activate
+
+    pip install -e ".[dev]"
+    pre-commit install
+    ```
+
+=== "Make"
+
+    ```bash
+    make install-dev                   # editable install + dev extras + pre-commit hooks
+    ```
+
+### Dependency extras
+
+| Extra | Contents |
+|---|---|
+| `dev` | pytest, pytest-cov, pytest-asyncio, pytest-mock, pytest-httpx, mypy, types-setuptools, pre-commit |
+| `test` | the pytest stack only |
+| `docs` | mkdocs, mkdocs-material, mkdocstrings[python], pymdown-extensions, mkdocs-minify-plugin |
+
+Install the docs extra when touching anything under `docs/`:
 
 ```bash
-python --version
+pip install -e ".[dev,docs]"
 ```
 
 ---
 
-## Installation
+## Verification commands
 
-Choose between automated setup scripts or manual installation steps.
-
-### Option 1: Automated Setup (Recommended)
-
-#### macOS / Linux
+These four commands are the contract. Run all of them before opening a pull request.
 
 ```bash
-git clone https://github.com/rahulkaushal04/depkeeper.git
-cd depkeeper
-bash scripts/setup_dev.sh
-```
+# 1. Tests — fast, no coverage instrumentation
+python -m pytest tests -q --no-cov
 
-#### Windows (PowerShell)
+# 2. Types — pin the analysis version; pyproject declares 3.8, which modern mypy rejects
+python -m mypy depkeeper --python-version 3.13
 
-```powershell
-git clone https://github.com/rahulkaushal04/depkeeper.git
-cd depkeeper
-.\scripts\setup_dev.ps1
-```
+# 3. Syntax — catches edits that silently join two source lines
+python -m compileall -q depkeeper
 
-These scripts create a virtual environment, install dependencies, and configure development tools.
-
----
-
-### Option 2: Manual Setup
-
-Manual setup provides full control over each installation step.
-
-```bash
-# Clone repository
-git clone https://github.com/rahulkaushal04/depkeeper.git
-cd depkeeper
-
-# Create virtual environment
-python -m venv venv
-
-# Activate virtual environment
-# macOS / Linux
-source venv/bin/activate
-
-# Windows
-venv\Scripts\activate
-
-# Install dependencies in editable mode
-pip install -e ".[dev]"
-
-# Install pre-commit hooks
-pre-commit install
-```
-
----
-
-## Verify Installation
-
-Confirm the installation succeeded:
-
-```bash
-# Verify CLI
-python -m depkeeper --version
-
-# Run test suite
-pytest
-
-# Run all linters and checks
+# 4. Hooks — formatting and file hygiene
 pre-commit run --all-files
 ```
 
-Each command should complete without errors.
+!!! note "Why `--python-version 3.13`"
 
----
+    `pyproject.toml` sets `python_version = "3.8"` for mypy, which current mypy releases refuse to
+    analyse. Pass the flag explicitly. The project's baseline is a single known error
+    (`data_store.py`, `no-any-return`); anything beyond that is yours.
 
-## Development Workflow
+!!! note "Why `--no-cov`"
 
-### 1. Create a Branch
+    `addopts` in `pyproject.toml` enables coverage with term, HTML and XML reports on every run.
+    That is what CI wants and what a fast edit-test loop does not. `--no-cov` skips it.
 
-Use descriptive branch names with appropriate prefixes:
-
-| Change Type   | Prefix      | Example                      |
-| ------------- | ----------- | ---------------------------- |
-| Feature       | `feature/`  | `feature/add-lock-file`      |
-| Bug fix       | `fix/`      | `fix/parse-error-handling`   |
-| Documentation | `docs/`     | `docs/update-installation`   |
-| Refactor      | `refactor/` | `refactor/simplify-parser`   |
-| Tests         | `test/`     | `test/add-integration-tests` |
+Coverage when you do want it:
 
 ```bash
-git checkout -b feature/my-feature
+python -m pytest --cov=depkeeper --cov-report=term-missing
+make test        # term + html + xml, as CI runs it
 ```
 
 ---
 
-### 2. Implement Changes
+## Change workflow
 
-- Follow the project’s [Code Style](code-style.md)
-- Keep changes focused and minimal
-- Add or update tests where applicable
+### 1. Branch
 
----
-
-### 3. Run Tests
-
-Run the test suite to verify your changes:
+| Type | Prefix | Example |
+|---|---|---|
+| Feature | `feature/` | `feature/private-index-support` |
+| Fix | `fix/` | `fix/parser-line-continuations` |
+| Docs | `docs/` | `docs/json-schema` |
+| Refactor | `refactor/` | `refactor/extract-resolution-loop` |
+| Tests | `test/` | `test/analyzer-stall-cases` |
 
 ```bash
-# Full test suite
-pytest
+git checkout -b fix/parser-line-continuations
+```
 
-# With coverage
-pytest --cov=depkeeper
+### 2. Write a failing test first
 
-# Specific test file
-pytest tests/unit/test_parser.py
+For a bug fix this is mandatory. The test must fail before the fix and pass after it; that is the
+only evidence that the fix addresses the reported behaviour.
 
-# Tests matching a pattern
-pytest -k "test_parse"
+### 3. Implement
+
+- Respect the [layering rules](../concepts/architecture.md#layering-rules): `models` perform no
+  I/O, `core` prints nothing, `commands` own all user interaction.
+- Do not weaken a [system invariant](../concepts/index.md#non-negotiable-invariants) without an
+  explicit argument in the pull request.
+- Add new tunables to `constants.py`, never inline.
+
+### 4. Verify
+
+Run all four verification commands above.
+
+### 5. Update documentation
+
+Behavioural changes require documentation changes in the same pull request. The pages most often
+affected:
+
+| Change | Pages |
+|---|---|
+| New or changed flag | [CLI commands](../reference/cli-commands.md), the relevant guide |
+| Changed recommendation logic | [Version recommendation](../concepts/version-recommendation.md) |
+| Changed resolver behaviour | [Conflict resolution](../concepts/conflict-resolution.md) |
+| New error or warning message | [Error reference](../reference/errors.md) |
+| Fixed a documented limitation | [Known limitations](../reference/limitations.md) |
+| New JSON field | [JSON output](../reference/json-output.md) |
+
+### 6. Commit and open a pull request
+
+```bash
+git commit -m "fix(parser): join backslash line continuations
+
+pip-compile --generate-hashes wraps hashes onto continuation lines, which
+the line-based parser treated as separate requirements.
+
+Closes #123"
+git push origin fix/parser-line-continuations
 ```
 
 ---
 
-### 4. Run Linters and Type Checks
+## Makefile targets
 
-Ensure code quality standards are met:
+| Target | Command it runs |
+|---|---|
+| `make install` | `pip install -e .` |
+| `make install-dev` | `pip install -e ".[dev]"` + `pre-commit install` |
+| `make test` | `pytest` with term, HTML and XML coverage |
+| `make typecheck` | `mypy depkeeper` |
+| `make all` | `typecheck` then `test` |
+| `make docs` | `mkdocs build` |
+| `make docs-serve` | `mkdocs serve` |
+| `make clean` | Removes build, cache and coverage artefacts |
+
+The Makefile targets assume a POSIX shell. On Windows, run the underlying commands directly.
+
+---
+
+## Working on the documentation
 
 ```bash
-# Run all checks
+pip install -e ".[docs]"
+mkdocs serve                # http://127.0.0.1:8000, live reload
+mkdocs build --strict       # what CI runs
+```
+
+`mkdocs.yml` sets `strict: true`, so a broken internal link, a missing snippet or an unresolved
+`mkdocstrings` reference **fails the build**. Always run `--strict` before pushing.
+
+Documentation conventions:
+
+- Every behavioural claim must be verifiable against the implementation. Run the command and paste
+  the real output rather than composing an illustrative one.
+- Cross-link rather than duplicate. Concepts live in `concepts/`, exhaustive lists in `reference/`,
+  tasks in `guides/`.
+- Prefer tables to prose for enumerable facts.
+- API documentation is generated from docstrings via `mkdocstrings`; fix the docstring, not the
+  page.
+
+---
+
+## Repository layout
+
+```text
+depkeeper/          Package source (see the architecture module map)
+tests/              Test suite, mirroring the package layout
+  support/          Shared factories, fake PyPI, dataset builders
+  integration/      Multi-component workflow tests
+docs/               This documentation site
+scripts/            Developer setup scripts
+mkdocs.yml          Documentation site configuration
+pyproject.toml      Packaging, mypy, pytest and coverage configuration
+Makefile            Development shortcuts
+.pre-commit-config.yaml
+```
+
+---
+
+## Pre-commit hooks
+
+Pinned so a local run applies exactly the checks CI applies:
+
+- `trailing-whitespace`, `end-of-file-fixer`
+- `mixed-line-ending --fix=lf` — the repository itself is LF-only, so diffs stay meaningful (this
+  is independent of depkeeper's runtime behaviour, which preserves whatever a target file uses)
+- `check-yaml` (excluding `mkdocs.yml`, which uses `!!python/name:` tags a safe loader rejects)
+- `check-json`, `check-toml`, `check-ast`
+- `check-added-large-files --maxkb=1000`
+- `check-case-conflict`, `check-merge-conflict`
+
+```bash
 pre-commit run --all-files
-
-# Individual tools
-black .
-mypy depkeeper
-```
-
-All checks must pass before opening a pull request.
-
----
-
-### 5. Commit Changes
-
-Write clear, meaningful commit messages:
-
-```bash
-git add .
-git commit -m "feat: add lock file generation
-
-- Implement lock file writer
-- Add hash verification
-- Update documentation"
-```
-
-The project follows **Conventional Commits**:
-
-| Prefix      | Purpose              |
-| ----------- | -------------------- |
-| `feat:`     | New feature          |
-| `fix:`      | Bug fix              |
-| `docs:`     | Documentation        |
-| `style:`    | Formatting only      |
-| `refactor:` | Internal refactoring |
-| `test:`     | Tests                |
-| `chore:`    | Maintenance tasks    |
-
----
-
-### 6. Push and Open a Pull Request
-
-Push your branch and create a pull request:
-
-```bash
-git push origin feature/my-feature
-```
-
-Include in your pull request:
-
-- Clear description of changes
-- References to related issues
-- Test results or validation notes
-
----
-
-## Makefile Shortcuts
-
-Use these shortcuts for common development tasks:
-
-```bash
-make install       # Install depkeeper in production mode
-make install-dev   # Install with dev dependencies and pre-commit hooks
-make test          # Run tests with coverage reports
-make typecheck     # Run mypy static type checks
-make all           # Run typecheck and test together
-make clean         # Remove cache and build artifacts
-make docs          # Build documentation
-make docs-serve    # Serve documentation locally
+pre-commit run --files depkeeper/core/parser.py
 ```
 
 ---
 
-## Environment Variables
+## Troubleshooting the environment
 
-Configure these variables for development:
-
-```bash
-# Path to configuration file
-export DEPKEEPER_CONFIG=path/to/config.toml
-
-# Disable colored output
-export DEPKEEPER_COLOR=false
-```
-
-For debug-level logging, use the `-vv` flag when running commands:
-
-```bash
-depkeeper -vv check
-```
-
----
-
-## IDE Configuration
-
-### VS Code
-
-Install these recommended extensions:
-
-- Python
-- Pylance
-- Black Formatter
-- Even Better TOML
-
-Add this configuration to `.vscode/settings.json`:
-
-```json
-{
-  "python.defaultInterpreterPath": "${workspaceFolder}/venv/bin/python",
-  "python.testing.pytestEnabled": true,
-  "python.testing.pytestArgs": ["tests"],
-  "[python]": {
-    "editor.formatOnSave": true,
-    "editor.defaultFormatter": "ms-python.black-formatter"
-  }
-}
-```
-
----
-
-### PyCharm
-
-Configure your PyCharm environment:
-
-1. Set project interpreter to `./venv/bin/python`
-2. Mark `depkeeper` as Sources Root
-3. Mark `tests` as Test Sources Root
-4. Configure pytest as the test runner
-
----
-
-## Troubleshooting
-
-### Virtual Environment Issues
-
-Recreate the virtual environment:
-
-```bash
-rm -rf venv
-python -m venv venv
-source venv/bin/activate
-pip install -e ".[dev]"
-```
-
----
-
-### Import Errors
-
-Verify the virtual environment is active:
-
-```bash
-which python
-# Expected: path/to/depkeeper/venv/bin/python
-```
-
----
-
-### Pre-commit Failures
-
-Update hooks or run them individually:
-
-```bash
-# Update hooks
-pre-commit autoupdate
-
-# Run a specific hook
-pre-commit run black --all-files
-```
-
----
-
-## Next Steps
-
-- [Code Style](code-style.md) -- Learn coding standards and formatting requirements
-- [Testing](testing.md) -- Understand testing practices and guidelines
-- [Release Process](release-process.md) -- Review versioning and release procedures
+| Symptom | Fix |
+|---|---|
+| `mypy: Python 3.8 is not supported` | Pass `--python-version 3.13`. |
+| Tests are slow | Use `--no-cov`; coverage reporting is on by default. |
+| `caplog` captures nothing in a new test module | `setup_logging` sets `propagate = False` process-wide. See [Testing → Logging isolation](testing.md#logging-isolation). |
+| `mkdocs build` fails on a link | `strict: true` treats broken links as errors. Fix the link. |
+| Console colour leaks between tests | Use the `_isolate_console` fixture; `reconfigure_console()` clears the memoised consoles. |

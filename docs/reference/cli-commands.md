@@ -1,318 +1,247 @@
 ---
 title: CLI Commands
-description: Complete command-line interface reference for depkeeper
+description: Complete command-line specification for depkeeper
 ---
 
 # CLI Commands
 
-Complete reference for all depkeeper command-line options. depkeeper provides two main commands -- `check` and `update` -- along with global options that apply to both.
+```text
+depkeeper [GLOBAL OPTIONS] COMMAND [COMMAND OPTIONS] [FILE]
+```
 
----
+Two entry points are installed and behave identically:
 
-## Command Overview
-
-| Command | Steps |
+| Entry point | Use |
 |---|---|
-| `depkeeper check` | Parse file &#8594; Query PyPI &#8594; Resolve conflicts &#8594; Display report |
-| `depkeeper update` | Parse file &#8594; Query PyPI &#8594; Resolve conflicts &#8594; Apply updates |
-
-Both commands share global options described below.
+| `depkeeper` | Console script (`depkeeper.cli:main`). |
+| `python -m depkeeper` | Module entry point. Use when the script directory is not on `PATH`. |
 
 ---
 
-## Global Options
+## Global options
 
-These options are available for all commands:
+| Option | Short | Env var | Default | Description |
+|---|---|---|---|---|
+| `--config PATH` | `-c` | `DEPKEEPER_CONFIG` | auto-discovered | Path to a configuration file. Must exist and be a file. |
+| `--verbose` | `-v` | — | `0` | Repeatable. `-v` → INFO, `-vv` (or more) → DEBUG. |
+| `--color / --no-color` | — | `DEPKEEPER_COLOR` | `--color` | Enable or disable coloured output. Also sets/clears `NO_COLOR` in the environment for downstream libraries. |
+| `--version` | — | — | — | Print `depkeeper <version>` and exit. |
+| `--help` | `-h` | — | — | Show help and exit. |
 
-```bash
-depkeeper [OPTIONS] COMMAND [ARGS]...
-```
-
-| Option | Short | Description |
-|---|---|---|
-| `--config PATH` | `-c` | Path to configuration file |
-| `--verbose` | `-v` | Increase verbosity (repeat for more: `-v`, `-vv`) |
-| `--color / --no-color` | | Enable/disable colored output |
-| `--version` | | Show version and exit |
-| `--help` | `-h` | Show help message |
-
-### Verbosity Levels
-
-| Level | Flag | Logging |
-|---|---|---|
-| Default | (none) | WARNING |
-| Verbose | `-v` | INFO |
-| Debug | `-vv` | DEBUG |
-
-### Examples
+Global options must appear **before** the subcommand:
 
 ```bash
-# Use specific config file
-depkeeper -c /path/to/config.toml check
-
-# Verbose output
-depkeeper -v check
-depkeeper -vv check  # Debug level
-
-# Disable colors
-depkeeper --no-color check
-
-# Show version
-depkeeper --version
+depkeeper -v check          # ✅
+depkeeper check -v          # ❌ Error: No such option: -v
 ```
+
+### Verbosity
+
+| Flag | Level | Emitted on stderr |
+|---|---|---|
+| *(none)* | `WARNING` | Warnings and errors. |
+| `-v` | `INFO` | Phase progress, resolution decisions, backups, rollbacks. Also enables the Resolution Summary for `update`, and status output for machine-readable `check` formats. |
+| `-vv`+ | `DEBUG` | Cache behaviour, per-candidate decisions, HTTP retries, per-line rewrites, effective configuration. |
 
 ---
 
-## check
+## `check`
 
-Check for available updates in a requirements file.
+Analyse a requirements file and report available updates. **Never writes to the filesystem.**
 
-### Synopsis
-
-```bash
+```text
 depkeeper check [OPTIONS] [FILE]
 ```
 
 ### Arguments
 
-| Argument | Description | Default |
-|---|---|---|
-| `FILE` | Path to requirements file | `requirements.txt` |
+| Argument | Type | Default | Notes |
+|---|---|---|---|
+| `FILE` | existing file path | `requirements.txt` | Must exist and must not be a directory. Validated by Click; a bad value exits `2`. |
 
 ### Options
 
-| Option | Short | Description | Default |
-|---|---|---|---|
-| `--outdated-only` | | Show only packages with available updates | `False` |
-| `--format` | `-f` | Output format: `table`, `simple`, `json` | `table` |
-| `--strict-version-matching` | | Only consider exact version pins (`==`) | `False` |
-| `--check-conflicts / --no-check-conflicts` | | Enable/disable dependency conflict resolution | `True` |
+| Option | Short | Type | Default | Description |
+|---|---|---|---|---|
+| `--outdated-only` | — | flag | off | Show only packages that have an update **or** a recorded conflict. |
+| `--format` | `-f` | `table` \| `simple` \| `json` | `table` | Output format. Case-insensitive. |
+| `--strict-version-matching` | — | flag | config, then `false` | Only a sole `==` specifier counts as a current version. |
+| `--check-conflicts / --no-check-conflicts` | — | flag pair | config, then `true` | Enable cross-package conflict resolution. |
 
-!!! tip "Configuration File Fallback"
+### Behaviour
 
-    `--strict-version-matching` and `--check-conflicts` fall back to values from your `depkeeper.toml` or `pyproject.toml` when not provided on the command line. See [Configuration](../guides/configuration.md) for details.
+1. Parse the file, following `-r` includes and loading `-c` constraints.
+2. Prefetch PyPI metadata for every unique package.
+3. Compute a recommendation per package.
+4. Optionally resolve cross-package conflicts.
+5. Filter if `--outdated-only`.
+6. Render.
 
-### How It Works
+Exits `0` on success regardless of findings; `1` on error. See [Exit codes](exit-codes.md).
 
-1. **Parse** -- Read and parse the requirements file (PEP 440/508 compliant)
-2. **Query PyPI** -- Fetch latest version metadata concurrently via async HTTP
-3. **Recommend** -- Compute safe upgrade targets within major version boundaries
-4. **Resolve** -- Cross-validate recommendations and resolve dependency conflicts
-5. **Report** -- Display results in the requested format
+### Output streams
 
-### Output Formats
+| Format | stdout | stderr |
+|---|---|---|
+| `table` | report and status messages | log records |
+| `simple` | package lines only | status messages, warnings, errors, log records |
+| `json` | the JSON document only | status messages, warnings, errors, log records |
 
-#### Table (default)
-
-Human-readable table with colors:
-
-```bash
-depkeeper check --format table
-```
-
-```
-Package       Current    Latest     Recommended  Status
-─────────────────────────────────────────────────────────
-requests      2.28.0     2.32.0     2.32.0       Outdated (minor)
-flask         2.0.0      3.0.1      2.3.3        Outdated (patch)
-```
-
-#### Simple
-
-One line per package:
-
-```bash
-depkeeper check --format simple
-```
-
-```
-requests: 2.28.0 -> 2.32.0 (minor)
-flask: 2.0.0 -> 2.3.3 (patch)
-```
-
-#### JSON
-
-Machine-readable JSON:
-
-```bash
-depkeeper check --format json
-```
-
-```json
-[
-  {
-    "name": "requests",
-    "status": "outdated",
-    "versions": {
-      "current": "2.28.0",
-      "latest": "2.32.0",
-      "recommended": "2.32.0"
-    },
-    "update_type": "minor"
-  }
-]
-```
+`--format json` always emits a document — `[]` when there is nothing to report — including on the
+"no packages found" and "nothing to display" paths.
 
 ### Examples
 
 ```bash
-# Basic check
 depkeeper check
-
-# Check specific file
 depkeeper check requirements-dev.txt
-
-# Show only outdated
 depkeeper check --outdated-only
-
-# JSON output for CI
 depkeeper check --format json > report.json
-
-# Disable conflict checking (faster)
-depkeeper check --no-check-conflicts
-
-# Strict mode: only exact pins
+depkeeper check --no-check-conflicts              # faster, fewer PyPI requests
 depkeeper check --strict-version-matching
+depkeeper -v check --format json | jq 'length'    # status output stays on stderr
 ```
 
 ---
 
-## update
+## `update`
 
-Update packages to newer versions within safe major version boundaries.
+Apply recommended versions to a requirements file.
 
-### Synopsis
-
-```bash
+```text
 depkeeper update [OPTIONS] [FILE]
 ```
 
 ### Arguments
 
-| Argument | Description | Default |
-|---|---|---|
-| `FILE` | Path to requirements file | `requirements.txt` |
+| Argument | Type | Default | Notes |
+|---|---|---|---|
+| `FILE` | existing file path | `requirements.txt` | Must exist. Files reached through `-r` includes are also written. |
 
 ### Options
 
-| Option | Short | Description | Default |
-|---|---|---|---|
-| `--dry-run` | | Preview changes without applying | `False` |
-| `--yes` | `-y` | Skip confirmation prompt | `False` |
-| `--backup` | | Create backup before updating | `False` |
-| `--packages` | `-p` | Update only specific packages (repeatable) | All |
-| `--strict-version-matching` | | Only consider exact version pins | `False` |
-| `--check-conflicts / --no-check-conflicts` | | Enable/disable conflict resolution | `True` |
+| Option | Short | Type | Default | Description |
+|---|---|---|---|---|
+| `--dry-run` | — | flag | off | Run the full pipeline and print the plan; write nothing. |
+| `--yes` | `-y` | flag | off | Skip the confirmation prompt. |
+| `--backup` | — | flag | off | Create a timestamped backup of **every** affected file before writing. |
+| `--pin` | — | flag | off | Replace every specifier with `==<version>` instead of preserving the declared range. |
+| `--allow-hash-removal` | — | flag | off | Permit updating requirements that carry `--hash` entries, removing those hashes. |
+| `--packages` | `-p` | string, repeatable | all | Restrict the update to these packages. Matched in PEP 503 canonical form. |
+| `--strict-version-matching` | — | flag | config, then `false` | Only a sole `==` specifier counts as a current version. |
+| `--check-conflicts / --no-check-conflicts` | — | flag pair | config, then `true` | Enable cross-package conflict resolution. |
 
-!!! tip "Configuration File Fallback"
+### Behaviour
 
-    `--strict-version-matching` and `--check-conflicts` fall back to values from your `depkeeper.toml` or `pyproject.toml` when not provided on the command line. See [Configuration](../guides/configuration.md) for details.
+1. Parse, prefetch, recommend, resolve — identical to `check`.
+2. Filter by `--packages` if given.
+3. Determine which requirements need a change.
+4. Refuse hashed requirements unless `--allow-hash-removal`.
+5. Print the update plan.
+6. Stop here if `--dry-run`.
+7. Prompt unless `-y`.
+8. Create backups if `--backup`.
+9. Render all affected files in memory, then commit each atomically, rolling back on failure.
 
-### Update Process
+### Confirmation prompt
 
-1. **Parse** -- Read the requirements file
-2. **Check** -- Query PyPI for available versions
-3. **Resolve** -- Check for dependency conflicts (if enabled)
-4. **Preview** -- Show proposed changes
-5. **Confirm** -- Ask for user confirmation (unless `-y`)
-6. **Backup** -- Create backup (if `--backup`)
-7. **Apply** -- Update the requirements file
-8. **Report** -- Show summary of changes
-
-### Backup Files
-
-When `--backup` is used, a timestamped backup is created:
-
-```
-requirements.txt.backup.20260208-143022
+```text
+Update 3 packages? (y, n) [y]:
 ```
 
-Format: `{filename}.backup.{YYYYMMDD}-{HHMMSS}`
+Defaults to yes. Invalid input re-prompts. Declining writes nothing and exits `0`.
+
+### Which requirements are updated
+
+| Condition | Updated? |
+|---|---|
+| Recommended version is higher than current | Yes |
+| No current version (unversioned requirement) | Yes — a pin is added |
+| A downgrade is required | Yes |
+| Direct reference (URL / VCS / local path) or `-e` editable | Never |
+| Target excluded by the declared constraints (without `--pin`) | No — skipped with a warning |
+| Rewrite would produce a byte-identical line | No — skipped, ensuring convergence |
+| Package has `--hash` entries and `--allow-hash-removal` is absent | No — the whole command fails |
+
+### Rewrite semantics
+
+Without `--pin`, only the floor moves:
+
+```text
+requests==2.28.0           → requests==2.34.2
+flask>=2.0,<2.3            → flask>=2.2.5,<2.3
+celery[redis]>=5.0,<6.0    → celery[redis]>=5.6.3,<6.0
+click~=8.0                 → click~=8.4
+certifi                    → certifi==2026.7.22
+```
+
+With `--pin`:
+
+```text
+celery[redis]>=5.0,<6.0    → celery[redis]==5.6.3
+```
+
+Comments, blank lines, directives, extras, markers, line endings and encoding are preserved. See
+[Write safety](../concepts/write-safety.md).
 
 ### Examples
 
 ```bash
-# Basic update (with confirmation)
-depkeeper update
-
-# Preview changes
 depkeeper update --dry-run
-
-# Update without confirmation
-depkeeper update -y
-
-# Create backup before updating
 depkeeper update --backup
-
-# Update specific packages only
-depkeeper update -p requests -p flask
-
-# Combine options
-depkeeper update --backup -y -p requests
-
-# Update specific file
-depkeeper update requirements-dev.txt --backup -y
-
-# Disable conflict checking
-depkeeper update --no-check-conflicts -y
+depkeeper update -y                               # non-interactive
+depkeeper update -p flask -p click
+depkeeper update --pin --backup                   # lockfile-style
+depkeeper update --allow-hash-removal -y          # then regenerate hashes
+depkeeper update requirements/dev.txt --dry-run   # also writes files it includes
 ```
 
 ---
 
-## Command Chaining
+## Option precedence
 
-depkeeper commands can be chained in scripts:
-
-```bash
-#!/bin/bash
-set -e
-
-# Check first
-if depkeeper check --outdated-only --format simple | grep -q .; then
-    echo "Updates available"
-
-    # Preview
-    depkeeper update --dry-run
-
-    # Apply with backup
-    depkeeper update --backup -y
-
-    # Verify
-    pip install -r requirements.txt
-    pytest
-fi
+```text
+built-in default  <  configuration file  <  command-line flag
 ```
 
----
+Only `--strict-version-matching` and `--check-conflicts` participate. Every other option is
+per-invocation.
 
-## Environment Variables
+!!! note "No negative form for `--strict-version-matching`"
 
-Commands respect these environment variables:
-
-| Variable | Affects |
-|---|---|
-| `DEPKEEPER_CONFIG` | `--config` option |
-| `DEPKEEPER_COLOR` | `--color` option |
-| `NO_COLOR` | Disables colors ([standard](https://no-color.org/)) |
+    If a configuration file sets it to `true`, it cannot be disabled from the command line. Use a
+    different `--config` file.
 
 ---
 
-## Exit Codes
+## Exit codes
 
 | Code | Meaning |
 |---|---|
-| `0` | Success |
-| `1` | Application error |
-| `2` | Usage/argument error |
-| `130` | Interrupted (Ctrl+C) |
+| `0` | Success. For `check`, includes "updates were found". For `update`, includes "user declined" and "nothing to do". |
+| `1` | Application error: parse failure, config error, write failure, refused hashed update, unexpected exception. |
+| `2` | Usage error from Click: unknown option, bad argument value, missing file. |
+| `130` | Interrupted with `Ctrl+C`. |
 
-See [Exit Codes](exit-codes.md) for detailed descriptions and scripting examples.
+Detail and scripting patterns: [Exit codes](exit-codes.md).
 
 ---
 
-## See Also
+## Environment variables
 
-- [Quick Start](../getting-started/quickstart.md) -- Getting started guide
-- [Configuration](../guides/configuration.md) -- Configuration options
-- [CI/CD Integration](../guides/ci-cd-integration.md) -- Pipeline integration
-- [Exit Codes](exit-codes.md) -- Exit code reference
+| Variable | Effect |
+|---|---|
+| `DEPKEEPER_CONFIG` | Default value for `--config`. |
+| `DEPKEEPER_COLOR` | Default value for `--color/--no-color`. |
+| `NO_COLOR` | Any non-empty value disables colour. depkeeper also sets or clears it to match the resolved flag. |
+| `CI` | Any non-empty value disables ANSI colour in log records. |
+| `HTTPS_PROXY`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` | Honoured by `httpx`. See [Operations](../guides/operations.md#tls-and-proxies). |
+
+---
+
+## Not available in 0.1.0
+
+There is no command or flag for: initialising a config file, adding or removing a requirement,
+scanning for security advisories, generating a lock file, selecting a package index, overriding
+the target Python version, tuning timeouts or concurrency, or discovering requirements files
+recursively. See [Known limitations](limitations.md).

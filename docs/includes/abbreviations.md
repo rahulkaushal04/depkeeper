@@ -9,3 +9,7 @@
 *[URL]: Uniform Resource Locator
 *[VCS]: Version Control System
 *[TTL]: Time To Live
+*[BOM]: Byte Order Mark
+*[TLS]: Transport Layer Security
+*[SemVer]: Semantic Versioning
+*[CA]: Certificate Authority

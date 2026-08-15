@@ -1,281 +1,172 @@
 ---
 title: Release Process
-description: How depkeeper releases are made
+description: Versioning policy, release checklist, build and publish steps
 ---
 
 # Release Process
 
-How depkeeper releases are created and published.
+For maintainers.
 
 ---
 
-## Overview
+## Versioning
 
-depkeeper follows [Semantic Versioning](https://semver.org/):
+depkeeper follows [Semantic Versioning](https://semver.org/).
 
-- **MAJOR**: Breaking changes
-- **MINOR**: New features (backward compatible)
-- **PATCH**: Bug fixes (backward compatible)
+| Increment | When |
+|---|---|
+| **Major** | Backwards-incompatible change to the CLI surface or to file-rewrite semantics. |
+| **Minor** | New commands, flags or output fields; a behavioural change that produces different (but still safe) recommendations. |
+| **Patch** | Bug fixes and documentation that do not change recommendations. |
+
+!!! warning "Recommendation logic is a behavioural contract"
+
+    A change that makes the same requirements file produce a different update plan is at minimum
+    a **minor** release, even if the diff looks like a bug fix. Consumers gate pipelines on this
+    output.
+
+While the project is `0.x`, the CLI surface is stable within a patch series; anything may change
+between minor versions.
 
 ---
 
-## Version Numbering
+## Version sources
 
-### Current Version
+| Location | Content |
+|---|---|
+| `depkeeper/__version__.py` | `__version__` — the runtime source of truth, used by `--version` and the HTTP `User-Agent`. |
+| `pyproject.toml` | `[project] version` — the packaging metadata. |
 
-The version is defined in `depkeeper/__version__.py`:
+Both must be updated together. A mismatch means the published artefact reports the wrong version
+to PyPI in its User-Agent.
 
-```python
-__version__ = "0.1.0"
+---
+
+## Release checklist
+
+### 1. Verify
+
+```bash
+python -m pytest tests -q --no-cov
+python -m mypy depkeeper --python-version 3.13
+python -m compileall -q depkeeper
+pre-commit run --all-files
+mkdocs build --strict
 ```
 
-### Version Format
+All five must pass on a clean checkout of `main`.
 
-| Component | Required | Description |
-|-----------|----------|-------------|
-| MAJOR | Yes | Breaking changes |
-| MINOR | Yes | New features (backward compatible) |
-| PATCH | Yes | Bug fixes (backward compatible) |
-| PRERELEASE | Optional | Alpha, beta, or release candidate (e.g., `-alpha.1`, `-rc.1`) |
-| BUILD | Optional | Build metadata (e.g., `+20260209`) |
+### 2. Bump the version
 
-Examples:
-
-- `0.1.0` - Initial development release
-- `1.0.0` - First stable release
-- `1.2.3` - Stable release
-- `2.0.0-alpha.1` - Pre-release
-- `2.0.0-rc.1` - Release candidate
-
----
-
-## Release Checklist
-
-### 1. Prepare the Release
-
-Verify these requirements:
-
-- [ ] All tests passing on main branch
-- [ ] Documentation updated
-- [ ] CHANGELOG.md updated
-- [ ] Version number bumped
-
-### 2. Update Version
-
-Edit `depkeeper/__version__.py`:
-
-```python
-__version__ = "0.2.0"  # New version
+```bash
+# depkeeper/__version__.py
+__version__ = "0.2.0"
 ```
 
-### 3. Update CHANGELOG
+```toml
+# pyproject.toml
+[project]
+version = "0.2.0"
+```
 
-Add a new section to `CHANGELOG.md`:
+### 3. Update the changelog
+
+Add a dated section to `docs/community/changelog.md` following Keep a Changelog. Every
+user-visible change belongs in it, grouped under `Added` / `Changed` / `Fixed` / `Removed` /
+`Security`.
+
+Call out behavioural changes explicitly, with a "how this affects you" note:
 
 ```markdown
-## [0.2.0] - 2026-02-08
-
-### Added
-- New feature X
-- Support for Y
-
 ### Changed
-- Improved Z performance
 
-### Fixed
-- Bug in parser (#123)
-
-### Security
-- Updated httpx to fix CVE-XXXX
+- Conflict resolution no longer adopts a compatible alternative for conflicts a later
+  iteration resolved. **Impact:** some packages will now be updated that were previously
+  held back at their current version.
 ```
 
-### 4. Create Release Commit
+### 4. Verify the documentation matches the release
 
-Commit the version changes:
+Behavioural changes must already be reflected in:
+
+- [CLI commands](../reference/cli-commands.md) — new or changed flags
+- [Version recommendation](../concepts/version-recommendation.md) — changed selection logic
+- [Conflict resolution](../concepts/conflict-resolution.md) — changed resolver behaviour
+- [Error reference](../reference/errors.md) — new or changed messages
+- [JSON output](../reference/json-output.md) — new fields
+- [Known limitations](../reference/limitations.md) — entries fixed or added
+
+### 5. Tag
 
 ```bash
-git add depkeeper/__version__.py CHANGELOG.md
-git commit -m "release: v0.2.0"
+git commit -am "chore(release): 0.2.0"
+git tag -a v0.2.0 -m "Release 0.2.0"
+git push origin main --follow-tags
 ```
 
-### 5. Tag the Release
-
-Create and push the version tag:
+### 6. Build
 
 ```bash
-git tag -a v0.2.0 -m "Release v0.2.0"
-git push origin main --tags
-```
-
-### 6. Build and Publish
-
-Build and upload to PyPI:
-
-```bash
-# Clean previous builds
-rm -rf dist/
-
-# Build
+python -m pip install --upgrade build twine
+rm -rf dist build *.egg-info
 python -m build
-
-# Upload to PyPI
-python -m twine upload dist/*
+python -m twine check dist/*
 ```
 
-### 7. Create GitHub Release
+`twine check` must report `PASSED` for both the sdist and the wheel.
 
-Publish the release on GitHub:
-
-1. Go to [Releases](https://github.com/rahulkaushal04/depkeeper/releases)
-2. Click "Draft a new release"
-3. Select the tag
-4. Copy changelog entries to description
-5. Attach built distributions
-6. Publish release
-
----
-
-## CHANGELOG Format
-
-Follow the [Keep a Changelog](https://keepachangelog.com/) format:
-
-```markdown
-# Changelog
-
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
-
-### Added
-- Feature in development
-
-## [0.2.0] - 2026-02-08
-
-### Added
-- Lock file generation
-- Health scoring
-
-### Changed
-- Improved dependency resolution
-
-### Fixed
-- Parser edge case (#123)
-
-## [0.1.0] - 2026-01-15
-
-### Added
-- Initial release
-- Check command
-- Update command
-```
-
-### Change Categories
-
-| Category | Description |
-|----------|-------------|
-| Added | New features |
-| Changed | Changes in existing functionality |
-| Deprecated | Soon-to-be removed features |
-| Removed | Removed features |
-| Fixed | Bug fixes |
-| Security | Security fixes |
-
----
-
-## Hotfix Process
-
-Apply urgent fixes to released versions:
-
-1. Create hotfix branch from tag:
-   ```bash
-   git checkout -b hotfix/0.1.1 v0.1.0
-   ```
-
-2. Apply fix and commit
-
-3. Bump patch version:
-   ```python
-   __version__ = "0.1.1"
-   ```
-
-4. Update CHANGELOG
-
-5. Tag and release:
-   ```bash
-   git tag -a v0.1.1 -m "Hotfix v0.1.1"
-   git push origin v0.1.1
-   ```
-
-6. Merge back to main:
-   ```bash
-   git checkout main
-   git merge hotfix/0.1.1
-   ```
-
----
-
-## PyPI Publishing
-
-### Manual Publishing
+### 7. Verify the artefact before publishing
 
 ```bash
-# Build
-python -m build
-
-# Check package
-twine check dist/*
-
-# Upload to TestPyPI first
-twine upload --repository testpypi dist/*
-
-# Test installation
-pip install --index-url https://test.pypi.org/simple/ depkeeper
-
-# Upload to PyPI
-twine upload dist/*
+python -m venv /tmp/verify && source /tmp/verify/bin/activate
+pip install dist/depkeeper-0.2.0-py3-none-any.whl
+depkeeper --version                     # must print 0.2.0
+printf 'requests==2.28.0\n' > /tmp/r.txt
+depkeeper check /tmp/r.txt --format json | jq -e 'length == 1'
+deactivate
 ```
 
-### PyPI Token
+### 8. Publish
 
-Store your PyPI token securely as GitHub secret `PYPI_TOKEN`.
+```bash
+python -m twine upload --repository testpypi dist/*     # rehearse
+python -m twine upload dist/*                           # publish
+```
 
-Generate tokens at: https://pypi.org/manage/account/token/
+### 9. Publish the documentation
 
----
+```bash
+mkdocs gh-deploy --force
+```
 
-## Post-Release
+The site uses `mike` as its version provider, so a versioned deployment is possible:
 
-Complete these tasks after releasing:
+```bash
+mike deploy --push --update-aliases 0.2 latest
+mike set-default --push latest
+```
 
-1. **Announce** - Post on social media and mailing lists
-2. **Monitor** - Watch for issue reports
-3. **Document** - Update any outdated documentation
-4. **Plan** - Start planning the next release
+### 10. Announce
 
----
-
-## Emergency Rollback
-
-Handle critical issues in releases:
-
-1. **Yank from PyPI** - Hide the problematic release:
-   ```bash
-   pip install twine
-   twine upload --skip-existing dist/*
-   # Use PyPI web interface to yank
-   ```
-
-2. **Notify users** - Update GitHub release notes
-
-3. **Fix and re-release** - Follow hotfix process
+Create a GitHub release from the tag, using the changelog section as the body. Link the
+documentation for the new version.
 
 ---
 
-## See Also
+## Post-release
 
-- [Development Setup](development-setup.md) -- Set up your development environment
-- [Testing](testing.md) -- Learn testing guidelines
-- [Code Style](code-style.md) -- Follow coding standards
+- [ ] `pip install depkeeper==0.2.0` works from a clean environment.
+- [ ] The documentation site shows the new version.
+- [ ] The GitHub release exists and its notes match the changelog.
+- [ ] Open a follow-up issue for anything deferred from this release.
+
+---
+
+## Yanking
+
+If a release is discovered to corrupt files or to produce unsafe recommendations:
+
+1. Yank it on PyPI (`pip` will stop resolving to it, existing pins keep working).
+2. Publish a patch release with the fix.
+3. Add a prominent note to the changelog explaining what was wrong and who is affected.
+4. If the defect had security impact, follow the [security policy](../community/security.md).

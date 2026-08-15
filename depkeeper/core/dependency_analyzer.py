@@ -1,19 +1,21 @@
-"""Fixed dependency analysis with strict major version boundaries.
+"""Dependency conflict analysis with strict major version boundaries.
 
-This module provides enhanced conflict resolution that strictly respects major
-version boundaries during dependency resolution. It ensures that packages are
-never upgraded or downgraded across major version boundaries when resolving
-conflicts.
+Resolves cross-package version conflicts without ever crossing a major
+version boundary, so conflict resolution can never introduce a breaking
+change the user did not ask for.
 
-Key improvements over the base implementation:
-1. **Strict major version boundaries** — never suggest crossing major version
-   boundaries during conflict resolution.
-2. **Major-constrained compatibility search** — find compatible versions within
-   the current major version only.
-3. **Safe fallback** — if no compatible version exists in current major, stay
-   on current version rather than crossing boundaries.
-4. **Enhanced tracking** — properly track and report when conflicts cannot be
-   resolved without major version changes.
+Design guarantees:
+
+1. **Strict major version boundaries** — a package is never moved into a
+   different major version to satisfy a conflict.
+2. **Major-constrained compatibility search** — candidate versions are drawn
+   only from the package's current major.
+3. **Safe fallback** — when no compatible version exists in the current major,
+   the package stays on its current version. Packages whose PyPI metadata
+   cannot be fetched (deleted projects, private-index-only distributions,
+   network failures) degrade to the same fallback instead of aborting the run.
+4. **Explicit tracking** — every conflict is reported, including ones that
+   could not be resolved within the boundaries above.
 
 All network I/O is routed through the shared :class:`~depkeeper.core.data_store.PyPIDataStore`
 so that package metadata is fetched at most once per process.
@@ -45,9 +47,11 @@ from packaging.version import parse, InvalidVersion
 from packaging.specifiers import SpecifierSet, InvalidSpecifier
 from packaging.requirements import Requirement as PkgRequirement, InvalidRequirement
 
+from depkeeper.exceptions import NetworkError
 from depkeeper.models.package import Package
 from depkeeper.utils.logger import get_logger
-from depkeeper.core.data_store import PyPIDataStore
+from depkeeper.utils.naming import normalize_package_name
+from depkeeper.core.data_store import PyPIDataStore, PyPIPackageData
 from depkeeper.models.conflict import Conflict, ConflictSet
 
 logger = get_logger("dependency_analyzer")
@@ -79,14 +83,11 @@ _MAX_SOURCE_CANDIDATES: int = 50
 class ResolutionStatus(Enum):
     """Outcome of version resolution for a single package."""
 
-    # Original recommendation was conflict-free
-    KEPT_RECOMMENDED = "kept_recommended"
-    UPGRADED = "upgraded"  # Successfully upgraded to a newer version
-    DOWNGRADED = "downgraded"  # Had to downgrade due to conflicts
+    KEPT_RECOMMENDED = "kept_recommended"  # Original recommendation was conflict-free
+    UPGRADED = "upgraded"  # Moved to a newer version than first proposed
+    DOWNGRADED = "downgraded"  # Had to move back due to conflicts
     KEPT_CURRENT = "kept_current"  # No safe upgrade found; stayed at current
-
-    # Version was constrained by another package's requirements
-    CONSTRAINED = "constrained"
+    CONSTRAINED = "constrained"  # Version dictated by another package's requirement
 
 
 @dataclass
@@ -97,11 +98,17 @@ class PackageResolution:
         name: Package name (normalized).
         original: Version that was initially proposed (from recommended_version
             or current_version).
-        resolved: Final version chosen after conflict resolution.
+        resolved: Final version chosen after conflict resolution. This is the
+            version that is applied — :attr:`Package.recommended_version` is
+            set to exactly this value.
         status: Why this version was chosen.
-        conflicts: List of conflicts affecting this package (empty if none).
-        compatible_alternative: Best alternative version that satisfies all
-            conflicts, or None if no alternative exists.
+        conflicts: Every conflict recorded for this package during resolution,
+            including ones a later iteration went on to resolve.
+        compatible_alternative: Advisory only. Best version satisfying *all*
+            recorded conflicts at once, or None if no such version exists.
+            It is adopted into :attr:`resolved` only when the resolution loop
+            left a conflict unresolved; otherwise it is display data and does
+            not affect what gets written.
     """
 
     name: str
@@ -112,11 +119,11 @@ class PackageResolution:
     compatible_alternative: Optional[str] = None
 
     def was_changed(self) -> bool:
-        """Return True if resolved version differs from original."""
+        """Return ``True`` when the resolved version differs from the original."""
         return self.original != self.resolved
 
     def has_conflicts(self) -> bool:
-        """Return True if this package has unresolved conflicts."""
+        """Return ``True`` when any conflict was recorded for this package."""
         return len(self.conflicts) > 0
 
 
@@ -140,42 +147,19 @@ class ResolutionResult:
     converged: bool
 
     def get_changed_packages(self) -> List[PackageResolution]:
-        """Return packages whose resolved version differs from original.
-
-        Returns:
-            List of PackageResolution objects where version changed.
-
-        Example::
-
-            >>> for pkg in result.get_changed_packages():
-            ...     print(f"{pkg.name}: {pkg.original} → {pkg.resolved}")
-        """
+        """Return packages whose resolved version differs from the original."""
         return [r for r in self.resolved_versions.values() if r.was_changed()]
 
     def get_conflicts(self) -> List[PackageResolution]:
-        """Return packages that have unresolved conflicts.
-
-        Returns:
-            List of PackageResolution objects with conflicts.
-        """
+        """Return packages that had at least one conflict recorded."""
         return [r for r in self.resolved_versions.values() if r.has_conflicts()]
 
     def summary(self) -> str:
-        """Generate a human-readable summary of resolution results.
+        """Render a human-readable summary of the resolution run.
 
         Returns:
-            Multi-line summary string.
-
-        Example::
-
-            >>> print(result.summary())
-            Resolution Summary:
-            ==================
-            Total packages: 15
-            Packages with conflicts: 2
-            Packages changed: 3
-            Converged: Yes (5 iterations)
-            ...
+            Multi-line summary covering totals, convergence, conflicts and
+            every version change.
         """
         lines = [
             "Resolution Summary:",
@@ -218,23 +202,21 @@ class ResolutionResult:
 
 
 def _normalize(name: str) -> str:
-    """Normalise a package name to lower-case with hyphens.
+    """Normalize a package name to its canonical PEP 503 form.
 
-    Matches the canonicalisation rule used by PyPI so that
-    ``"My_Package"`` and ``"my-package"`` map to the same key.
+    Thin alias for :func:`depkeeper.utils.naming.normalize_package_name`.
+    Upstream ``requires_dist`` metadata spells names however the author
+    typed them (``zope.interface``), while the update set is keyed by the
+    parser's canonical form (``zope-interface``); both sides must use this
+    one rule or cross-package conflicts are silently missed.
 
     Args:
         name: Raw package name in any casing / separator style.
 
     Returns:
         Canonical form, e.g. ``"my-package"``.
-
-    Example::
-
-        >>> _normalize("Flask_Login")
-        'flask-login'
     """
-    return name.lower().replace("_", "-")
+    return normalize_package_name(name)
 
 
 def _get_major_version(version: Optional[str]) -> Optional[int]:
@@ -248,12 +230,6 @@ def _get_major_version(version: Optional[str]) -> Optional[int]:
 
     Returns:
         The major version integer, or ``None``.
-
-    Example::
-
-        >>> _get_major_version("3.11.2")
-        3
-        >>> _get_major_version(None)
     """
     if not version:
         return None
@@ -264,18 +240,93 @@ def _get_major_version(version: Optional[str]) -> Optional[int]:
         return None
 
 
+def _satisfies(version: Optional[str], required_spec: str) -> bool:
+    """Return ``True`` when *version* satisfies *required_spec*.
+
+    Unparseable specifiers and versions are treated as *satisfied* so that
+    malformed upstream metadata can never, on its own, veto a version the
+    resolution loop already accepted.
+
+    Args:
+        version: Candidate version string, or ``None``.
+        required_spec: PEP-440 specifier string, e.g. ``">=2.0,<3"``.
+
+    Returns:
+        Whether the candidate is allowed by the specifier.
+    """
+    if version is None:
+        return True
+    try:
+        return version in SpecifierSet(required_spec)
+    except (InvalidSpecifier, InvalidVersion):
+        return True
+
+
+def _satisfies_all(version: Optional[str], conflicts: List[Conflict]) -> bool:
+    """Return ``True`` when *version* satisfies every conflict's specifier."""
+    return all(_satisfies(version, c.required_spec) for c in conflicts)
+
+
+def _live_conflicts(
+    update_set: Dict[str, Optional[str]],
+    target_name: str,
+    target_version: Optional[str],
+    conflicts: List[Conflict],
+) -> List[Conflict]:
+    """Filter accumulated conflicts down to those the final set still violates.
+
+    ``conflict_tracking`` is cumulative across iterations, so it also holds
+    conflicts that a later iteration resolved — typically by stepping the
+    *source* package back to a release with a laxer requirement. Such a
+    conflict is history, not a live problem, and must not influence the
+    version that gets applied.
+
+    A conflict is *live* when both halves of the pair are still proposed as
+    recorded: the source package is still headed for ``source_version`` and
+    the target's final version still fails ``required_spec``.
+
+    Args:
+        update_set: Final name → proposed-version mapping.
+        target_name: Package the conflicts are recorded against.
+        target_version: *target_name*'s entry in the final update set.
+        conflicts: Conflicts accumulated for *target_name*.
+
+    Returns:
+        The subset of *conflicts* still violated by the final update set.
+    """
+    live: List[Conflict] = []
+
+    for conflict in conflicts:
+        if update_set.get(conflict.source_package) != conflict.source_version:
+            # The source moved on; this requirement is no longer proposed.
+            continue
+        if _satisfies(target_version, conflict.required_spec):
+            continue
+        live.append(conflict)
+
+    if live:
+        logger.debug(
+            "%s has %d live conflict(s) of %d recorded at %s",
+            target_name,
+            len(live),
+            len(conflicts),
+            target_version,
+        )
+
+    return live
+
+
 # ---------------------------------------------------------------------------
 # Analyzer
 # ---------------------------------------------------------------------------
 
 
 class DependencyAnalyzer:
-    """Detect and resolve version conflicts with strict major version boundaries.
+    """Detect and resolve version conflicts within major version boundaries.
 
-    This analyzer enhances the base conflict resolution by ensuring that no
-    package is ever upgraded or downgraded across major version boundaries
-    during conflict resolution. This prevents breaking changes from being
-    inadvertently introduced.
+    Conflict resolution never moves a package into a different major version,
+    so resolving one dependency's requirement cannot silently introduce a
+    breaking change elsewhere.
 
     The analyzer works exclusively through a :class:`PyPIDataStore`
     instance, which guarantees that every ``/pypi/{pkg}/json`` call is
@@ -289,14 +340,6 @@ class DependencyAnalyzer:
 
     Raises:
         TypeError: If *data_store* is ``None``.
-
-    Example::
-
-        >>> async with HTTPClient() as http:
-        ...     store    = PyPIDataStore(http)
-        ...     analyzer = DependencyAnalyzer(data_store=store)
-        ...     result   = await analyzer.resolve_and_annotate_conflicts(pkgs)
-        ...     print(result.summary())
     """
 
     def __init__(
@@ -310,6 +353,52 @@ class DependencyAnalyzer:
             )
         self.data_store: PyPIDataStore = data_store
         self._semaphore: asyncio.Semaphore = asyncio.Semaphore(concurrent_limit)
+
+        # Normalized names whose metadata could not be fetched during this
+        # resolution run. Remembering them keeps the resolution loop from
+        # re-issuing (and re-retrying) a request that is already known to fail.
+        self._unavailable_packages: Set[str] = set()
+
+    # ------------------------------------------------------------------
+    # Data access helpers
+    # ------------------------------------------------------------------
+
+    async def _get_package_data_or_none(self, name: str) -> Optional[PyPIPackageData]:
+        """Fetch metadata for *name*, degrading to ``None`` when unavailable.
+
+        Mirrors the stub strategy used by
+        :meth:`~depkeeper.core.checker.VersionChecker.get_package_info`: a
+        package that PyPI cannot serve (deleted project, private-index-only
+        distribution, rate limiting, network outage) must not abort the whole
+        run. The first failure for a given name is logged at WARNING and
+        remembered, so subsequent resolution passes skip the package instead
+        of paying for another retry cycle.
+
+        Args:
+            name: Package name (any casing / separator style).
+
+        Returns:
+            The :class:`PyPIPackageData` snapshot, or ``None`` when metadata
+            could not be retrieved.
+        """
+        normalized = _normalize(name)
+
+        if normalized in self._unavailable_packages:
+            return None
+
+        try:
+            return await self.data_store.get_package_data(name)
+        except NetworkError as exc:
+            # PyPIError (404 / unexpected status) subclasses NetworkError, so
+            # this also covers timeouts, rate-limit exhaustion and 5xx.
+            self._unavailable_packages.add(normalized)
+            logger.warning(
+                "PyPI metadata for '%s' is unavailable (%s); "
+                "conflict resolution will skip this package",
+                name,
+                exc,
+            )
+            return None
 
     # ------------------------------------------------------------------
     # Public API
@@ -340,9 +429,17 @@ class DependencyAnalyzer:
 
            d. Break early when no progress is made.
 
-        4. Annotate each :class:`Package` with its final version and any
-           unresolved :class:`Conflict` objects.
-        5. Return a :class:`ResolutionResult` with complete details.
+        4. For packages the loop could not fix, adopt the best version that
+           satisfies every conflict at once, when one exists.
+        5. Annotate each :class:`Package` with its final version and any
+           recorded :class:`Conflict` objects.
+        6. Return a :class:`ResolutionResult` with complete details.
+
+        Invariant: after this call, ``pkg.recommended_version`` equals
+        ``result.resolved_versions[pkg.name].resolved`` for every package.
+        :class:`ResolutionResult` is therefore the single source of truth —
+        the version reported in the summary is always the version applied by
+        ``depkeeper update``.
 
         Args:
             packages: Mutable list of :class:`Package` objects. Each
@@ -352,25 +449,19 @@ class DependencyAnalyzer:
         Returns:
             :class:`ResolutionResult` containing the final version for each
             package, conflict details, and resolution statistics.
-
-        Example::
-
-            >>> result = await analyzer.resolve_and_annotate_conflicts(pkgs)
-            >>> print(result.summary())
-            >>> for pkg_name, info in result.resolved_versions.items():
-            ...     if info.was_changed():
-            ...         print(f"{pkg_name}: {info.original} → {info.resolved}")
         """
-        # ── initialise update set ─────────────────────────────────────
+        # ── initialize update set ─────────────────────────────────────
         pkg_lookup: Dict[str, Package] = {pkg.name: pkg for pkg in packages}
         update_set: Dict[str, Optional[str]] = {}
         conflict_tracking: Dict[str, List[Conflict]] = {}
 
-        # Track original proposed versions for comparison
+        # Kept separately so PackageResolution can report what was originally
+        # proposed even after update_set has been rewritten in place.
         original_versions: Dict[str, Optional[str]] = {}
 
         for pkg in packages:
-            # Use recommended version (which already respects major boundaries)
+            # recommended_version already respects major boundaries; falling
+            # back to current_version means "propose no change".
             proposed = pkg.recommended_version or pkg.current_version
             update_set[pkg.name] = proposed
             original_versions[pkg.name] = proposed
@@ -393,13 +484,13 @@ class DependencyAnalyzer:
                 converged = True
                 break
 
-            # Record every conflict for later annotation (with deduplication)
+            # Record every conflict for later annotation. The same conflict can
+            # be re-detected on each pass, so identical signatures are dropped.
             for conflict in cross_conflicts:
                 conflicts_list = conflict_tracking.setdefault(
                     conflict.target_package, []
                 )
 
-                # Deduplicate using conflict signature
                 conflict_key = (
                     conflict.source_package,
                     conflict.source_version,
@@ -438,6 +529,46 @@ class DependencyAnalyzer:
                 _MAX_RESOLUTION_ITERATIONS,
             )
 
+        # ── advisory alternatives, computed from one stable snapshot ──
+        # `conflict_tracking` is cumulative: it holds every conflict seen in
+        # *any* iteration, including ones the loop went on to resolve. The
+        # alternative search below is therefore only advisory — it must never
+        # silently override the version the loop actually decided on (that
+        # divergence is exactly what made the printed summary disagree with
+        # the version written to the file).
+        alternatives: Dict[str, Optional[str]] = {}
+        live_conflicts: Dict[str, List[Conflict]] = {}
+
+        for pkg in packages:
+            conflicts = conflict_tracking.get(pkg.name, [])
+            if not conflicts:
+                continue
+            alternatives[pkg.name] = self._find_alternative_within_major(
+                pkg, conflicts
+            )
+            live_conflicts[pkg.name] = _live_conflicts(
+                update_set, pkg.name, update_set.get(pkg.name), conflicts
+            )
+
+        # ── adopt an alternative only where the decision is still broken ──
+        # Every decision above is made against the same pre-adoption snapshot
+        # so the outcome does not depend on package ordering.
+        for name, live in live_conflicts.items():
+            alternative = alternatives.get(name)
+            if not live or not alternative or alternative == update_set.get(name):
+                continue
+            if not _satisfies_all(alternative, live):
+                continue
+            logger.info(
+                "Adopting compatible alternative for %s: %s → %s "
+                "(%d conflict(s) unresolved by the resolution loop)",
+                name,
+                update_set.get(name),
+                alternative,
+                len(live),
+            )
+            update_set[name] = alternative
+
         # ── annotate packages and build resolution map ────────────────
         resolved_versions: Dict[str, PackageResolution] = {}
         packages_with_conflicts = 0
@@ -446,44 +577,22 @@ class DependencyAnalyzer:
             original = original_versions.get(pkg.name)
             resolved = update_set.get(pkg.name)
             conflicts = conflict_tracking.get(pkg.name, [])
+            compatible_alt = alternatives.get(pkg.name)
 
-            # Determine resolution status
-            status = self._determine_status(pkg, original, resolved, conflicts)
-
-            # Find compatible alternative if there are conflicts
-            # (constrained to current major version only)
-            compatible_alt = None
             if conflicts:
-                # Get current major version to constrain search
-                current_major = _get_major_version(pkg.current_version)
-
-                if current_major is not None:
-                    # Only look within current major
-                    available = self.data_store.get_versions(pkg.name)
-                    available_in_major = [
-                        v for v in available if _get_major_version(v) == current_major
-                    ]
-
-                    conflict_set = ConflictSet(pkg.name)
-                    for c in conflicts:
-                        conflict_set.add_conflict(c)
-
-                    compatible_alt = self.find_compatible_version(
-                        conflict_set, available_in_major, pkg.current_version
-                    )
-
                 packages_with_conflicts += 1
 
-            # Update the Package object itself
-            if resolved and resolved != pkg.recommended_version:
-                # Only update recommended_version if resolution changed it
-                pkg.recommended_version = (
-                    resolved if resolved != pkg.current_version else pkg.current_version
-                )
-            if conflicts:
-                pkg.set_conflicts(conflicts, resolved_version=compatible_alt)
+            status = self._determine_status(pkg, original, resolved, conflicts)
 
-            # Store resolution details
+            # Update the Package object itself. `recommended_version` is a
+            # projection of `resolved` and nothing else, so the version shown
+            # by `check` and written by `update` is always the version this
+            # method reports in `ResolutionResult`.
+            if resolved is not None:
+                pkg.recommended_version = resolved
+            if conflicts:
+                pkg.set_conflicts(conflicts)
+
             resolved_versions[pkg.name] = PackageResolution(
                 name=pkg.name,
                 original=original,
@@ -499,6 +608,49 @@ class DependencyAnalyzer:
             packages_with_conflicts=packages_with_conflicts,
             iterations_used=iterations_used,
             converged=converged,
+        )
+
+    def _find_alternative_within_major(
+        self,
+        pkg: Package,
+        conflicts: List[Conflict],
+    ) -> Optional[str]:
+        """Find the highest version satisfying *every* recorded conflict.
+
+        Purely advisory: the search is independent of the resolution loop
+        (it intersects all specifiers at once, whereas the loop handles one
+        conflict at a time), so its answer may legitimately differ from the
+        resolved version. Callers must treat the result as a suggestion and
+        never as the applied version.
+
+        The search never leaves the package's current major version and never
+        goes below the installed version, matching the resolver's own safety
+        policy.
+
+        Args:
+            pkg: Package the conflicts are recorded against.
+            conflicts: Conflicts accumulated for *pkg* across all iterations.
+
+        Returns:
+            A version string, or ``None`` when the major version cannot be
+            determined or no candidate satisfies every conflict.
+        """
+        current_major = _get_major_version(pkg.current_version)
+        if current_major is None:
+            return None
+
+        available_in_major = [
+            v
+            for v in self.data_store.get_versions(pkg.name)
+            if _get_major_version(v) == current_major
+        ]
+
+        conflict_set = ConflictSet(pkg.name)
+        for conflict in conflicts:
+            conflict_set.add_conflict(conflict)
+
+        return self.find_compatible_version(
+            conflict_set, available_in_major, pkg.current_version
         )
 
     def _determine_status(
@@ -520,14 +672,11 @@ class DependencyAnalyzer:
             ResolutionStatus enum indicating the outcome.
         """
         if original == resolved:
-            # No change made during resolution
             return ResolutionStatus.KEPT_RECOMMENDED
 
         if resolved == pkg.current_version:
-            # Reverted to current due to conflicts
             return ResolutionStatus.KEPT_CURRENT
 
-        # Version changed - determine if upgrade or downgrade
         if original and resolved:
             try:
                 original_parsed = parse(original)
@@ -536,7 +685,8 @@ class DependencyAnalyzer:
                 if resolved_parsed > original_parsed:
                     return ResolutionStatus.UPGRADED
                 elif resolved_parsed < original_parsed:
-                    # Was downgraded due to conflicts
+                    # A step back with no recorded conflict means another
+                    # package's requirement, not a conflict, dictated it.
                     return (
                         ResolutionStatus.DOWNGRADED
                         if conflicts
@@ -545,7 +695,6 @@ class DependencyAnalyzer:
             except InvalidVersion:
                 pass
 
-        # Default: version was constrained by dependencies
         return ResolutionStatus.CONSTRAINED
 
     # ------------------------------------------------------------------
@@ -597,7 +746,8 @@ class DependencyAnalyzer:
 
                 req_name: str = _normalize(req.name)
 
-                # Only interesting when the dependency is itself in our update set
+                # A dependency outside the update set is not something this
+                # run can adjust, so it cannot be a resolvable conflict.
                 target_version = update_set.get(req_name)
 
                 if (
@@ -676,7 +826,6 @@ class DependencyAnalyzer:
             source_major = _get_major_version(source_pkg.current_version)
             target_major = _get_major_version(target_pkg.current_version)
             target_proposed = update_set.get(target_name)
-
             logger.debug(
                 "Resolving conflict: %s (major %s) vs %s (major %s)",
                 source_name,
@@ -771,25 +920,15 @@ class DependencyAnalyzer:
             source_pkg: The source :class:`Package` being adjusted.
             source_major: Major version the source must stay within (or
                 ``None`` if major cannot be determined).
-            target_name: Normalised name of the dependency that caused the
+            target_name: Normalized name of the dependency that caused the
                 conflict.
             target_proposed_version: The target's current entry in the
                 update set (may be ``None``).
 
         Returns:
             The highest compatible source version string (within the same
-            major), or ``None`` when no candidate satisfies the constraints.
-
-        Example::
-
-            >>> v = await analyzer._find_compatible_source_within_major(
-            ...     source_pkg=flask_pkg,
-            ...     source_major=3,
-            ...     target_name="werkzeug",
-            ...     target_proposed_version="3.0.1",
-            ... )
-            >>> v
-            '3.1.0'
+            major), ``None`` when no candidate satisfies the constraints, or
+            ``None`` when PyPI metadata for the source cannot be fetched.
         """
         if source_major is None:
             logger.debug(
@@ -800,10 +939,14 @@ class DependencyAnalyzer:
         source_name: str = source_pkg.name
         python_version: str = PyPIDataStore.get_current_python_version()
 
+        source_data = await self._get_package_data_or_none(source_name)
+        if source_data is None:
+            return None
+
         # Get all versions in source's current major that are Python-compatible
-        available_in_major = (
-            await self.data_store.get_package_data(source_name)
-        ).get_python_compatible_versions(python_version, major=source_major)
+        available_in_major = source_data.get_python_compatible_versions(
+            python_version, major=source_major
+        )
 
         candidates_checked: int = 0
 
@@ -858,8 +1001,8 @@ class DependencyAnalyzer:
 
         Only stable versions within *target_major* are considered. Returns
         ``None`` when the specifier itself is unparseable, when major version
-        cannot be determined, or when no matching version exists within the
-        major boundary.
+        cannot be determined, when PyPI metadata for the target cannot be
+        fetched, or when no matching version exists within the major boundary.
 
         Args:
             target_name: Package whose versions are being scanned.
@@ -870,16 +1013,6 @@ class DependencyAnalyzer:
 
         Returns:
             A version string (within the specified major), or ``None``.
-
-        Example::
-
-            >>> v = await analyzer._find_constrained_target_within_major(
-            ...     target_name="werkzeug",
-            ...     target_major=2,
-            ...     required_spec=">=2.0,<3",
-            ... )
-            >>> v
-            '2.3.7'
         """
         if target_major is None:
             logger.debug("Cannot determine target major version for %s", target_name)
@@ -892,22 +1025,23 @@ class DependencyAnalyzer:
             return None
 
         # Get all versions in target's current major
-        available = (await self.data_store.get_package_data(target_name)).all_versions
+        target_data = await self._get_package_data_or_none(target_name)
+        if target_data is None:
+            return None
+
+        available = target_data.all_versions
 
         for version_str in available:  # already sorted descending
             try:
                 parsed = parse(version_str)
 
-                # Skip pre-releases
                 if parsed.is_prerelease:
                     continue
 
-                # Check if in correct major
                 version_major = parsed.release[0] if parsed.release else None
                 if version_major != target_major:
                     continue
 
-                # Check if satisfies spec
                 if version_str in spec:
                     return version_str  # first match is the highest
 
@@ -942,12 +1076,6 @@ class DependencyAnalyzer:
         Returns:
             A compatible version string, or ``None`` when no candidate
             passes all filters.
-
-        Example::
-
-            >>> v = analyzer.find_compatible_version(cs, ["2.1", "2.0", "1.9"], "2.0")
-            >>> v
-            '2.1'
         """
         if not conflict_set.has_conflicts():
             return None
@@ -956,7 +1084,8 @@ class DependencyAnalyzer:
             available_versions
         )
 
-        # Enforce the floor
+        # A candidate below the installed version would be a downgrade the
+        # caller never asked for, so reject rather than propose it.
         if compatible and min_version:
             try:
                 if parse(compatible) < parse(min_version):
@@ -982,20 +1111,14 @@ def _extract_specifier_for(deps: List[str], target_name: str) -> Optional[Specif
     Args:
         deps: PEP-508 dependency strings (extras and markers already
             stripped by the data store).
-        target_name: Normalised package name to search for.
+        target_name: Normalized package name to search for.
 
     Returns:
         The :class:`SpecifierSet` for *target_name*, or ``None`` when the
-        target does not appear in *deps*.
-
-    Example::
-
-        >>> _extract_specifier_for(["click>=8.0", "jinja2>=3.0"], "jinja2")
-        <SpecifierSet('>=3.0')>
-        >>> _extract_specifier_for(["click>=8.0"], "jinja2") is None
-        True
+        target does not appear in *deps*. The set may be empty, which means
+        "any version".
     """
-    normalised_target: str = _normalize(target_name)
+    normalized_target: str = _normalize(target_name)
 
     for dep in deps:
         try:
@@ -1004,8 +1127,7 @@ def _extract_specifier_for(deps: List[str], target_name: str) -> Optional[Specif
             logger.debug("Skipping unparseable dependency: %r", dep)
             continue
 
-        if _normalize(req.name) == normalised_target:
-            # may be an empty SpecifierSet (matches everything)
+        if _normalize(req.name) == normalized_target:
             return req.specifier
 
     return None

@@ -1,100 +1,107 @@
 ---
 title: Contributing
-description: Learn how to contribute to depkeeper
+description: How to contribute to depkeeper — orientation, workflow and standards
 ---
 
-# Contributing to depkeeper
+# Contributing
 
-We welcome contributions of all types, including bug fixes, new features, documentation improvements, and design suggestions.
-This project values clear communication, code quality, and respectful collaboration.
+Contributions are welcome. This section documents the standards a change must meet before it can
+be merged.
 
----
+<div class="grid cards" markdown>
 
-## How You Can Contribute
+- :material-tools:{ .lg .middle } **[Development setup](development-setup.md)**
 
-There are many ways to participate in the depkeeper project, regardless of your experience level.
+    ---
 
-| Contribution | Description | Link |
-|---|---|---|
-| Report a Bug | Open an issue when you encounter unexpected behavior. Include clear reproduction steps. | [Open an issue](https://github.com/rahulkaushal04/depkeeper/issues/new) |
-| Propose a Feature | Submit feature requests or improvement ideas through discussions. | [Start a discussion](https://github.com/rahulkaushal04/depkeeper/discussions) |
-| Improve Documentation | Keep documentation accurate, clear, and easy to follow. | [Edit documentation](https://github.com/rahulkaushal04/depkeeper/tree/main/docs) |
-| Contribute Code | Fix bugs, improve performance, or add new features. | [Development setup](development-setup.md) |
+    Environment, tooling, verification commands and the change workflow.
 
----
+- :material-format-align-left:{ .lg .middle } **[Code style](code-style.md)**
 
-## Contributor Resources
+    ---
 
-Use these guides to get started:
+    Typing, docstrings, comments and naming conventions — all enforced.
 
-- **[Development Setup](development-setup.md)** -- Set up your local development environment
-- **[Code Style Guide](code-style.md)** -- Follow coding standards and best practices
-- **[Testing Guide](testing.md)** -- Write and execute tests
-- **[Release Process](release-process.md)** -- Understand how releases are planned and published
+- :material-test-tube:{ .lg .middle } **[Testing](testing.md)**
 
----
+    ---
 
-## Code of Conduct
+    Suite layout, shared fixtures, isolation traps and what must be tested.
 
-All contributors must follow our **[Code of Conduct](../community/code-of-conduct.md)** to maintain a respectful, inclusive, and professional environment.
+- :material-puzzle:{ .lg .middle } **[Extending depkeeper](extending.md)**
 
----
+    ---
 
-## Getting Support
+    Where to add a flag, a format, a check or a parser, and the invariants you must not break.
 
-Get help through the following channels:
+- :material-tag:{ .lg .middle } **[Release process](release-process.md)**
 
-- **General Questions** -- [GitHub Discussions](https://github.com/rahulkaushal04/depkeeper/discussions)
-- **Bug Reports** -- [GitHub Issues](https://github.com/rahulkaushal04/depkeeper/issues)
-- **Security Issues** -- [Security Policy](../community/security.md)
+    ---
+
+    Versioning, changelog, build and publish steps.
+
+</div>
 
 ---
 
-## First-Time Contributors
+## Before you start
 
-New to open-source contributions? Follow these steps:
-
-1. Find issues labeled [`good first issue`](https://github.com/rahulkaushal04/depkeeper/labels/good%20first%20issue)
-2. Review the [Development Setup](development-setup.md) guide
-3. Follow the [Code Style](code-style.md) guidelines
-4. Submit a pull request
-
-Maintainers provide guidance during the review process.
+Read [Core concepts](../concepts/index.md), in particular the
+[system invariants](../concepts/index.md#non-negotiable-invariants). depkeeper's value is that its
+guarantees hold; most rejected changes are rejected because they quietly weaken one.
 
 ---
 
-## Standard Contribution Flow
+## Ways to contribute
 
-1. Fork the repository
-2. Create a dedicated branch for your change
-3. Implement changes following project guidelines
-4. Add or update tests as required
-5. Open a pull request with a clear description
-6. Address review feedback
-7. Maintainers merge changes after approval
+| Contribution | What to include |
+|---|---|
+| **Bug report** | Minimal reproducer requirements file, exact command, `depkeeper -vv … 2> debug.log`, `depkeeper --version`, `python --version`, expected vs actual. |
+| **Bug fix** | A failing test first, then the fix. State which invariant was violated. |
+| **Feature** | Open an issue describing the problem before writing code. Features that change what gets *written* need a design discussion. |
+| **Documentation** | Verify claims against the implementation. Every behavioural statement in these docs is verified; keep it that way. |
+| **Performance** | Include a before/after measurement and the workload used. |
+
+Security issues must **not** be filed as public issues — follow the
+[security policy](../community/security.md).
 
 ---
 
-## Project Structure
+## Definition of done
 
-The depkeeper codebase is organized as follows:
+A change is ready to merge when all of the following hold:
 
+- [ ] `python -m pytest tests -q --no-cov` passes.
+- [ ] `python -m mypy depkeeper --python-version 3.13` reports no new errors.
+- [ ] `python -m compileall -q depkeeper` succeeds.
+- [ ] `pre-commit run --all-files` passes.
+- [ ] New behaviour has tests; fixed bugs have regression tests.
+- [ ] Public API changes are reflected in the docstrings **and** in the affected
+      documentation pages.
+- [ ] No system invariant is weakened, or the change explicitly argues why the invariant should
+      change.
+- [ ] The changelog entry is added when the change is user-visible.
+
+---
+
+## Commit convention
+
+Conventional Commits:
+
+```text
+feat(update): add --pin to replace declared ranges with exact pins
+fix(parser): join backslash line continuations
+docs(reference): document the JSON schema
+test(analyzer): pin cumulative-conflict behaviour
+refactor(core): extract the alternative search from the resolution loop
+chore(deps): bump httpx floor
 ```
-depkeeper/
-├── depkeeper/             # Source code
-│   ├── commands/          # CLI command implementations (check, update)
-│   ├── core/              # Dependency parsing, version checking, resolution
-│   ├── models/            # Data models (package, requirement, conflict)
-│   ├── utils/             # Console output, HTTP, logging, file I/O
-│   ├── cli.py             # CLI entry point and global options
-│   ├── constants.py       # Centralized configuration constants
-│   ├── context.py         # CLI context management
-│   └── exceptions.py      # Custom exception hierarchy
-├── tests/                 # Test suite (unit, integration, e2e)
-├── docs/                  # Documentation source (MkDocs)
-└── scripts/               # Development setup and automation
-```
+
+The scope is the module or subsystem. The body should state *why*, not what — the diff already
+says what.
 
 ---
 
-Thank you for contributing to depkeeper.
+## Code of conduct
+
+Participation is governed by the [Code of Conduct](../community/code-of-conduct.md).

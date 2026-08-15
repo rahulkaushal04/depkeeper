@@ -327,6 +327,88 @@ class TestAtomicWrite:
 
 
 @pytest.mark.unit
+class TestAtomicWriteHardening:
+    """M7/m5/m6 regressions for the atomic write helper."""
+
+    def test_temp_file_removed_when_write_fails(self, temp_dir: Path) -> None:
+        """m5 regression: a failure before the rename must not leak a temp file.
+
+        The temp path used to be bound *after* the write, so a failure inside
+        the ``with`` block left an orphaned ``.<name>.*.tmp`` next to the target.
+        """
+        target = temp_dir / "requirements.txt"
+        target.write_text("original\n", encoding="utf-8")
+
+        with patch("os.fsync", side_effect=OSError("fsync failed")):
+            with pytest.raises(FileOperationError):
+                _atomic_write(target, "new content\n")
+
+        assert target.read_text(encoding="utf-8") == "original\n"
+        assert list(temp_dir.glob(".*.tmp")) == []
+
+    def test_original_file_intact_when_replace_fails(self, temp_dir: Path) -> None:
+        """An interrupted write must never truncate the destination."""
+        target = temp_dir / "requirements.txt"
+        target.write_bytes(b"click==8.0.0\n")
+
+        with patch.object(Path, "replace", side_effect=OSError("ENOSPC")):
+            with pytest.raises(FileOperationError):
+                _atomic_write(target, "click==8.1.7\n")
+
+        assert target.read_bytes() == b"click==8.0.0\n"
+
+    def test_line_endings_written_verbatim(self, temp_dir: Path) -> None:
+        """CRLF/LF/mixed endings must survive on every platform."""
+        target = temp_dir / "requirements.txt"
+
+        _atomic_write(target, "a==1\r\nb==2\nc==3\r\n")
+
+        assert target.read_bytes() == b"a==1\r\nb==2\nc==3\r\n"
+
+    def test_encoding_can_emit_bom(self, temp_dir: Path) -> None:
+        """``utf-8-sig`` re-emits a byte order mark for BOM-carrying files."""
+        target = temp_dir / "requirements.txt"
+
+        _atomic_write(target, "click==8.1.7\n", encoding="utf-8-sig")
+
+        raw = target.read_bytes()
+        assert raw.startswith(b"\xef\xbb\xbf")
+        assert target.read_text(encoding="utf-8-sig") == "click==8.1.7\n"
+
+    def test_default_encoding_writes_no_bom(self, temp_dir: Path) -> None:
+        """The default encoding must not introduce a BOM."""
+        target = temp_dir / "requirements.txt"
+
+        _atomic_write(target, "click==8.1.7\n")
+
+        assert not target.read_bytes().startswith(b"\xef\xbb\xbf")
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes only")
+    def test_preserves_existing_file_mode(self, temp_dir: Path) -> None:
+        """m6 regression: the temp file's 0600 mode must not leak to the target."""
+        target = temp_dir / "requirements.txt"
+        target.write_text("original\n", encoding="utf-8")
+        target.chmod(0o644)
+
+        _atomic_write(target, "updated\n")
+
+        assert (target.stat().st_mode & 0o777) == 0o644
+
+    @pytest.mark.skipif(not SYMLINKS_SUPPORTED, reason="Symlinks not supported")
+    def test_writes_through_symlink(self, temp_dir: Path) -> None:
+        """A symlinked requirements file must stay a symlink."""
+        real = temp_dir / "real.txt"
+        real.write_text("click==8.0.0\n", encoding="utf-8")
+        link = temp_dir / "requirements.txt"
+        link.symlink_to(real)
+
+        _atomic_write(link, "click==8.1.7\n")
+
+        assert link.is_symlink()
+        assert real.read_text(encoding="utf-8") == "click==8.1.7\n"
+
+
+@pytest.mark.unit
 class TestCreateBackupInternal:
     """Tests for _create_backup_internal helper."""
 
@@ -558,6 +640,46 @@ class TestSafeReadFile:
             safe_read_file(binary_file, encoding="utf-8")
 
         assert exc_info.value.operation == "read"
+
+    def test_strips_utf8_bom(self, temp_dir: Path) -> None:
+        """M3 regression: a leading UTF-8 BOM must not reach the caller.
+
+        Files written by Notepad or PowerShell ``Set-Content`` start with
+        ``\\xef\\xbb\\xbf``, which decodes to ``\\ufeff`` under plain UTF-8 and
+        corrupts the first token.
+        """
+        bom_file = temp_dir / "bom.txt"
+        bom_file.write_bytes("flask==2.0.0\n".encode("utf-8-sig"))
+
+        result = safe_read_file(bom_file)
+
+        assert result == "flask==2.0.0\n"
+        assert not result.startswith("\ufeff")
+
+    def test_bom_free_content_is_unchanged(self, temp_dir: Path) -> None:
+        """The BOM-aware default must decode plain UTF-8 identically."""
+        plain_file = temp_dir / "plain.txt"
+        content = "flask==2.0.0\n# café ☕\n"
+        plain_file.write_text(content, encoding="utf-8")
+
+        assert safe_read_file(plain_file) == content
+
+    def test_explicit_utf8_encoding_retains_bom(self, temp_dir: Path) -> None:
+        """Backward compatibility: an explicit encoding is still honoured."""
+        bom_file = temp_dir / "bom.txt"
+        bom_file.write_bytes("flask==2.0.0\n".encode("utf-8-sig"))
+
+        assert safe_read_file(bom_file, encoding="utf-8").startswith("\ufeff")
+
+    def test_bom_counts_toward_size_limit(self, temp_dir: Path) -> None:
+        """The size guard measures bytes on disk, BOM included."""
+        bom_file = temp_dir / "bom.txt"
+        bom_file.write_bytes("x".encode("utf-8-sig"))
+
+        with pytest.raises(FileOperationError) as exc_info:
+            safe_read_file(bom_file, max_size=2)
+
+        assert "too large" in str(exc_info.value).lower()
 
 
 @pytest.mark.unit
@@ -1166,135 +1288,87 @@ class TestCreateTimestampedBackup:
 
 @pytest.mark.integration
 class TestEdgeCases:
-    """Additional edge cases and integration tests."""
+    """Cross-cutting behaviour that spans more than one helper."""
 
     def test_concurrent_backups(self, temp_file: Path) -> None:
-        """Test multiple simultaneous backups don't conflict.
+        """Concurrent backups of one file must all get distinct names.
 
-        Edge case: Concurrent backups should all succeed with unique names.
+        ``update`` backs up every affected file before writing. A timestamp
+        collision would make one backup silently overwrite another, so a
+        rollback would restore the wrong content.
         """
         import concurrent.futures
 
-        def create_backup_wrapper():
-            return create_backup(temp_file)
-
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(create_backup_wrapper) for _ in range(5)]
+            futures = [executor.submit(create_backup, temp_file) for _ in range(5)]
             backups = [f.result() for f in futures]
 
-        # All should succeed
-        assert len(backups) == 5
         assert all(b.exists() for b in backups)
-
-        # All should be unique
         assert len(set(backups)) == 5
 
-    def test_write_read_cycle(self, temp_dir: Path) -> None:
-        """Test write then read returns same content.
-
-        Integration test: Full write/read cycle.
-        """
-        file_path = temp_dir / "cycle.txt"
-        content = "Test content with �� unicode"
+    def test_write_read_round_trip_preserves_unicode(self, temp_dir: Path) -> None:
+        """Comments in requirements files routinely carry non-ASCII text."""
+        file_path = temp_dir / "requirements.txt"
+        content = "requests==2.32.3  # 依存関係を固定 — see ACME-1234\n"
 
         safe_write_file(file_path, content, create_backup=False)
-        result = safe_read_file(file_path)
 
-        assert result == content
+        assert safe_read_file(file_path) == content
 
-    def test_cross_platform_path_handling(self, temp_dir: Path) -> None:
-        """Test path handling works across different platforms.
+    def test_write_creates_missing_parent_directories(self, temp_dir: Path) -> None:
+        """Layered projects write to ``requirements/prod.txt`` under a new root."""
+        nested = temp_dir / "requirements" / "envs" / "prod.txt"
 
-        Cross-platform: Paths should work on Windows, Linux, macOS.
+        safe_write_file(nested, "flask>=2.2,<3.0\n", create_backup=False)
+
+        assert safe_read_file(nested) == "flask>=2.2,<3.0\n"
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "requests==2.32.3\nurllib3==1.26.18\n",
+            "requests==2.32.3\r\nurllib3==1.26.18\r\n",
+            "requests==2.32.3\nurllib3==1.26.18",
+        ],
+        ids=["lf", "crlf", "no-final-newline"],
+    )
+    def test_line_endings_survive_a_write_read_cycle(
+        self, temp_dir: Path, content: str
+    ) -> None:
+        """``_atomic_write`` opens with ``newline=""`` so nothing is translated.
+
+        A whole-file CRLF/LF flip buries the real change in the diff and, on a
+        mixed-platform team, ping-pongs on every run. Bytes are compared
+        directly because ``read_text`` would hide exactly the difference under
+        test.
         """
-        # Test with nested directories
-        nested = temp_dir / "a" / "b" / "c" / "file.txt"
-
-        safe_write_file(nested, "content", create_backup=False)
-
-        assert nested.exists()
-        assert safe_read_file(nested) == "content"
-
-    def test_special_characters_in_content(self, temp_dir: Path) -> None:
-        """Test files with special characters and unicode.
-
-        Cross-platform: Unicode should work on all platforms.
-        """
-        file_path = temp_dir / "unicode.txt"
-        content = "Hello 世界 �� Привет مرحبا"
+        file_path = temp_dir / "requirements.txt"
 
         safe_write_file(file_path, content, create_backup=False)
-        result = safe_read_file(file_path)
 
-        assert result == content
+        assert file_path.read_bytes() == content.encode("utf-8")
 
-    def test_line_ending_preservation(self, temp_dir: Path) -> None:
-        """Test line endings are consistent across platforms.
-
-        Uses newline='\\n' in atomic_write to ensure LF line endings.
-        """
-        file_path = temp_dir / "lines.txt"
-        content = "line1\\nline2\\nline3\\n"
-
-        safe_write_file(file_path, content, create_backup=False)
-        result = safe_read_file(file_path)
-
-        assert result == content
-        assert "\\r\\n" not in result  # Should use LF, not CRLF
-
-    def test_backup_restore_cycle(self, temp_file: Path) -> None:
-        """Test backup then restore preserves content.
-
-        Integration test: Full backup/restore cycle.
-        """
-        original = temp_file.read_text()
-
-        # Create backup, modify, restore
-        backup = create_backup(temp_file)
-        temp_file.write_text("modified")
-        restore_backup(backup, temp_file)
-
-        assert temp_file.read_text(encoding="utf-8") == original
-
-    def test_special_characters_in_filename(self, temp_dir: Path) -> None:
-        """Test handles special characters in filenames.
-
-        Edge case: Some special chars should work.
-        """
-        # Avoid truly invalid chars like / \ : * ? " < > |
-        special_name = "file-with_special.chars (1) [test].txt"
-        file_path = temp_dir / special_name
-
-        safe_write_file(file_path, "content", create_backup=False)
-
-        assert file_path.exists()
-
-    def test_empty_file_operations(self, temp_dir: Path) -> None:
-        """Test operations on empty files.
-
-        Edge case: Empty files should be handled correctly.
-        """
-        empty_file = temp_dir / "empty.txt"
-        empty_file.write_text("")
-
-        # Read empty file
-        content = safe_read_file(empty_file)
-        assert content == ""
-
-        # Backup empty file
-        backup = create_backup(empty_file)
-        assert backup.exists()
-        assert backup.read_text(encoding="utf-8") == ""
-
-    def test_whitespace_only_content(self, temp_dir: Path) -> None:
-        """Test files with only whitespace.
-
-        Edge case: Whitespace-only content should be preserved.
-        """
-        file_path = temp_dir / "whitespace.txt"
+    def test_whitespace_only_content_is_preserved(self, temp_dir: Path) -> None:
+        """Blank-line structure is part of a requirements file's readability."""
+        file_path = temp_dir / "requirements.txt"
         content = "   \n\n\t  \n"
 
         safe_write_file(file_path, content, create_backup=False)
-        result = safe_read_file(file_path)
 
-        assert result == content
+        assert safe_read_file(file_path) == content
+
+    def test_empty_file_can_be_read_and_backed_up(self, temp_dir: Path) -> None:
+        """A newly created requirements file is legitimately zero bytes."""
+        empty_file = temp_dir / "requirements.txt"
+        empty_file.write_text("", encoding="utf-8")
+
+        assert safe_read_file(empty_file) == ""
+        assert create_backup(empty_file).read_text(encoding="utf-8") == ""
+
+    def test_special_characters_in_filename(self, temp_dir: Path) -> None:
+        """Requirement files live in developer-named directories."""
+        file_path = temp_dir / "requirements-dev (local) [wip].txt"
+
+        safe_write_file(file_path, "pytest>=8.2.0\n", create_backup=False)
+
+        assert file_path.exists()

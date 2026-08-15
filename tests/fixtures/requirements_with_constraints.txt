@@ -1,6 +1,0 @@
-# Requirements with constraints
--c constraints.txt
-
-requests
-django
-flask==2.0.1

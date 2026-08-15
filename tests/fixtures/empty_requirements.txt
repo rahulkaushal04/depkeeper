@@ -1,3 +1,0 @@
-# Empty requirements file with only comments
-
-# No actual requirements

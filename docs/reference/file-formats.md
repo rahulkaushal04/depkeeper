@@ -1,212 +1,266 @@
 ---
 title: File Formats
-description: Supported file format specifications for depkeeper
+description: Accepted requirements-file syntax, encoding rules and rewrite semantics
 ---
 
 # File Formats
 
-Reference for all file formats supported by depkeeper. This page covers the requirements file syntax, configuration file formats, and backup file conventions.
+depkeeper reads and writes **pip requirements files** only. It does not read `Pipfile`,
+`poetry.lock`, `pyproject.toml` dependency tables, `setup.py`, `setup.cfg` or `environment.yml`.
+
+Behavioural background: [Requirements parsing](../concepts/requirements-parsing.md).
 
 ---
 
-## requirements.txt
+## File selection
 
-The standard pip requirements format (PEP 508). This is the primary file format depkeeper reads and updates.
+`FILE` is an explicit argument, defaulting to `requirements.txt`. There is no automatic
+discovery in the CLI — the glob patterns below exist in `constants.py` and are used only by the
+`find_requirements_files` helper in the [Python API](python-api.md).
 
-### Version Specifiers
+| Category | Patterns |
+|---|---|
+| requirements | `requirements.txt`, `requirements-*.txt`, `requirements/*.txt` |
+| constraints | `constraints.txt`, `constraints-*.txt` |
+| backup | `*.backup` |
 
-| Operator | Meaning | Example |
-|---|---|---|
-| `==` | Exact version | `requests==2.31.0` |
-| `>=` | Minimum version | `requests>=2.28.0` |
-| `<=` | Maximum version | `requests<=3.0.0` |
-| `>` | Greater than | `requests>2.27.0` |
-| `<` | Less than | `requests<3.0.0` |
-| `!=` | Not equal | `requests!=2.29.0` |
-| `~=` | Compatible release | `requests~=2.31.0` |
+---
 
-### Compatible Release (`~=`)
+## Line syntax
 
-The `~=` operator allows patch updates but not minor/major:
+### Standard requirements
 
-```ini
-# Equivalent to >=2.31.0, ==2.31.*
-requests~=2.31.0
-
-# Equivalent to >=2.31, ==2.*
-requests~=2.31
-```
-
-### Basic Syntax
-
-```ini
-# Package with exact version
+```text
+requests
+requests>=2.25.0
 requests==2.31.0
-
-# Package with version constraints
-flask>=2.0.0,<3.0.0
-
-# Package without version (latest)
-click
-
-# Combined constraints
-requests>=2.28.0,<3.0.0,!=2.29.0
+requests>=2.25.0,<3.0.0
+requests!=2.30.0,>=2.25.0
+requests~=2.31.0
+requests[security,socks]>=2.25.0
+requests>=2.25.0; python_version >= "3.8"
+requests>=2.25.0  # inline comment
 ```
 
-### Extras
+| Operator | Supported | Classification on rewrite |
+|---|---|---|
+| `==` | ✅ | Exact pin — repinned (unless it is a wildcard). |
+| `===` | ✅ | Exact pin — repinned. |
+| `>=` | ✅ | Floor — rewritten. |
+| `>` | ✅ | Floor — rewritten and **widened to `>=`**. |
+| `~=` | ✅ | Floor — rewritten, keeping the author's precision. |
+| `<`, `<=` | ✅ | Retained verbatim. |
+| `!=` | ✅ | Retained verbatim. |
+| `==2.*` | ✅ | Retained verbatim. |
 
-Install optional dependencies:
+Extras and PEP 508 environment markers are captured and preserved. Markers are **not** evaluated:
+depkeeper reports every requirement in the file regardless of whether its marker matches the
+current environment.
 
-```ini
-# Single extra
-requests[security]==2.31.0
+### Comments and blank lines
 
-# Multiple extras
-package[extra1,extra2]==1.0.0
+```text
+# Full-line comment
+requests>=2.25.0  # inline comment
+
+# blank lines above and below are preserved
 ```
 
-### Environment Markers
+Both are preserved byte-for-byte by the writer. `#` inside a URL fragment is not treated as a
+comment.
 
-Conditional installations based on environment:
+### Include directives
 
-```ini
-# Python version
-dataclasses==0.6; python_version < "3.7"
-
-# Platform
-pywin32==305; sys_platform == "win32"
-
-# Implementation
-uvloop>=0.18.0; implementation_name == "cpython"
-
-# Combined
-package==1.0.0; python_version >= "3.8" and sys_platform != "win32"
+```text
+-r requirements/base.txt
+--requirement requirements/base.txt
 ```
 
-### URL and VCS Requirements
+Recursively parsed and flattened. Relative paths resolve against the **directory of the including
+file**. Cycles raise `ParseError`. `update` rewrites the included file, not the directive.
 
-```ini
-# Git repository
-git+https://github.com/user/project.git
+### Constraint directives
 
-# Specific branch
-git+https://github.com/user/project.git@main
-
-# Specific tag
-git+https://github.com/user/project.git@v1.0.0
-
-# Specific commit
-git+https://github.com/user/project.git@abc123
-
-# With package name
-project @ git+https://github.com/user/project.git@v1.0.0
-```
-
-depkeeper supports `git+`, `bzr+`, `hg+`, `svn+`, `https://`, `http://`, and `file://` URL schemes.
-
-### Editable Installs
-
-```ini
-# Local package in development
--e .
-
-# Local package at path
--e /path/to/package
-
-# Local package with extras
--e .[dev,test]
-```
-
-### Include and Constraint Directives
-
-```ini
-# Include another requirements file
--r requirements-base.txt
---requirement requirements-base.txt
-
-# Constraints file (version limits, not installs)
+```text
 -c constraints.txt
 --constraint constraints.txt
 ```
 
-depkeeper follows include chains and detects circular dependencies. Constraints loaded via `-c` are applied to matching package names during parsing.
+Parsed into an internal constraint map and applied to matching requirements. Constraint files are
+never returned as requirements and are never rewritten.
 
-### Hash Verification
+### Editable installs
 
-```ini
-requests==2.31.0 \
-    --hash=sha256:942c5a758f98d790eaed1a29cb6eefc7ffb0d1cf7af05c3d2791656dbd6ad1e1
+```text
+-e .
+-e ./local-package
+--editable git+https://github.com/org/repo.git#egg=repo
 ```
 
-### Comments and Blank Lines
+Parsed and reported; **never updated**.
 
-```ini
-# This is a comment
-requests==2.31.0  # Inline comment
+### Direct references
 
-# Blank lines are ignored
-
-flask==3.0.0
+```text
+git+https://github.com/org/repo.git@v1.0.0#egg=repo
+git+ssh://git@github.com/org/repo.git#egg=repo
+hg+https://…  bzr+https://…  svn+https://…
+https://example.com/pkg-1.0.tar.gz#egg=pkg
+file:///abs/path/pkg-1.0.whl#egg=pkg
+./local/package
+../sibling/package
+/absolute/path/package
+C:\absolute\path\package
 ```
+
+Parsed and reported; **never updated**. Always add `#egg=<name>` — inference from the URL's last
+path segment is unreliable, and a URL with no inferable name raises `ParseError`.
+
+### Hashes
+
+```text
+requests==2.31.0 --hash=sha256:abcdef...
+requests==2.31.0 --hash sha256:abcdef...
+```
+
+Both separators are accepted. Hashed requirements are refused by `update` unless
+`--allow-hash-removal` is passed.
+
+!!! warning "Line continuations are not supported"
+
+    ```text
+    requests==2.31.0 \
+        --hash=sha256:aaa... \
+        --hash=sha256:bbb...
+    ```
+
+    depkeeper does not join backslash continuations, so this — the default output of
+    `pip-compile --generate-hashes` — fails to parse. Use the single-line form.
+
+### pip global options
+
+Recognised and skipped:
+
+```text
+--index-url https://pypi.org/simple
+-i https://pypi.org/simple
+--extra-index-url https://internal.example.com/simple
+--find-links ./wheels
+-f ./wheels
+--trusted-host internal.example.com
+--no-binary :all:
+--only-binary :all:
+--use-feature 2020-resolver
+--pre
+--prefer-binary
+```
+
+These are preserved in the file and **have no effect on depkeeper**. In particular, index options
+do not redirect depkeeper's queries; it always uses `pypi.org`.
+
+Any other option line raises `ParseError`.
 
 ---
 
-## depkeeper.toml
+## Encoding
 
-Project configuration file for depkeeper settings.
+| Aspect | Behaviour |
+|---|---|
+| Read encoding | `utf-8-sig` — plain UTF-8 plus BOM removal. |
+| Write encoding | `utf-8`, or `utf-8-sig` when the file originally carried a BOM. |
+| Non-UTF-8 input | `FileOperationError`. |
+| Maximum size | 10 MB. |
 
-```toml
-[depkeeper]
-check_conflicts = true
-strict_version_matching = false
-```
+## Line endings
 
-For the full list of options and their descriptions, see [Configuration Options](configuration-options.md).
-
----
-
-## pyproject.toml Integration
-
-depkeeper reads configuration from `pyproject.toml` under the `[tool.depkeeper]` section:
-
-```toml
-[project]
-name = "my-project"
-version = "1.0.0"
-dependencies = [
-    "requests>=2.28.0",
-    "flask>=2.0.0",
-]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0.0",
-    "black>=23.0.0",
-]
-
-[tool.depkeeper]
-check_conflicts = true
-strict_version_matching = false
-```
+Preserved exactly. Each rewritten line re-attaches its own terminator, so LF stays LF, CRLF stays
+CRLF, a mixed file keeps its mixture, and a file without a trailing newline does not gain one.
 
 ---
 
-## Backup Files
+## Rewrite semantics
 
-When `--backup` is used with the `update` command, depkeeper creates a timestamped backup:
+Given:
 
+```text title="requirements.txt"
+# Web stack
+requests==2.28.0
+flask>=2.0,<2.3          # capped: 2.3 needs a newer werkzeug
+celery[redis]>=5.0,<6.0
+click~=8.0
+certifi
+urllib3==1.26.0
+
+-e ./local-lib
+git+https://github.com/org/tool.git@v1.0#egg=tool
 ```
-requirements.txt.backup.20260208-143022
+
+`depkeeper update -y` produces:
+
+```text title="requirements.txt (after)"
+# Web stack
+requests==2.34.2
+flask>=2.2.5,<2.3          # capped: 2.3 needs a newer werkzeug
+celery[redis]>=5.6.3,<6.0
+click~=8.4
+certifi==2026.7.22
+urllib3==1.26.20
+
+-e ./local-lib
+git+https://github.com/org/tool.git@v1.0#egg=tool
 ```
 
-Format: `{filename}.backup.{YYYYMMDD}-{HHMMSS}`
+`depkeeper update --pin -y` produces:
 
-Backup files are plain copies of the original requirements file. They can be restored by renaming or copying them back to the original filename.
+```text title="requirements.txt (after, --pin)"
+# Web stack
+requests==2.34.2
+flask==2.2.5          # capped: 2.3 needs a newer werkzeug
+celery[redis]==5.6.3
+click==8.4.2
+certifi==2026.7.22
+urllib3==1.26.20
+
+-e ./local-lib
+git+https://github.com/org/tool.git@v1.0#egg=tool
+```
+
+Preserved in both cases: comments (including inline ones), blank lines, ordering, extras, markers,
+directives, direct references, encoding and line endings.
+
+!!! note "Inline comments can become stale"
+
+    The comment above still says "capped: 2.3 needs a newer werkzeug" after the version moved.
+    depkeeper preserves comments verbatim; it does not interpret or update them.
+
+### Edge cases
+
+| Input | Target | Output | Note |
+|---|---|---|---|
+| `pkg` | `1.2.3` | `pkg==1.2.3` | A requirement with no specifiers gains an exact pin. |
+| `pkg<3.0` | `2.32.3` | `pkg<3.0,>=2.32.3` | A cap-only requirement gains a floor; order is not normalised. |
+| `pkg>2.0` | `2.5.0` | `pkg>=2.5.0` | `>` is widened to `>=`. |
+| `pkg~=2.0` | `2.3.3` | `pkg~=2.3` | The author's precision is kept. |
+| `pkg~=2.0` | `2.0.30` | *(unchanged)* | Already covered by the declared floor; skipped for convergence. |
+| `pkg==2.*` | `2.9.0` | `pkg==2.*,>=2.9.0` | A wildcard band is retained, and a floor is added. |
+| `-e .` | any | *(unchanged)* | Editable installs are never updated. |
 
 ---
 
-## See Also
+## Backup files
 
-- [CLI Commands](cli-commands.md) -- Working with files via CLI
-- [Configuration Options](configuration-options.md) -- Full configuration reference
-- [Python API](python-api.md) -- Programmatic file handling
+`--backup` writes `<stem>.<timestamp>_<uuid8>.backup<suffix>` beside each affected file:
+
+```text
+requirements.20260815_144129_853745_d54d785d.backup.txt
+```
+
+The original suffix stays last so the file remains recognisable by extension. depkeeper never
+deletes backups. Add `*.backup.*` to `.gitignore` if you use the flag in a repository.
+
+!!! note "A second, different backup layout exists"
+
+    The programmatic helper `create_backup()` uses `<name><suffix>.<timestamp>_<uuid8>.backup`,
+    and `restore_backup()`'s target inference only understands **that** layout. The CLI uses
+    `create_timestamped_backup()`, so CLI-produced backups must be restored by copying them
+    manually. See [Python API](python-api.md#filesystem-utilities).

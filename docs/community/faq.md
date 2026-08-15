@@ -1,180 +1,240 @@
 ---
-title: Frequently Asked Questions
-description: Common questions about depkeeper installation, usage, configuration, and troubleshooting
+title: FAQ
+description: Frequently asked questions about depkeeper's behaviour and scope
 ---
 
 # Frequently Asked Questions
 
-This page answers common questions about depkeeper. If your question is not covered here, check the [Troubleshooting Guide](../guides/troubleshooting.md) or open an issue on [GitHub](https://github.com/rahulkaushal04/depkeeper/issues).
+---
+
+## Scope and positioning
+
+### What is depkeeper for?
+
+Answering one question well: *what is the largest upgrade I can take for each requirement without
+crossing a major version, without breaking Python compatibility, without violating the constraints
+I declared, and without conflicting with the other packages in my file?* It then rewrites the file
+with those answers.
+
+### How is it different from `pip list --outdated`?
+
+`pip` reports the **latest** version. depkeeper reports the **safe** version, and can apply it.
+`pip` also reports on the installed environment; depkeeper reads a requirements file and needs
+nothing installed.
+
+### How is it different from Poetry or pip-tools?
+
+Those tools own the dependency workflow and introduce a lock file. depkeeper edits the files you
+already have and adds no new format. The trade-off is that it does not perform full resolution.
+
+| | pip | pip-tools | Poetry | depkeeper |
+|---|---|---|---|---|
+| Reports available updates | latest only | no | yes | yes, with a safe target |
+| Enforces major-version boundaries | no | no | no | yes |
+| Full transitive resolution | yes (at install) | yes | yes | no |
+| Requires a new file format | no | `.in` files | `pyproject.toml` + lock | no |
+| Rewrites `requirements.txt` in place | no | regenerates | n/a | yes |
+
+### Does it replace `pip`?
+
+No. `pip install` remains the authority on whether a set of requirements resolves. Always install
+and test after an update.
+
+### Does it scan for vulnerabilities?
+
+No. Use `pip-audit` or `safety` alongside it.
 
 ---
 
-## General
+## Behaviour
 
-### What is depkeeper?
+### Why won't it upgrade past a major version?
 
-depkeeper is a modern Python dependency management tool that helps you keep your `requirements.txt` files up-to-date and conflict-free. It analyzes your dependencies, checks for available updates, resolves conflicts, and applies safe upgrades.
+That is the core safety rule. Crossing a major version is, by convention, permission to break the
+caller — not a decision an unattended tool should make. See
+[the boundary rule](../concepts/version-recommendation.md#the-major-version-boundary).
 
-### How is depkeeper different from pip-tools?
+### How do I take a major upgrade?
 
-depkeeper focuses on intelligent update checking and dependency conflict resolution, while pip-tools focuses on compiling and syncing dependencies.
+Edit the floor yourself and let depkeeper continue from there:
 
-| Feature | depkeeper | pip-tools |
-|---|---|---|
-| Update checking | Yes, built-in | Manual |
-| Dependency conflict resolution | Yes, automatic | No |
-| Safe major version boundaries | Yes, enforced | No |
-| Multiple output formats | Yes (table, simple, JSON) | No |
-| Dry-run mode | Yes | Yes |
-
-### How is depkeeper different from poetry?
-
-depkeeper is designed for projects using `requirements.txt`, while poetry uses `pyproject.toml`. depkeeper is non-invasive and works alongside pip without changing your existing workflow or project structure.
-
-### Is depkeeper free?
-
-Yes. depkeeper is open source and free to use under the [Apache License 2.0](license.md).
-
----
-
-## Installation
-
-### What Python version do I need?
-
-depkeeper requires Python 3.8 or later. It supports Python 3.8, 3.9, 3.10, 3.11, and 3.12.
-
-### Can I install depkeeper globally?
-
-Yes, but we recommend using pipx for global installation to avoid polluting your system Python:
-
-```bash
-pipx install depkeeper
+```text
+django>=3.2,<5.0    →    django>=4.2,<5.0
 ```
 
-### Does depkeeper work on Windows?
+Then run `depkeeper update`, install, and test.
 
-Yes. depkeeper works on Windows, macOS, and Linux.
+### Why is the recommendation lower than `Latest`?
+
+One of four reasons, in order of likelihood:
+
+1. Your own declared cap or exclusion (`<`, `!=`, `==x.*`).
+2. The major boundary, anchored on the version inferred from your file.
+3. A conflict with another package in the file.
+4. `requires_python` of newer releases excludes the interpreter depkeeper is running on.
+
+`depkeeper -vv check` names the reason.
+
+### Why does `certifi` never update?
+
+Calendar versioning. `2023.7.22` has "major" `2023`, so `2024.x` is a boundary crossing. Either
+leave the requirement unversioned or bump it manually. See
+[Limitations](../reference/limitations.md#calendar-versioning-hits-the-major-boundary).
+
+### Why did it propose a downgrade?
+
+Either the version you declared is incompatible with the running interpreter, or another package
+in your file requires an older release. Review it — this rewrites your floor downwards. See
+[Downgrades](../concepts/conflict-resolution.md#downgrades).
+
+### Why did it change a package that `check` showed as `✓ OK`?
+
+The requirement had no version specifier, so there was nothing to compare against and the table
+fell through to its up-to-date branch. `update` correctly adds a pin. The JSON and simple formats
+report it as `install`. See
+[Limitations](../reference/limitations.md#unversioned-requirements-report-as-ok).
+
+### Will it destroy my version ranges?
+
+No. By default only the floor moves: `celery>=5.0,<6.0` becomes `celery>=5.6.3,<6.0`. Upper
+bounds, exclusions and `~=` bands are preserved verbatim. Use `--pin` if you *want* exact pins.
+
+### Does it preserve comments and formatting?
+
+Yes. Comments (including inline ones), blank lines, ordering, extras, markers, directives, line
+endings and byte order marks are all preserved. Only the version specifier on updated lines
+changes.
+
+Note that a comment explaining a cap is preserved verbatim and can become stale — depkeeper does
+not interpret comments.
+
+### Is running it twice safe?
+
+Yes. A target that would produce a byte-identical line is skipped, so a second run reports
+`All packages are up to date!`.
+
+### Why are the recommendations different in CI than on my laptop?
+
+Different Python versions running depkeeper. Compatibility filtering uses **depkeeper's own**
+interpreter. Pin the CI Python to your project's target.
 
 ---
 
 ## Usage
 
-### How do I check for updates?
-
-Use the `check` command to scan your requirements file for available updates:
-
-```bash
-depkeeper check
-```
-
-You can target a specific file and show only outdated packages:
-
-```bash
-depkeeper check requirements.txt --outdated-only
-```
-
-### How do I update dependencies?
-
-Use the `update` command. Preview changes first with `--dry-run`, then apply:
+### How do I preview changes?
 
 ```bash
 depkeeper update --dry-run
-depkeeper update
 ```
 
-### Can I update specific packages?
+It runs the full pipeline and stops before the first byte is written, so the plan is authoritative.
 
-Yes. Use the `-p` flag to select individual packages:
+### How do I update a single package?
 
 ```bash
-depkeeper update -p flask -p click
+depkeeper update -p django
 ```
 
-### How does depkeeper handle major version boundaries?
+Names are matched in PEP 503 canonical form, so `My_Pkg` and `my-pkg` are the same.
 
-depkeeper never crosses major version boundaries when recommending updates. If your current version is `1.2.3`, depkeeper will recommend up to the latest `1.x.x` release, but will not suggest `2.0.0`. This protects you from breaking changes.
+### How do I use it in a script?
 
-### What output formats are available?
+```bash
+depkeeper check --format json > report.json
+jq '[.[] | select(.status == "outdated")] | length' report.json
+```
 
-The `check` command supports three output formats:
+Do not gate on the exit code — `check` exits `0` whether or not updates exist. See
+[Exit codes](../reference/exit-codes.md).
 
-| Format | Flag | Description |
-|---|---|---|
-| Table | `--format table` | Rich formatted table (default) |
-| Simple | `--format simple` | Plain text output |
-| JSON | `--format json` | Machine-readable JSON |
+### Can I pipe the JSON with verbose logging on?
 
-### Does depkeeper resolve dependency conflicts?
+Yes. In machine-readable formats every diagnostic goes to stderr:
 
-Yes. When `--check-conflicts` is enabled (the default), depkeeper builds a dependency graph, detects version conflicts between packages, and iteratively adjusts recommendations until a conflict-free set is found.
+```bash
+depkeeper -vv check --format json | jq .
+```
+
+### Does it work with multiple requirements files?
+
+Yes, via `-r` includes: checking a file reports the union, and updating it rewrites every included
+file that contains an updated requirement. There is no directory or recursive mode.
+
+### Can I point it at a private index?
+
+No. depkeeper always queries `pypi.org`; `--index-url` lines are parsed and ignored. Private
+packages report as `✗ ERROR`.
+
+### Can I change the timeout or concurrency?
+
+Not from the CLI. Use the [Python API](../reference/python-api.md) and construct `HTTPClient` /
+`PyPIDataStore` yourself.
+
+### Does it work with hash-pinned files?
+
+It refuses them by default. `--allow-hash-removal` proceeds but produces a partially hashed file
+that `pip --require-hashes` rejects, so regenerate hashes afterwards. See
+[Hashed requirements](../guides/updating-dependencies.md#hashed-requirements).
 
 ---
 
-## Security
+## Operations
 
-### Is it safe to run depkeeper update?
+### Does it need network access?
 
-Yes. depkeeper never crosses major version boundaries, supports `--dry-run` to preview changes, and offers `--backup` to create timestamped backups before writing. For more details, see the [Security Policy](security.md).
+Yes. Every run queries the PyPI JSON API. There is no offline mode and no persistent cache.
 
----
+### Does it send my code or my file contents anywhere?
 
-## Configuration
+No. Only package **names** appear, as URL path segments in requests to `pypi.org`. Versions,
+comments and file contents never leave the machine.
 
-### Where should I put my config file?
+### Does it execute or install the packages it analyses?
 
-You can pass a configuration file path directly with the `--config` flag or set the `DEPKEEPER_CONFIG` environment variable:
+Never. It reads JSON metadata only.
 
-```bash
-depkeeper check --config path/to/config.toml
-```
+### Is it safe to run against an untrusted repository?
 
-### Can I control colored output?
+With care. `update` writes to every file reachable through `-r` includes, and include paths can
+contain `../`. Run `--dry-run` first, or run in a container with only the project directory
+mounted.
 
-Yes. Use `--no-color` to disable colored terminal output, or set the `DEPKEEPER_COLOR` environment variable:
+### How do I make it faster?
 
-```bash
-depkeeper check --no-color
-```
+`--no-check-conflicts` removes the resolution phase, which is the dominant cost. Runtime is
+otherwise dominated by network latency.
 
-### What verbosity levels are available?
+### Why do I get `429 Rate limit exceeded`?
 
-Use `-v` for verbose output and `-vv` for maximum detail:
-
-```bash
-depkeeper check -v
-depkeeper check -vv
-```
+Too many requests from one egress IP — usually many CI jobs sharing it. Stagger schedules and use
+`--no-check-conflicts` for reports.
 
 ---
 
-## Troubleshooting
+## Project
 
-### Why am I getting parsing errors?
+### What Python versions are supported?
 
-Ensure your `requirements.txt` follows PEP 508 format. Common issues include:
+3.8 and later. Note that the interpreter you install depkeeper on affects its recommendations.
 
-- Invalid characters in package names
-- Malformed version specifiers (e.g., missing operators)
-- Incorrect URL syntax for VCS dependencies
+### Is it production-ready?
 
-depkeeper supports all standard PEP 440/508 formats including extras, environment markers, include directives, constraint files, VCS URLs, editable installs, and hash verification.
+It is `0.1.0`, classified alpha. The write path is defensive (atomic writes, rollback, backups)
+and the behaviour is documented and tested, but pin the version and review changes before
+merging.
 
-### Why is depkeeper slow?
+### Is it free?
 
-depkeeper uses concurrent async HTTP requests to query PyPI, so it is generally fast. If you experience slowness:
+Yes, under the [Apache License 2.0](license.md).
 
-- Check your network connection
-- Reduce request volume if you are being rate-limited by PyPI
-- Consider using a private PyPI mirror for large dependency sets
+### How do I report a bug?
 
-### Where can I report bugs?
+[Open an issue](https://github.com/rahulkaushal04/depkeeper/issues) with a minimal reproducer and
+`depkeeper -vv … 2> debug.log`. For security issues, follow the [security policy](security.md)
+instead.
 
-Open an issue on [GitHub](https://github.com/rahulkaushal04/depkeeper/issues). Include your OS, Python version, depkeeper version, and steps to reproduce the problem.
+### How do I contribute?
 
----
-
-## Contributing
-
-### How can I contribute?
-
-See the [Contributing Guide](../contributing/index.md) for setup instructions, testing, and pull request guidelines.
+See [Contributing](../contributing/index.md). Start with the
+[system invariants](../concepts/index.md#non-negotiable-invariants).

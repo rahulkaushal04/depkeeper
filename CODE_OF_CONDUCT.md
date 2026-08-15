@@ -1,143 +1,125 @@
 # Contributor Covenant Code of Conduct
 
-## Our Pledge
+## Our pledge
 
-As members, contributors, and maintainers of **depkeeper**, we pledge to foster an open, welcoming, inclusive, and harassment-free environment for everyone.
+As members, contributors and maintainers of depkeeper, we pledge to make participation in our
+community a harassment-free experience for everyone, regardless of age, body size, visible or
+invisible disability, ethnicity, sex characteristics, gender identity and expression, level of
+experience, education, socio-economic status, nationality, personal appearance, race, caste,
+colour, religion, or sexual identity and orientation.
 
-We are committed to ensuring participation regardless of:
-
-- Age
-- Body size
-- Visible or invisible disability
-- Ethnicity
-- Gender identity or expression
-- Level of experience
-- Education
-- Socio-economic status
-- Nationality
-- Personal appearance
-- Race or caste
-- Religion
-- Sexual identity or orientation
-
-Our goal is to build a community where contributors feel supported, heard, respected, and safe.
+We pledge to act and interact in ways that contribute to an open, welcoming, diverse, inclusive
+and healthy community.
 
 ---
 
-## Our Standards
+## Our standards
 
-### Positive behaviors that help our community thrive:
+Examples of behaviour that contributes to a positive environment:
 
-- Demonstrating empathy, respect, and kindness toward others
-- Welcoming new contributors and being supportive of their learning
-- Giving and accepting constructive feedback gracefully
-- Taking responsibility and apologizing when mistakes occur
-- Focusing on what benefits the community as a whole
+- Demonstrating empathy and kindness toward other people
+- Being respectful of differing opinions, viewpoints and experiences
+- Giving and gracefully accepting constructive feedback
+- Accepting responsibility, apologising to those affected by our mistakes, and learning from them
+- Focusing on what is best for the community as a whole
+- Welcoming new contributors and supporting their learning
 
-### Unacceptable behaviors include (but are not limited to):
+Examples of unacceptable behaviour:
 
-- Sexualized language, imagery, or inappropriate attention
-- Trolling, insulting, or derogatory comments
-- Personal, political, or religious attacks
+- The use of sexualised language or imagery, and sexual attention or advances of any kind
+- Trolling, insulting or derogatory comments, and personal, political or religious attacks
 - Public or private harassment
-- Publishing private information (e.g., addresses) without permission
-- Any behavior that would be considered inappropriate in a professional setting
+- Publishing others' private information, such as a physical or email address, without their
+  explicit permission
+- Other conduct which could reasonably be considered inappropriate in a professional setting
 
 ---
 
-## Enforcement Responsibilities
+## Enforcement responsibilities
 
-Community leaders are responsible for:
+Community leaders are responsible for clarifying and enforcing our standards of acceptable
+behaviour, and will take appropriate and fair corrective action in response to any behaviour that
+they deem inappropriate, threatening, offensive or harmful.
 
-- Clarifying community standards
-- Responding to unacceptable behavior
-- Taking fair and appropriate corrective action
-- Moderating contributions (issues, PRs, comments, commits, wiki edits)
-- Explaining moderation decisions when appropriate
+Community leaders have the right and responsibility to remove, edit or reject comments, commits,
+code, issues, pull requests, wiki edits and other contributions that are not aligned to this Code
+of Conduct, and will communicate reasons for moderation decisions when appropriate.
 
 ---
 
 ## Scope
 
-This Code of Conduct applies:
-
-- Within all **depkeeper** community spaces (GitHub Issues, PRs, Discussions)
-- In public spaces where someone is representing the community
-
-Representation examples include using an official email, posting via a project account, or speaking at events on behalf of depkeeper.
+This Code of Conduct applies within all community spaces — the repository, issues, pull requests
+and discussions — and also applies when an individual is officially representing the community in
+public spaces. Examples include using an official email address, posting via an official social
+media account, or acting as an appointed representative at an event.
 
 ---
 
 ## Enforcement
 
-If you experience or witness unacceptable behavior, please report it through our confidential contact form:
+Report abusive, harassing or otherwise unacceptable behaviour privately through the repository's
+Security tab:
 
-🔒 https://github.com/depkeeper/depkeeper/security/advisories/new
+**<https://github.com/rahulkaushal04/depkeeper/security/advisories/new>**
 
-All reports will be reviewed promptly, fairly, and confidentially.
-Community leaders will respect the privacy and safety of reporters at all times.
-
----
-
-## Enforcement Guidelines
-
-The following guidelines outline how community leaders will handle violations.
-
-### 1. **Correction**
-
-**Community Impact:**
-Minor inappropriate behavior or first-time offense.
-
-**Consequence:**
-Private written warning explaining what went wrong and how to improve.
-A public apology may be requested.
+All complaints will be reviewed and investigated promptly and fairly. Community leaders are
+obligated to respect the privacy and security of the reporter of any incident.
 
 ---
 
-### 2. **Warning**
+## Enforcement guidelines
 
-**Community Impact:**
-Repeated violations or more serious behavior.
+Community leaders will follow these Community Impact Guidelines in determining the consequences
+for any action they deem in violation of this Code of Conduct.
 
-**Consequence:**
-Formal warning with clear consequences for continued behavior.
-Avoiding interaction with affected parties may be required.
+### 1. Correction
 
----
+**Community impact:** Use of inappropriate language or other behaviour deemed unprofessional or
+unwelcome.
 
-### 3. **Temporary Ban**
+**Consequence:** A private, written warning from community leaders, providing clarity around the
+nature of the violation and an explanation of why the behaviour was inappropriate. A public
+apology may be requested.
 
-**Community Impact:**
-Serious or repeated violations.
+### 2. Warning
 
-**Consequence:**
-Temporary ban from participation in all community spaces.
-Any attempt to circumvent the ban may result in escalation.
+**Community impact:** A violation through a single incident or series of actions.
 
----
+**Consequence:** A warning with consequences for continued behaviour. No interaction with the
+people involved, including unsolicited interaction with those enforcing the Code of Conduct, for a
+specified period. This includes avoiding interactions in community spaces as well as external
+channels. Violating these terms may lead to a temporary or permanent ban.
 
-### 4. **Permanent Ban**
+### 3. Temporary ban
 
-**Community Impact:**
-Pattern of sustained inappropriate behavior, harassment, or discrimination.
+**Community impact:** A serious violation of community standards, including sustained
+inappropriate behaviour.
 
-**Consequence:**
-Permanent ban from all community participation.
+**Consequence:** A temporary ban from any sort of interaction or public communication with the
+community for a specified period. No public or private interaction with the people involved is
+allowed during this period. Violating these terms may lead to a permanent ban.
+
+### 4. Permanent ban
+
+**Community impact:** Demonstrating a pattern of violation of community standards, including
+sustained inappropriate behaviour, harassment of an individual, or aggression toward or
+disparagement of classes of individuals.
+
+**Consequence:** A permanent ban from any sort of public interaction within the community.
 
 ---
 
 ## Attribution
 
-This Code of Conduct is adapted from the [Contributor Covenant][homepage] v2.1:
-https://www.contributor-covenant.org/version/2/1/code_of_conduct/
+This Code of Conduct is adapted from the [Contributor Covenant][homepage], version 2.1, available
+at <https://www.contributor-covenant.org/version/2/1/code_of_conduct.html>.
 
-Community Impact Guidelines were inspired by:
-Mozilla’s Code of Conduct Enforcement Ladder.
+Community Impact Guidelines were inspired by
+[Mozilla's code of conduct enforcement ladder](https://github.com/mozilla/diversity).
 
-For FAQs:
-https://www.contributor-covenant.org/faq
-
-Translations:
-https://www.contributor-covenant.org/translations
+For answers to common questions about this code of conduct, see
+<https://www.contributor-covenant.org/faq>. Translations are available at
+<https://www.contributor-covenant.org/translations>.
 
 [homepage]: https://www.contributor-covenant.org

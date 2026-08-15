@@ -1,40 +1,71 @@
 ---
 title: Community
-description: Join the depkeeper community -- get help, contribute, and stay informed
+description: FAQ, changelog, licence, code of conduct and security policy
 ---
 
 # Community
 
-Welcome to the depkeeper community. This section covers how to get involved, stay informed about releases, and find answers to common questions.
+<div class="grid cards" markdown>
+
+- :material-frequently-asked-questions:{ .lg .middle } **[FAQ](faq.md)**
+
+    ---
+
+    Answers to the questions that come up repeatedly.
+
+- :material-history:{ .lg .middle } **[Changelog](changelog.md)**
+
+    ---
+
+    Version history and behavioural changes.
+
+- :material-license:{ .lg .middle } **[Licence](license.md)**
+
+    ---
+
+    Apache License 2.0 — what it permits and requires.
+
+- :material-account-group:{ .lg .middle } **[Code of Conduct](code-of-conduct.md)**
+
+    ---
+
+    Expected behaviour and enforcement.
+
+- :material-shield-lock:{ .lg .middle } **[Security policy](security.md)**
+
+    ---
+
+    Supported versions and how to report a vulnerability.
+
+</div>
 
 ---
 
-## Get Involved
+## Getting help
 
-depkeeper is an open source project and we welcome contributions of all kinds. Whether you want to report a bug, suggest a feature, improve documentation, or submit code, there are many ways to participate.
-
-- **Report issues** -- Found a bug or have a feature request? Open an issue on [GitHub](https://github.com/rahulkaushal04/depkeeper/issues)
-- **Contribute code** -- See the [Contributing Guide](../contributing/index.md) for setup instructions and guidelines
-- **Improve docs** -- Documentation improvements are always welcome
-
----
-
-## Quick Links
-
-| Resource | Description |
+| Need | Where |
 |---|---|
-| [FAQ](faq.md) | Answers to common questions about installation, usage, and configuration |
-| [Changelog](changelog.md) | Version history and release notes |
-| [License](license.md) | Apache 2.0 licensing details and third-party dependencies |
-| [Code of Conduct](code-of-conduct.md) | Community standards and expectations |
-| [Security Policy](security.md) | How to report vulnerabilities and what to expect |
+| Something is broken | [Troubleshooting](../guides/troubleshooting.md), then [open an issue](https://github.com/rahulkaushal04/depkeeper/issues) |
+| A behaviour looks wrong | [Known limitations](../reference/limitations.md) — it may be documented |
+| A question about usage | [FAQ](faq.md), then [GitHub Discussions](https://github.com/rahulkaushal04/depkeeper/discussions) |
+| A feature request | Open an issue describing the *problem* before proposing a solution |
+| A security vulnerability | **Never** a public issue — follow the [security policy](security.md) |
+| You want to contribute | [Contributing](../contributing/index.md) |
+
+### Before opening an issue
+
+Include:
+
+1. `depkeeper --version` and `python --version`
+2. The smallest requirements file that reproduces the behaviour
+3. The exact command line
+4. `depkeeper -vv <command> … 2> debug.log`, with `debug.log` attached
+5. Expected versus actual behaviour
 
 ---
 
-## Project Links
+## Links
 
-- **Repository** -- [github.com/rahulkaushal04/depkeeper](https://github.com/rahulkaushal04/depkeeper)
-- **PyPI** -- [pypi.org/project/depkeeper](https://pypi.org/project/depkeeper/)
-- **Documentation** -- [rahulkaushal04.github.io/depkeeper](https://rahulkaushal04.github.io/depkeeper/)
-- **Issue Tracker** -- [GitHub Issues](https://github.com/rahulkaushal04/depkeeper/issues)
-- **GitHub Releases** -- [Releases](https://github.com/rahulkaushal04/depkeeper/releases)
+- Repository — [github.com/rahulkaushal04/depkeeper](https://github.com/rahulkaushal04/depkeeper)
+- Issues — [github.com/rahulkaushal04/depkeeper/issues](https://github.com/rahulkaushal04/depkeeper/issues)
+- PyPI — [pypi.org/project/depkeeper](https://pypi.org/project/depkeeper/)

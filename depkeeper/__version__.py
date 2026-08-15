@@ -1,9 +1,8 @@
-"""
-Version information for depkeeper.
+"""Version information for depkeeper.
 
-This module exposes the canonical version string for the depkeeper
-package. It is intentionally isolated to avoid import cycles and to
-allow tools (CLI, packaging, docs) to query the version reliably.
+Exposes the canonical version string for the depkeeper package. It is
+intentionally isolated to avoid import cycles and to allow tools (CLI,
+packaging, docs) to query the version reliably.
 """
 
 from __future__ import annotations

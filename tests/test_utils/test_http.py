@@ -1,1548 +1,714 @@
+"""Tests for :class:`depkeeper.utils.http.HTTPClient`.
+
+This is the only component that talks to the network, so its retry, rate-limit
+and concurrency behaviour decides whether a ``depkeeper check`` against a flaky
+PyPI mirror recovers or fails the build.
+
+Two deliberate choices shape this module:
+
+- **No real waiting.** ``asyncio.sleep`` is replaced by the ``instant_sleep``
+  fixture, which records the requested delay instead of honouring it. The old
+  version of these tests spent roughly 50 seconds sleeping through exponential
+  backoff, and asserted on ``time.time()`` deltas — which made every retry test
+  a race against CI scheduling. Recording delays is both faster *and* a
+  stronger assertion: the exact backoff schedule is checked, not a lower bound.
+- **Transport-level fakes.** Responses are driven through ``httpx.MockTransport``
+  where practical, so status handling exercises real ``httpx.Response`` objects
+  rather than ``MagicMock``\\ s that would happily agree with a broken
+  expectation.
+"""
+
 from __future__ import annotations
 
+import asyncio
 import json
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
 import httpx
 import pytest
-import asyncio
-from typing import Any, Dict, Generator, List
-from unittest.mock import AsyncMock, MagicMock, patch
 
-from depkeeper.utils.http import HTTPClient
 from depkeeper.exceptions import NetworkError, PyPIError
+from depkeeper.utils.http import HTTPClient
+
+PYPI_URL = "https://pypi.org/pypi/requests/json"
+
+#: A trimmed but structurally real PyPI JSON body.
+REQUESTS_PAYLOAD: Dict[str, Any] = {
+    "info": {
+        "name": "requests",
+        "version": "2.32.3",
+        "requires_python": ">=3.8",
+        "requires_dist": ["urllib3<3,>=1.21.1", "certifi>=2017.4.17"],
+    },
+    "releases": {"2.31.0": [{"filename": "requests-2.31.0-py3-none-any.whl"}]},
+}
 
 
-@pytest.fixture
-def http_client() -> Generator[HTTPClient, None, None]:
-    """Create an HTTPClient instance for testing.
+# ---------------------------------------------------------------------------
+# Transport helpers
+# ---------------------------------------------------------------------------
 
-    Yields:
-        HTTPClient: A configured client instance with short timeouts for testing.
 
-    Note:
-        Ensures proper cleanup by closing the client after test completion.
+def _client(
+    responses: List[Any],
+    *,
+    seen: Optional[List[httpx.Request]] = None,
+    **kwargs: Any,
+) -> HTTPClient:
+    """Build an :class:`HTTPClient` wired to a mock transport.
+
+    The client is returned *unopened*; use it as an async context manager so
+    ``close`` still runs and connection cleanup stays under test.
+
+    SSL verification is disabled by default because every request is served by
+    an in-memory transport. Leaving it on makes ``httpx`` build a real
+    ``SSLContext`` — and load the CA bundle — for each of the dozens of clients
+    this module creates, which dominated the module's runtime.
     """
-    client = HTTPClient(timeout=5, max_retries=2)
-    yield client
-    # Ensure client is closed to prevent resource leaks
-    if client._client is not None:
-        asyncio.get_event_loop().run_until_complete(client.close())
+    kwargs.setdefault("verify_ssl", False)
+    client = HTTPClient(**kwargs)
+    remaining = list(responses)
+    calls = seen if seen is not None else []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        item = remaining.pop(0) if len(remaining) > 1 else remaining[0]
+        if isinstance(item, BaseException):
+            raise item
+        return item
+
+    transport = httpx.MockTransport(handler)
+    original_ensure = client._ensure_client
+
+    async def _ensure_with_mock_transport() -> None:
+        await original_ensure()
+        assert client._client is not None
+        client._client._transport = transport
+
+    client._ensure_client = _ensure_with_mock_transport  # type: ignore[method-assign]
+    return client
 
 
-@pytest.mark.unit
-class TestHTTPClientInit:
-    """Tests for HTTPClient initialization and configuration."""
+#: Distinguishes "no JSON body" from a body that is literally ``null``.
+_NO_BODY = object()
 
-    def test_default_values(self) -> None:
-        """Test HTTPClient initializes with correct default values.
 
-        Verifies that all default parameters match expected constants
-        and that the user agent includes the package name.
-        """
+def _response(
+    status_code: int,
+    *,
+    json_body: Any = _NO_BODY,
+    text: str = "",
+    headers: Optional[Dict[str, str]] = None,
+) -> httpx.Response:
+    """Build a real ``httpx.Response`` with the given status and body."""
+    if json_body is not _NO_BODY:
+        return httpx.Response(status_code, json=json_body, headers=headers)
+    return httpx.Response(status_code, text=text, headers=headers)
+
+
+# ---------------------------------------------------------------------------
+# Configuration and lifecycle
+# ---------------------------------------------------------------------------
+
+
+class TestConfiguration:
+    def test_defaults_match_the_documented_contract(self) -> None:
+        """These values appear in the README and bound worst-case run time."""
         client = HTTPClient()
 
-        assert client.timeout == 30  # DEFAULT_TIMEOUT
-        assert client.max_retries == 3  # DEFAULT_MAX_RETRIES
+        assert (client.timeout, client.max_retries) == (30, 3)
         assert client.rate_limit_delay == 0.0
         assert client.verify_ssl is True
         assert client.max_concurrency == 10
-        assert "depkeeper" in client.user_agent
         assert client._max_429_retries == 5
 
-    def test_custom_values(self) -> None:
-        """Test HTTPClient accepts and stores custom configuration values.
+    def test_user_agent_identifies_depkeeper_and_its_version(self) -> None:
+        """PyPI rate-limits by user agent; an anonymous one gets throttled."""
+        from depkeeper.__version__ import __version__
 
-        Ensures all constructor parameters are properly stored and
-        can be customized independently.
-        """
-        client = HTTPClient(
-            timeout=10,
-            max_retries=5,
-            rate_limit_delay=0.5,
-            verify_ssl=False,
-            user_agent="CustomAgent/1.0",
-            max_concurrency=20,
-        )
+        assert __version__ in HTTPClient().user_agent
+        assert "depkeeper" in HTTPClient().user_agent
 
-        assert client.timeout == 10
-        assert client.max_retries == 5
-        assert client.rate_limit_delay == 0.5
-        assert client.verify_ssl is False
-        assert client.user_agent == "CustomAgent/1.0"
-        assert client.max_concurrency == 20
+    async def test_configuration_reaches_the_underlying_httpx_client(self) -> None:
+        """Storing the values is not enough — they must be applied."""
+        async with HTTPClient(
+            timeout=15, verify_ssl=False, user_agent="acme-ci/1.0", max_concurrency=4
+        ) as client:
+            assert client._client is not None
+            assert client._client.timeout.read == 15
+            assert client._client.headers["User-Agent"] == "acme-ci/1.0"
+            assert client._semaphore._value == 4
 
-    def test_initial_state(self) -> None:
-        """Test HTTPClient starts in correct initial state.
 
-        Verifies that internal state variables are properly initialized
-        before any requests are made.
-        """
+class TestLifecycle:
+    async def test_context_manager_opens_and_closes_the_transport(self) -> None:
         client = HTTPClient()
 
-        assert client._client is None
-        assert client._last_request_time == 0.0
-        assert client._rate_limit_lock is not None
-        assert client._semaphore is not None
-        assert client._semaphore._value == 10  # Default max_concurrency
-
-    def test_edge_case_zero_timeout(self) -> None:
-        """Test HTTPClient handles zero timeout configuration.
-
-        Edge case: Zero timeout should be accepted but may cause
-        immediate timeouts in practice.
-        """
-        client = HTTPClient(timeout=0)
-        assert client.timeout == 0
-
-    def test_edge_case_zero_max_retries(self) -> None:
-        """Test HTTPClient handles zero max_retries (no retries).
-
-        Edge case: Zero retries means fail immediately on first error.
-        """
-        client = HTTPClient(max_retries=0)
-        assert client.max_retries == 0
-
-    def test_edge_case_negative_rate_limit(self) -> None:
-        """Test HTTPClient handles negative rate limit delay.
-
-        Edge case: Negative delays should be treated as no delay.
-        """
-        client = HTTPClient(rate_limit_delay=-1.0)
-        assert client.rate_limit_delay == -1.0
-
-
-@pytest.mark.unit
-class TestHTTPClientContextManager:
-    """Tests for HTTPClient async context manager protocol."""
-
-    @pytest.mark.asyncio
-    async def test_context_manager_creates_client(self) -> None:
-        """Test async context manager initializes httpx client on entry.
-
-        Verifies that the underlying httpx.AsyncClient is created
-        when entering the async context.
-        """
-        async with HTTPClient() as client:
-            assert client._client is not None
+        async with client:
             assert isinstance(client._client, httpx.AsyncClient)
 
-    @pytest.mark.asyncio
-    async def test_context_manager_closes_client(self) -> None:
-        """Test async context manager properly closes client on exit.
+        assert client._client is None
 
-        Ensures resources are cleaned up when exiting the context,
-        preventing connection leaks.
-        """
+    async def test_transport_is_closed_even_when_the_body_raises(self) -> None:
+        """A failed check must not leak sockets into the rest of the process."""
         client = HTTPClient()
-        async with client:
-            assert client._client is not None
+
+        with pytest.raises(RuntimeError):
+            async with client:
+                raise RuntimeError("check failed")
 
         assert client._client is None
 
-    @pytest.mark.asyncio
-    async def test_context_manager_closes_on_exception(self) -> None:
-        """Test client is closed even when exception occurs in context.
-
-        Edge case: Resource cleanup should happen even during error conditions.
-        """
+    async def test_client_can_be_reopened_after_closing(self) -> None:
+        """``check`` and ``update`` each open the shared client in turn."""
         client = HTTPClient()
+
+        async with client:
+            first = client._client
+        async with client:
+            second = client._client
+
+        assert first is not second
+
+    async def test_ensure_client_is_idempotent(self) -> None:
+        """Every request calls it; recreating the pool would defeat keep-alive."""
+        client = HTTPClient()
+
+        await client._ensure_client()
+        first = client._client
+        await client._ensure_client()
+
+        assert client._client is first
+        await client.close()
+
+    async def test_close_is_safe_before_and_after_use(self) -> None:
+        client = HTTPClient()
+
+        await client.close()  # never opened
+        await client._ensure_client()
+        await client.close()
+        await client.close()  # already closed
+
+        assert client._client is None
+
+
+# ---------------------------------------------------------------------------
+# Request handling
+# ---------------------------------------------------------------------------
+
+
+class TestRequestSuccess:
+    @pytest.mark.parametrize("status_code", [200, 201, 202, 204])
+    async def test_success_statuses_are_returned_unchanged(
+        self, status_code: int
+    ) -> None:
+        client = _client([_response(status_code)], max_retries=0)
+
+        async with client:
+            response = await client.get(PYPI_URL)
+
+        assert response.status_code == status_code
+
+    @pytest.mark.parametrize(
+        "raw_url",
+        [
+            f'"{PYPI_URL}"',
+            f"'{PYPI_URL}'",
+            f"  {PYPI_URL}  ",
+            f"\t{PYPI_URL}\n",
+        ],
+        ids=["double-quoted", "single-quoted", "spaces", "tabs-and-newline"],
+    )
+    async def test_urls_are_cleaned_before_dispatch(self, raw_url: str) -> None:
+        """URLs arrive from config files and shell interpolation, so quoting
+        and stray whitespace are routine; sending them verbatim yields a 404.
+        """
+        seen: List[httpx.Request] = []
+        client = _client([_response(200)], seen=seen, max_retries=0)
+
+        async with client:
+            await client.get(raw_url)
+
+        assert str(seen[0].url) == PYPI_URL
+
+    async def test_post_sends_the_body_through(self) -> None:
+        seen: List[httpx.Request] = []
+        client = _client([_response(201)], seen=seen, max_retries=0)
+
+        async with client:
+            await client.post(PYPI_URL, json={"name": "requests"})
+
+        assert seen[0].method == "POST"
+        assert json.loads(seen[0].content) == {"name": "requests"}
+
+
+class TestRetryPolicy:
+    """Which failures are retried, how often, and with what backoff.
+
+    Getting the classification wrong is expensive in both directions: retrying
+    a 404 multiplies load on PyPI for no benefit, while *not* retrying a 503
+    turns a momentary blip into a failed build.
+    """
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            pytest.param(httpx.TimeoutException("read timed out"), id="timeout"),
+            pytest.param(httpx.ConnectError("connection refused"), id="connect-error"),
+            pytest.param(httpx.ReadError("connection reset"), id="read-error"),
+        ],
+    )
+    async def test_transport_failures_are_retried_then_succeed(
+        self, failure: Exception, instant_sleep: List[float]
+    ) -> None:
+        seen: List[httpx.Request] = []
+        client = _client([failure, _response(200)], seen=seen, max_retries=2)
+
+        async with client:
+            response = await client.get(PYPI_URL)
+
+        assert response.status_code == 200
+        assert len(seen) == 2
+
+    @pytest.mark.parametrize("status_code", [500, 502, 503, 504])
+    async def test_server_errors_are_retried_then_succeed(
+        self, status_code: int, instant_sleep: List[float]
+    ) -> None:
+        """5xx is the mirror having a bad minute; the next attempt usually works."""
+        seen: List[httpx.Request] = []
+        client = _client(
+            [_response(status_code, text="upstream error"), _response(200)],
+            seen=seen,
+            max_retries=2,
+        )
+
+        async with client:
+            response = await client.get(PYPI_URL)
+
+        assert response.status_code == 200
+        assert len(seen) == 2
+
+    @pytest.mark.parametrize("status_code", [400, 401, 403, 405, 422])
+    async def test_client_errors_fail_fast_without_retrying(
+        self, status_code: int, instant_sleep: List[float]
+    ) -> None:
+        """The request is wrong; repeating it wastes the user's time and PyPI's."""
+        seen: List[httpx.Request] = []
+        client = _client(
+            [_response(status_code, text="denied")], seen=seen, max_retries=3
+        )
+
+        async with client:
+            with pytest.raises(NetworkError) as exc_info:
+                await client.get(PYPI_URL)
+
+        assert exc_info.value.status_code == status_code
+        assert exc_info.value.response_body == "denied"
+        assert len(seen) == 1
+        assert instant_sleep == []
+
+    async def test_404_raises_pypi_error_immediately(
+        self, instant_sleep: List[float]
+    ) -> None:
+        """A typo'd or private package name must be reported as such, not as a
+        network outage — the two need completely different user action.
+        """
+        seen: List[httpx.Request] = []
+        client = _client([_response(404)], seen=seen, max_retries=3)
+
+        async with client:
+            with pytest.raises(PyPIError) as exc_info:
+                await client.get(PYPI_URL)
+
+        assert exc_info.value.status_code == 404
+        assert "not found" in str(exc_info.value).lower()
+        assert len(seen) == 1
+
+    async def test_retries_are_exhausted_then_reported(
+        self, instant_sleep: List[float]
+    ) -> None:
+        """The final error must name the attempt count so the user can tell a
+        persistent outage from a single unlucky request.
+        """
+        seen: List[httpx.Request] = []
+        client = _client(
+            [httpx.TimeoutException("read timed out")], seen=seen, max_retries=2
+        )
+
+        async with client:
+            with pytest.raises(NetworkError, match="failed after 3 attempts"):
+                await client.get(PYPI_URL)
+
+        assert len(seen) == 3  # initial attempt plus two retries
+
+    async def test_backoff_grows_exponentially_with_bounded_jitter(
+        self, instant_sleep: List[float]
+    ) -> None:
+        """Backoff is ``2**attempt`` plus up to 0.3s of jitter.
+
+        The exponential term prevents a retry storm against an already
+        struggling mirror; the jitter stops many concurrent clients from
+        retrying in lockstep. Asserting on the recorded delays checks both
+        properties exactly, where a wall-clock assertion could only ever check
+        a lower bound.
+        """
+        client = _client([httpx.TimeoutException("read timed out")], max_retries=3)
+
+        async with client:
+            with pytest.raises(NetworkError):
+                await client.get(PYPI_URL)
+
+        assert len(instant_sleep) == 3
+        for attempt, delay in enumerate(instant_sleep):
+            base = 2**attempt
+            assert base <= delay < base + 0.3
+
+    async def test_no_backoff_is_applied_after_the_final_attempt(
+        self, instant_sleep: List[float]
+    ) -> None:
+        """Sleeping before giving up would add latency for no benefit."""
+        client = _client([httpx.TimeoutException("read timed out")], max_retries=0)
+
+        async with client:
+            with pytest.raises(NetworkError):
+                await client.get(PYPI_URL)
+
+        assert instant_sleep == []
+
+
+class TestRateLimitResponses:
+    """429 has its own budget, separate from the transport retry budget.
+
+    PyPI answers a 429 quickly, so these attempts are cheap and a client that
+    counted them against ``max_retries`` would give up while still being told
+    exactly how long to wait.
+    """
+
+    async def test_retry_after_header_is_honoured(
+        self, instant_sleep: List[float]
+    ) -> None:
+        client = _client(
+            [_response(429, headers={"Retry-After": "7"}), _response(200)],
+            max_retries=1,
+        )
+
+        async with client:
+            response = await client.get(PYPI_URL)
+
+        assert response.status_code == 200
+        assert instant_sleep == [7]
+
+    async def test_missing_retry_after_falls_back_to_one_second(
+        self, instant_sleep: List[float]
+    ) -> None:
+        client = _client([_response(429), _response(200)], max_retries=1)
+
+        async with client:
+            await client.get(PYPI_URL)
+
+        assert instant_sleep == [1]
+
+    async def test_429_attempts_consume_an_outer_retry_slot(
+        self, instant_sleep: List[float]
+    ) -> None:
+        """Documented behaviour: a 429 also costs one ``max_retries`` attempt.
+
+        ``_max_429_retries`` caps how many rate-limit responses are tolerated,
+        but each one re-enters the same loop that bounds transport retries. With
+        ``max_retries=1`` a client therefore survives exactly one 429, even
+        though its 429 budget is five. Operators tuning ``max_retries`` down for
+        latency need to know it also shortens rate-limit patience.
+        """
+        seen: List[httpx.Request] = []
+        client = _client(
+            [
+                _response(429, headers={"Retry-After": "0"}),
+                _response(429, headers={"Retry-After": "0"}),
+                _response(200),
+            ],
+            seen=seen,
+            max_retries=1,
+        )
+
+        async with client:
+            with pytest.raises(NetworkError, match="failed after 2 attempts"):
+                await client.get(PYPI_URL)
+
+        assert len(seen) == 2
+
+    async def test_a_generous_retry_budget_rides_out_transient_throttling(
+        self, instant_sleep: List[float]
+    ) -> None:
+        """With the default budget, four 429s still resolve to a success."""
+        seen: List[httpx.Request] = []
+        client = _client(
+            [
+                _response(429, headers={"Retry-After": "0"}),
+                _response(429, headers={"Retry-After": "0"}),
+                _response(429, headers={"Retry-After": "0"}),
+                _response(429, headers={"Retry-After": "0"}),
+                _response(200),
+            ],
+            seen=seen,
+            max_retries=5,
+        )
+
+        async with client:
+            response = await client.get(PYPI_URL)
+
+        assert response.status_code == 200
+        assert len(seen) == 5
+
+    async def test_sustained_rate_limiting_eventually_gives_up(
+        self, instant_sleep: List[float]
+    ) -> None:
+        """Without a cap a throttled client would spin indefinitely."""
+        seen: List[httpx.Request] = []
+        client = _client(
+            [_response(429, headers={"Retry-After": "0"})], seen=seen, max_retries=10
+        )
+        client._max_429_retries = 2
+
+        async with client:
+            with pytest.raises(NetworkError, match="Rate limit exceeded") as exc_info:
+                await client.get(PYPI_URL)
+
+        assert exc_info.value.status_code == 429
+        assert len(seen) == client._max_429_retries + 1
+
+
+class TestOutboundRateLimiting:
+    """``rate_limit_delay`` throttles depkeeper's own request rate."""
+
+    @pytest.mark.parametrize("delay", [0.0, -1.0], ids=["zero", "negative"])
+    async def test_non_positive_delay_disables_throttling(
+        self, delay: float, instant_sleep: List[float]
+    ) -> None:
+        client = HTTPClient(rate_limit_delay=delay)
+
+        await client._rate_limit()
+        await client._rate_limit()
+
+        assert instant_sleep == []
+
+    async def test_second_request_waits_out_the_remaining_interval(
+        self, instant_sleep: List[float]
+    ) -> None:
+        """The first call is free; subsequent calls pay the difference."""
+        client = HTTPClient(rate_limit_delay=0.5)
+
+        await client._rate_limit()
+        await client._rate_limit()
+
+        assert len(instant_sleep) == 1
+        assert 0 < instant_sleep[0] <= 0.5
+
+    async def test_concurrent_callers_are_serialised_into_a_schedule(
+        self, instant_sleep: List[float]
+    ) -> None:
+        """A lock plus a projected timestamp is what stops a burst of coroutines
+        from all reading the same "last request" time and firing at once.
+        """
+        client = HTTPClient(rate_limit_delay=0.5)
+
+        await asyncio.gather(*(client._rate_limit() for _ in range(4)))
+
+        # First caller passes freely; the other three are spaced out.
+        assert len(instant_sleep) == 3
+        assert instant_sleep == sorted(instant_sleep)
+
+
+class TestConcurrencyLimit:
+    """The semaphore bounds in-flight requests so PyPI is not flooded."""
+
+    async def test_in_flight_requests_never_exceed_the_limit(self) -> None:
+        peak = 0
+        active = 0
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal peak, active
+            active += 1
+            peak = max(peak, active)
+            await asyncio.sleep(0)
+            active -= 1
+            return httpx.Response(200, json={})
+
+        client = HTTPClient(max_concurrency=3, max_retries=0, verify_ssl=False)
+        await client._ensure_client()
+        assert client._client is not None
+        client._client._transport = httpx.MockTransport(handler)  # type: ignore[assignment]
 
         try:
-            async with client:
-                assert client._client is not None
-                raise ValueError("Test exception")
-        except ValueError:
-            pass
+            await asyncio.gather(*(client.get(PYPI_URL) for _ in range(12)))
+        finally:
+            await client.close()
 
-        # Client should still be closed
-        assert client._client is None
+        assert peak <= 3
 
-    @pytest.mark.asyncio
-    async def test_multiple_context_manager_entries(self) -> None:
-        """Test client can be used with context manager multiple times.
-
-        Edge case: Should be able to reuse client with multiple
-        async with blocks sequentially.
-        """
-        client = HTTPClient()
+    async def test_permits_are_released_when_a_request_fails(self) -> None:
+        """A leaked permit deadlocks every later request in the same run."""
+        client = _client([_response(500, text="boom")], max_concurrency=2, max_retries=0)
 
         async with client:
-            first_client = client._client
-            assert first_client is not None
+            for _ in range(4):
+                with pytest.raises(NetworkError):
+                    await client.get(PYPI_URL)
 
-        assert client._client is None
+            assert client._semaphore._value == 2
+
+
+# ---------------------------------------------------------------------------
+# JSON helpers
+# ---------------------------------------------------------------------------
+
+
+class TestGetJson:
+    async def test_parses_a_realistic_pypi_document(self) -> None:
+        client = _client([_response(200, json_body=REQUESTS_PAYLOAD)], max_retries=0)
 
         async with client:
-            second_client = client._client
-            assert second_client is not None
-
-        # Should create new client instance
-        assert first_client is not second_client
-
-
-@pytest.mark.unit
-class TestHTTPClientEnsureClient:
-    """Tests for HTTPClient._ensure_client internal method."""
-
-    @pytest.mark.asyncio
-    async def test_ensure_client_creates_once(self) -> None:
-        """Test _ensure_client is idempotent (creates only once).
-
-        Multiple calls should reuse the same httpx.AsyncClient instance.
-        """
-        client = HTTPClient()
-
-        await client._ensure_client()
-        first_client = client._client
-        assert first_client is not None
-
-        await client._ensure_client()
-        second_client = client._client
-
-        assert first_client is second_client
-        await client.close()
-
-    @pytest.mark.asyncio
-    async def test_ensure_client_configures_correctly(self) -> None:
-        """Test _ensure_client passes configuration to httpx.AsyncClient.
-
-        Verifies that timeout, SSL verification, and other settings
-        are properly configured in the underlying client.
-        """
-        client = HTTPClient(timeout=15, verify_ssl=False, user_agent="TestAgent")
-        await client._ensure_client()
-
-        assert client._client is not None
-        assert client._client.timeout.read == 15
-        assert client._client.headers["User-Agent"] == "TestAgent"
-        await client.close()
-
-    @pytest.mark.asyncio
-    async def test_ensure_client_enables_http2(self) -> None:
-        """Test _ensure_client enables HTTP/2 support.
-
-        HTTP/2 should be enabled for better performance with modern servers.
-        """
-        client = HTTPClient()
-        await client._ensure_client()
-
-        assert client._client is not None
-        # HTTP/2 is enabled in the constructor
-        await client.close()
-
-
-@pytest.mark.unit
-class TestHTTPClientClose:
-    """Tests for HTTPClient.close cleanup method."""
-
-    @pytest.mark.asyncio
-    async def test_close_sets_client_to_none(self) -> None:
-        """Test close nullifies the _client reference.
-
-        After closing, _client should be None to prevent use-after-close.
-        """
-        client = HTTPClient()
-        await client._ensure_client()
-        assert client._client is not None
-
-        await client.close()
-        assert client._client is None
-
-    @pytest.mark.asyncio
-    async def test_close_when_no_client(self) -> None:
-        """Test close is safe to call when no client exists.
-
-        Edge case: Should be a no-op when client was never initialized.
-        """
-        client = HTTPClient()
-        assert client._client is None
-
-        # Should not raise
-        await client.close()
-        assert client._client is None
-
-    @pytest.mark.asyncio
-    async def test_close_multiple_times(self) -> None:
-        """Test close can be called multiple times safely.
-
-        Edge case: Multiple close calls should be idempotent.
-        """
-        client = HTTPClient()
-        await client._ensure_client()
-
-        await client.close()
-        assert client._client is None
-
-        # Second close should not raise
-        await client.close()
-        assert client._client is None
-
-
-@pytest.mark.unit
-class TestHTTPClientRateLimit:
-    """Tests for HTTPClient._rate_limit rate limiting mechanism."""
-
-    @pytest.mark.asyncio
-    async def test_rate_limit_no_delay(self) -> None:
-        """Test rate limit with zero delay is effectively disabled.
-
-        When rate_limit_delay is 0, requests should proceed immediately.
-        """
-        client = HTTPClient(rate_limit_delay=0.0)
-
-        import time
-
-        start = time.time()
-        await client._rate_limit()
-        elapsed = time.time() - start
-
-        # Should be nearly instant
-        assert elapsed < 0.05
-
-    @pytest.mark.asyncio
-    async def test_rate_limit_enforces_delay(self) -> None:
-        """Test rate limit enforces minimum delay between requests.
-
-        Sequential calls should be separated by at least rate_limit_delay seconds.
-        """
-        client = HTTPClient(rate_limit_delay=0.1)
-
-        import time
-
-        # First call should be instant
-        await client._rate_limit()
-
-        # Second call should wait
-        start = time.time()
-        await client._rate_limit()
-        elapsed = time.time() - start
-
-        # Should have waited approximately 0.1 seconds
-        assert elapsed >= 0.08  # Allow some tolerance for timing jitter
-
-    @pytest.mark.asyncio
-    async def test_rate_limit_concurrent_calls(self) -> None:
-        """Test rate limit serializes concurrent calls properly.
-
-        Multiple concurrent calls should be serialized by the lock
-        and each should wait the full delay.
-        """
-        client = HTTPClient(rate_limit_delay=0.05)
-
-        import time
-
-        start = time.time()
-
-        # Fire off 3 concurrent rate_limit calls
-        await asyncio.gather(
-            client._rate_limit(),
-            client._rate_limit(),
-            client._rate_limit(),
-        )
-
-        elapsed = time.time() - start
-
-        # Should take at least 2 * delay (3 calls - 1st is immediate)
-        assert elapsed >= 0.08
-
-    @pytest.mark.asyncio
-    async def test_rate_limit_updates_last_request_time(self) -> None:
-        """Test rate limit correctly tracks last request time.
-
-        _last_request_time should be updated after each rate limit check.
-        """
-        client = HTTPClient(rate_limit_delay=0.01)
-
-        initial_time = client._last_request_time
-        await client._rate_limit()
-        after_first = client._last_request_time
-
-        assert after_first > initial_time
-
-    @pytest.mark.asyncio
-    async def test_rate_limit_with_negative_delay(self) -> None:
-        """Test rate limit handles negative delay gracefully.
-
-        Edge case: Negative delays should be treated as zero (no delay).
-        """
-        client = HTTPClient(rate_limit_delay=-0.5)
-
-        import time
-
-        start = time.time()
-        await client._rate_limit()
-        await client._rate_limit()
-        elapsed = time.time() - start
-
-        # Should not delay
-        assert elapsed < 0.05
-
-
-@pytest.mark.unit
-class TestHTTPClientRequestWithRetry:
-    """Tests for HTTPClient._request_with_retry core retry logic."""
-
-    @pytest.mark.asyncio
-    async def test_successful_request(self) -> None:
-        """Test successful request returns response without retries.
-
-        Happy path: 200 OK should return immediately.
-        """
-        client = HTTPClient(max_retries=1)
-
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-
-        with patch.object(
-            httpx.AsyncClient, "request", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.return_value = mock_response
-
-            async with client:
-                response = await client._request_with_retry(
-                    "GET", "https://example.com"
-                )
-
-            assert response.status_code == 200
-            assert mock_request.call_count == 1
-
-    @pytest.mark.asyncio
-    async def test_strips_quotes_from_url(self) -> None:
-        """Test URL cleaning removes surrounding quotes.
-
-        Edge case: URLs may arrive with surrounding quotes that need
-        to be stripped before making the request.
-        """
-        client = HTTPClient(max_retries=0)
-
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-
-        with patch.object(
-            httpx.AsyncClient, "request", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.return_value = mock_response
-
-            async with client:
-                await client._request_with_retry("GET", '"https://example.com"')
-                await client._request_with_retry("GET", "'https://example.com'")
-
-            # Both should be called with clean URL
-            assert all(
-                args[0][1] == "https://example.com"
-                for args in mock_request.call_args_list
-            )
-
-    @pytest.mark.asyncio
-    async def test_strips_whitespace_from_url(self) -> None:
-        """Test URL cleaning removes whitespace.
-
-        Edge case: URLs with leading/trailing whitespace.
-        """
-        client = HTTPClient(max_retries=0)
-
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-
-        with patch.object(
-            httpx.AsyncClient, "request", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.return_value = mock_response
-
-            async with client:
-                await client._request_with_retry("GET", "  https://example.com  ")
-
-            call_url = mock_request.call_args[0][1]
-            assert call_url == "https://example.com"
-
-    @pytest.mark.asyncio
-    async def test_404_raises_pypi_error(self) -> None:
-        """Test 404 response raises PyPIError immediately without retry.
-
-        404 errors are not transient - should fail fast without retries.
-        """
-        client = HTTPClient(max_retries=3)
-
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 404
-
-        with patch.object(
-            httpx.AsyncClient, "request", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.return_value = mock_response
-
-            async with client:
-                with pytest.raises(PyPIError) as exc_info:
-                    await client._request_with_retry("GET", "https://pypi.org/test")
-
-            assert "not found" in str(exc_info.value).lower()
-            assert exc_info.value.status_code == 404
-            # Should not retry 404s
-            assert mock_request.call_count == 1
-
-    @pytest.mark.asyncio
-    async def test_429_retries_with_backoff(self) -> None:
-        """Test 429 (rate limit) response triggers retry with Retry-After.
-
-        Rate limit responses should respect Retry-After header and retry.
-        """
-        client = HTTPClient(max_retries=1)
-        client._max_429_retries = 2
-
-        rate_limited_response = MagicMock(spec=httpx.Response)
-        rate_limited_response.status_code = 429
-        rate_limited_response.headers = {"Retry-After": "0"}
-
-        success_response = MagicMock(spec=httpx.Response)
-        success_response.status_code = 200
-
-        with patch.object(
-            httpx.AsyncClient, "request", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.side_effect = [rate_limited_response, success_response]
-
-            async with client:
-                response = await client._request_with_retry(
-                    "GET", "https://example.com"
-                )
-
-            assert response.status_code == 200
-            assert mock_request.call_count == 2
-
-    @pytest.mark.asyncio
-    async def test_429_default_retry_after(self) -> None:
-        """Test 429 response uses default 1s delay when Retry-After missing.
-
-        Edge case: Server may not provide Retry-After header.
-        """
-        client = HTTPClient(max_retries=1)
-        client._max_429_retries = 2
-
-        rate_limited_response = MagicMock(spec=httpx.Response)
-        rate_limited_response.status_code = 429
-        rate_limited_response.headers = {}  # No Retry-After
-
-        success_response = MagicMock(spec=httpx.Response)
-        success_response.status_code = 200
-
-        import time
-
-        with patch.object(
-            httpx.AsyncClient, "request", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.side_effect = [rate_limited_response, success_response]
-
-            async with client:
-                start = time.time()
-                await client._request_with_retry("GET", "https://example.com")
-                elapsed = time.time() - start
-
-            # Should wait at least 1 second (default)
-            assert elapsed >= 0.9
-
-    @pytest.mark.asyncio
-    async def test_429_max_retries_exceeded(self) -> None:
-        """Test 429 raises NetworkError after max 429 retries.
-
-        Should give up after _max_429_retries attempts, even if
-        max_retries would allow more.
-        """
-        client = HTTPClient(max_retries=10)
-        client._max_429_retries = 1
-
-        rate_limited_response = MagicMock(spec=httpx.Response)
-        rate_limited_response.status_code = 429
-        rate_limited_response.headers = {"Retry-After": "0"}
-
-        with patch.object(
-            httpx.AsyncClient, "request", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.return_value = rate_limited_response
-
-            async with client:
-                with pytest.raises(NetworkError) as exc_info:
-                    await client._request_with_retry("GET", "https://example.com")
-
-            assert "Rate limit exceeded" in str(exc_info.value)
-            assert exc_info.value.status_code == 429
-
-    @pytest.mark.asyncio
-    async def test_timeout_retries(self) -> None:
-        """Test timeout exception triggers retry with exponential backoff.
-
-        Transient timeout errors should be retried.
-        """
-        client = HTTPClient(max_retries=1)
-
-        success_response = MagicMock(spec=httpx.Response)
-        success_response.status_code = 200
-
-        with patch.object(
-            httpx.AsyncClient, "request", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.side_effect = [
-                httpx.TimeoutException("Timeout"),
-                success_response,
-            ]
-
-            async with client:
-                response = await client._request_with_retry(
-                    "GET", "https://example.com"
-                )
-
-            assert response.status_code == 200
-            assert mock_request.call_count == 2
-
-    @pytest.mark.asyncio
-    async def test_network_error_retries(self) -> None:
-        """Test network error triggers retry.
-
-        Connection failures and other network errors should be retried.
-        """
-        client = HTTPClient(max_retries=1)
-
-        success_response = MagicMock(spec=httpx.Response)
-        success_response.status_code = 200
-
-        with patch.object(
-            httpx.AsyncClient, "request", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.side_effect = [
-                httpx.NetworkError("Connection failed"),
-                success_response,
-            ]
-
-            async with client:
-                response = await client._request_with_retry(
-                    "GET", "https://example.com"
-                )
-
-            assert response.status_code == 200
-            assert mock_request.call_count == 2
-
-    @pytest.mark.asyncio
-    async def test_4xx_error_raises_network_error(self) -> None:
-        """Test 4xx client errors (except 404, 429) raise NetworkError.
-
-        Client errors are not retried as they indicate bad requests.
-        """
-        client = HTTPClient(max_retries=3)
-
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 403
-        mock_response.text = "Forbidden"
-        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "Forbidden",
-            request=MagicMock(),
-            response=mock_response,
-        )
-
-        with patch.object(
-            httpx.AsyncClient, "request", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.return_value = mock_response
-
-            async with client:
-                with pytest.raises(NetworkError) as exc_info:
-                    await client._request_with_retry("GET", "https://example.com")
-
-            assert "403" in str(exc_info.value)
-            assert exc_info.value.status_code == 403
-            # Should not retry 4xx
-            assert mock_request.call_count == 1
-
-    @pytest.mark.asyncio
-    async def test_multiple_4xx_codes(self) -> None:
-        """Test various 4xx status codes all raise NetworkError.
-
-        Edge case: Test multiple client error codes.
-        """
-        client = HTTPClient(max_retries=0)
-
-        for status_code in [400, 401, 403, 405, 422]:
-            mock_response = MagicMock(spec=httpx.Response)
-            mock_response.status_code = status_code
-            mock_response.text = f"Error {status_code}"
-            mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-                f"Error {status_code}",
-                request=MagicMock(),
-                response=mock_response,
-            )
-
-            with patch.object(
-                httpx.AsyncClient, "request", new_callable=AsyncMock
-            ) as mock_request:
-                mock_request.return_value = mock_response
-
-                async with client:
-                    with pytest.raises(NetworkError) as exc_info:
-                        await client._request_with_retry("GET", "https://example.com")
-
-                assert str(status_code) in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    async def test_5xx_error_retries(self) -> None:
-        """Test 5xx server errors trigger retry.
-
-        Server errors are transient and should be retried.
-        """
-        client = HTTPClient(max_retries=1)
-
-        error_response = MagicMock(spec=httpx.Response)
-        error_response.status_code = 503
-        error_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "Service Unavailable",
-            request=MagicMock(),
-            response=error_response,
-        )
-
-        success_response = MagicMock(spec=httpx.Response)
-        success_response.status_code = 200
-
-        with patch.object(
-            httpx.AsyncClient, "request", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.side_effect = [error_response, success_response]
-
-            async with client:
-                response = await client._request_with_retry(
-                    "GET", "https://example.com"
-                )
-
-            assert response.status_code == 200
-            assert mock_request.call_count == 2
-
-    @pytest.mark.asyncio
-    async def test_multiple_5xx_codes(self) -> None:
-        """Test various 5xx status codes all trigger retry.
-
-        Edge case: Different server error codes.
-        """
-        for status_code in [500, 502, 503, 504]:
-            client = HTTPClient(max_retries=1)
-
-            error_response = MagicMock(spec=httpx.Response)
-            error_response.status_code = status_code
-            error_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-                f"Server Error {status_code}",
-                request=MagicMock(),
-                response=error_response,
-            )
-
-            success_response = MagicMock(spec=httpx.Response)
-            success_response.status_code = 200
-
-            with patch.object(
-                httpx.AsyncClient, "request", new_callable=AsyncMock
-            ) as mock_request:
-                mock_request.side_effect = [error_response, success_response]
-
-                async with client:
-                    response = await client._request_with_retry(
-                        "GET", "https://example.com"
-                    )
-
-                assert response.status_code == 200
-
-    @pytest.mark.asyncio
-    async def test_max_retries_exceeded_raises_error(self) -> None:
-        """Test NetworkError is raised after exhausting all retries.
-
-        After max_retries attempts, should give up and raise.
-        """
-        client = HTTPClient(max_retries=2)
-
-        with patch.object(
-            httpx.AsyncClient, "request", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.side_effect = httpx.TimeoutException("Timeout")
-
-            async with client:
-                with pytest.raises(NetworkError) as exc_info:
-                    await client._request_with_retry("GET", "https://example.com")
-
-            assert "failed after" in str(exc_info.value).lower()
-            # Should try max_retries + 1 times (initial + retries)
-            assert mock_request.call_count == 3
-
-    @pytest.mark.asyncio
-    async def test_exponential_backoff_timing(self) -> None:
-        """Test retry delays follow exponential backoff pattern.
-
-        Delays should increase: 2^0, 2^1, 2^2, etc. (plus random jitter).
-        """
-        client = HTTPClient(max_retries=3)
-
-        import time
-
-        with patch.object(
-            httpx.AsyncClient, "request", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.side_effect = httpx.TimeoutException("Timeout")
-
-            async with client:
-                start = time.time()
-                try:
-                    await client._request_with_retry("GET", "https://example.com")
-                except NetworkError:
-                    pass
-                elapsed = time.time() - start
-
-            # Total wait should be at least: 2^0 + 2^1 + 2^2 = 7 seconds
-            # (minus jitter which is at most 0.3 per retry)
-            assert elapsed >= 6.0
-
-    @pytest.mark.asyncio
-    async def test_success_status_codes(self) -> None:
-        """Test various 2xx success codes are handled correctly.
-
-        Edge case: Different success codes should all return without error.
-        """
-        client = HTTPClient(max_retries=0)
-
-        for status_code in [200, 201, 202, 204]:
-            mock_response = MagicMock(spec=httpx.Response)
-            mock_response.status_code = status_code
-
-            with patch.object(
-                httpx.AsyncClient, "request", new_callable=AsyncMock
-            ) as mock_request:
-                mock_request.return_value = mock_response
-
-                async with client:
-                    response = await client._request_with_retry(
-                        "GET", "https://example.com"
-                    )
-
-                assert response.status_code == status_code
-
-    @pytest.mark.asyncio
-    async def test_redirect_status_codes(self) -> None:
-        """Test 3xx redirect codes are handled by httpx.
-
-        Edge case: Redirects should be followed automatically by httpx.
-        """
-        client = HTTPClient(max_retries=0)
-
-        # httpx with follow_redirects=True handles this automatically
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200  # After redirect
-
-        with patch.object(
-            httpx.AsyncClient, "request", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.return_value = mock_response
-
-            async with client:
-                response = await client._request_with_retry(
-                    "GET", "https://example.com"
-                )
-
-            assert response.status_code == 200
-
-
-@pytest.mark.unit
-class TestHTTPClientGet:
-    """Tests for HTTPClient.get convenience method."""
-
-    @pytest.mark.asyncio
-    async def test_get_request(self) -> None:
-        """Test GET request delegates to _request_with_retry.
-
-        GET method should pass through to the retry logic.
-        """
-        client = HTTPClient(max_retries=0)
-
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-
-        with patch.object(
-            HTTPClient, "_request_with_retry", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.return_value = mock_response
-
-            async with client:
-                response = await client.get("https://example.com")
-
-            assert response.status_code == 200
-            mock_request.assert_called_once_with("GET", "https://example.com")
-
-    @pytest.mark.asyncio
-    async def test_get_with_params(self) -> None:
-        """Test GET request passes through kwargs.
-
-        Additional parameters should be forwarded to the underlying request.
-        """
-        client = HTTPClient(max_retries=0)
-
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-
-        with patch.object(
-            HTTPClient, "_request_with_retry", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.return_value = mock_response
-
-            async with client:
-                await client.get(
-                    "https://example.com",
-                    params={"key": "value"},
-                    headers={"X-Custom": "header"},
-                )
-
-            call_kwargs = mock_request.call_args[1]
-            assert "params" in call_kwargs
-            assert "headers" in call_kwargs
-
-
-@pytest.mark.unit
-class TestHTTPClientPost:
-    """Tests for HTTPClient.post convenience method."""
-
-    @pytest.mark.asyncio
-    async def test_post_request(self) -> None:
-        """Test POST request delegates to _request_with_retry.
-
-        POST method should pass through to the retry logic.
-        """
-        client = HTTPClient(max_retries=0)
-
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 201
-
-        with patch.object(
-            HTTPClient, "_request_with_retry", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.return_value = mock_response
-
-            async with client:
-                response = await client.post(
-                    "https://example.com",
-                    json={"key": "value"},
-                )
-
-            assert response.status_code == 201
-            mock_request.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_post_with_data(self) -> None:
-        """Test POST request with different data types.
-
-        Edge case: POST can send JSON, form data, or raw bytes.
-        """
-        client = HTTPClient(max_retries=0)
-
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 201
-
-        with patch.object(
-            HTTPClient, "_request_with_retry", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.return_value = mock_response
-
-            async with client:
-                # Test JSON
-                await client.post("https://example.com", json={"key": "value"})
-
-                # Test form data
-                await client.post("https://example.com", data={"key": "value"})
-
-                # Test raw content
-                await client.post("https://example.com", content=b"raw bytes")
-
-            assert mock_request.call_count == 3
-
-
-@pytest.mark.unit
-class TestHTTPClientGetJson:
-    """Tests for HTTPClient.get_json JSON parsing method."""
-
-    @pytest.mark.asyncio
-    async def test_get_json_success(self) -> None:
-        """Test successful JSON fetch and parse.
-
-        Happy path: Valid JSON response should be parsed into dict.
-        """
-        client = HTTPClient(max_retries=0)
-
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.json.return_value = {"name": "package", "version": "1.0.0"}
-
-        with patch.object(HTTPClient, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_response
-
-            async with client:
-                data = await client.get_json("https://example.com/api")
-
-            assert data == {"name": "package", "version": "1.0.0"}
-
-    @pytest.mark.asyncio
-    async def test_get_json_invalid_json(self) -> None:
-        """Test error when response contains invalid JSON.
-
-        Malformed JSON should raise NetworkError with details.
-        """
-        client = HTTPClient(max_retries=0)
-
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.json.side_effect = json.JSONDecodeError("Error", "doc", 0)
-        mock_response.text = "Invalid JSON"
-
-        with patch.object(HTTPClient, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_response
-
-            async with client:
-                with pytest.raises(NetworkError) as exc_info:
-                    await client.get_json("https://example.com/api")
-
-            assert "Invalid JSON" in str(exc_info.value)
-            assert exc_info.value.response_body == "Invalid JSON"
-
-    @pytest.mark.asyncio
-    async def test_get_json_non_object_response(self) -> None:
-        """Test error when JSON is not an object/dict.
-
-        Arrays and primitives should raise NetworkError as we expect objects.
-        """
-        client = HTTPClient(max_retries=0)
-
-        for invalid_data in [["list"], "string", 123, None]:
-            mock_response = MagicMock(spec=httpx.Response)
-            mock_response.json.return_value = invalid_data
-            mock_response.text = json.dumps(invalid_data)
-
-            with patch.object(HTTPClient, "get", new_callable=AsyncMock) as mock_get:
-                mock_get.return_value = mock_response
-
-                async with client:
-                    with pytest.raises(NetworkError) as exc_info:
-                        await client.get_json("https://example.com/api")
-
-                assert "Expected JSON object" in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    async def test_get_json_empty_object(self) -> None:
-        """Test successful parse of empty JSON object.
-
-        Edge case: Empty dict {} is valid.
-        """
-        client = HTTPClient(max_retries=0)
-
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.json.return_value = {}
-
-        with patch.object(HTTPClient, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_response
-
-            async with client:
-                data = await client.get_json("https://example.com/api")
-
-            assert data == {}
-
-    @pytest.mark.asyncio
-    async def test_get_json_nested_structure(self) -> None:
-        """Test parsing complex nested JSON structures.
-
-        Edge case: Deeply nested objects should parse correctly.
-        """
-        client = HTTPClient(max_retries=0)
-
-        complex_data = {
-            "info": {"name": "test", "meta": {"version": "1.0"}},
-            "releases": {"1.0": [{"url": "https://..."}]},
-        }
-
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.json.return_value = complex_data
-
-        with patch.object(HTTPClient, "get", new_callable=AsyncMock) as mock_get:
-            mock_get.return_value = mock_response
-
-            async with client:
-                data = await client.get_json("https://example.com/api")
-
-            assert data == complex_data
-            assert data["info"]["meta"]["version"] == "1.0"
-
-
-@pytest.mark.unit
-class TestHTTPClientBatchGetJson:
-    """Tests for HTTPClient.batch_get_json concurrent fetch method."""
-
-    @pytest.mark.asyncio
-    async def test_batch_get_json_success(self) -> None:
-        """Test successful concurrent fetch of multiple JSON endpoints.
-
-        Happy path: All requests succeed and return their data.
-        """
-        client = HTTPClient(max_retries=0)
-
-        urls = [
-            "https://example.com/1",
-            "https://example.com/2",
-            "https://example.com/3",
+            data = await client.get_json(PYPI_URL)
+
+        assert data["info"]["version"] == "2.32.3"
+        assert data["info"]["requires_dist"] == [
+            "urllib3<3,>=1.21.1",
+            "certifi>=2017.4.17",
         ]
 
-        async def mock_get_json(url: str, **kwargs: Any) -> Dict[str, Any]:
-            return {"url": url, "data": f"response from {url}"}
-
-        with patch.object(HTTPClient, "get_json", side_effect=mock_get_json):
-            async with client:
-                results = await client.batch_get_json(urls)
-
-            assert len(results) == 3
-            assert results["https://example.com/1"]["url"] == "https://example.com/1"
-            assert results["https://example.com/2"]["url"] == "https://example.com/2"
-            assert results["https://example.com/3"]["url"] == "https://example.com/3"
-
-    @pytest.mark.asyncio
-    async def test_batch_get_json_with_failures(self) -> None:
-        """Test batch fetch handles individual failures gracefully.
-
-        Failed requests should return empty dict, successful ones return data.
-        """
-        client = HTTPClient(max_retries=0)
-
-        urls = [
-            "https://example.com/1",
-            "https://example.com/2",
-            "https://example.com/3",
-        ]
-
-        call_count = [0]
-
-        async def mock_get_json(url: str, **kwargs: Any) -> Dict[str, Any]:
-            call_count[0] += 1
-            if "1" in url:
-                raise NetworkError("Failed", url=url)
-            if "3" in url:
-                raise PyPIError("Not found", url=url, status_code=404)
-            return {"url": url}
-
-        with patch.object(HTTPClient, "get_json", side_effect=mock_get_json):
-            async with client:
-                results = await client.batch_get_json(urls)
-
-            # All URLs attempted
-            assert call_count[0] == 3
-
-            # Failed requests return empty dict
-            assert results["https://example.com/1"] == {}
-            assert results["https://example.com/2"]["url"] == "https://example.com/2"
-            assert results["https://example.com/3"] == {}
-
-    @pytest.mark.asyncio
-    async def test_batch_get_json_with_progress_callback(self) -> None:
-        """Test batch fetch invokes progress callback correctly.
-
-        Callback should be called after each completion with current progress.
-        """
-        client = HTTPClient(max_retries=0)
-
-        urls = [
-            "https://example.com/1",
-            "https://example.com/2",
-            "https://example.com/3",
-        ]
-        progress_calls: List[tuple] = []
-
-        def progress_callback(completed: int, total: int) -> None:
-            progress_calls.append((completed, total))
-
-        async def mock_get_json(url: str, **kwargs: Any) -> Dict[str, Any]:
-            return {"url": url}
-
-        with patch.object(HTTPClient, "get_json", side_effect=mock_get_json):
-            async with client:
-                await client.batch_get_json(urls, progress_callback=progress_callback)
-
-            # Should be called once per URL
-            assert len(progress_calls) == 3
-
-            # Total should always be 3
-            assert all(total == 3 for _, total in progress_calls)
-
-            # Completed should go from 1 to 3
-            assert [completed for completed, _ in progress_calls] == [1, 2, 3]
-
-            # Final call should be (3, 3)
-            assert progress_calls[-1] == (3, 3)
-
-    @pytest.mark.asyncio
-    async def test_batch_get_json_progress_callback_with_failures(self) -> None:
-        """Test progress callback is called even when requests fail.
-
-        Edge case: Failures should still increment progress counter.
-        """
-        client = HTTPClient(max_retries=0)
-
-        urls = ["https://example.com/1", "https://example.com/2"]
-        progress_calls: List[tuple] = []
-
-        def progress_callback(completed: int, total: int) -> None:
-            progress_calls.append((completed, total))
-
-        async def mock_get_json(url: str, **kwargs: Any) -> Dict[str, Any]:
-            if "1" in url:
-                raise NetworkError("Failed", url=url)
-            return {"url": url}
-
-        with patch.object(HTTPClient, "get_json", side_effect=mock_get_json):
-            async with client:
-                await client.batch_get_json(urls, progress_callback=progress_callback)
-
-            assert len(progress_calls) == 2
-            assert progress_calls == [(1, 2), (2, 2)]
-
-    @pytest.mark.asyncio
-    async def test_batch_get_json_empty_urls(self) -> None:
-        """Test batch fetch with empty URL list.
-
-        Edge case: Empty input should return empty results.
-        """
-        client = HTTPClient()
+    async def test_empty_object_is_valid(self) -> None:
+        """A package with no releases still returns a well-formed document."""
+        client = _client([_response(200, json_body={})], max_retries=0)
 
         async with client:
-            results = await client.batch_get_json([])
+            assert await client.get_json(PYPI_URL) == {}
+
+    async def test_malformed_json_is_reported_with_the_body(self) -> None:
+        """A mirror serving an HTML error page is the common cause; the body is
+        what tells the user they are pointed at a proxy rather than PyPI.
+        """
+        client = _client(
+            [_response(200, text="<html>502 Bad Gateway</html>")], max_retries=0
+        )
+
+        async with client:
+            with pytest.raises(NetworkError, match="Invalid JSON") as exc_info:
+                await client.get_json(PYPI_URL)
+
+        assert exc_info.value.response_body == "<html>502 Bad Gateway</html>"
+
+    @pytest.mark.parametrize(
+        "body",
+        ['["requests"]', '"requests"', "42", "null", "true"],
+        ids=["array", "string", "number", "null", "bool"],
+    )
+    async def test_non_object_documents_are_rejected(self, body: str) -> None:
+        """Callers index into the result; a list would fail far from here.
+
+        Bodies are supplied as raw JSON text so that ``null`` and ``true`` are
+        actually transmitted rather than being dropped during encoding.
+        """
+        client = _client([_response(200, text=body)], max_retries=0)
+
+        async with client:
+            with pytest.raises(NetworkError, match="Expected JSON object"):
+                await client.get_json(PYPI_URL)
+
+
+class TestBatchGetJson:
+    """Batch fetching is how ``check`` resolves a whole requirements file."""
+
+    @staticmethod
+    def _urls(*names: str) -> List[str]:
+        return [f"https://pypi.org/pypi/{name}/json" for name in names]
+
+    @staticmethod
+    def _fake_get_json(behaviour: Dict[str, Any]) -> Callable[..., Any]:
+        """Return a ``get_json`` replacement driven by *behaviour*.
+
+        Patched onto the class, so it takes ``self``. Values that are exceptions
+        are raised; anything else is returned.
+        """
+
+        async def _get_json(_self: HTTPClient, url: str, **_: Any) -> Dict[str, Any]:
+            result = behaviour[url]
+            if isinstance(result, BaseException):
+                raise result
+            return result
+
+        return _get_json
+
+    async def test_returns_one_entry_per_url(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        urls = self._urls("requests", "urllib3", "certifi")
+        monkeypatch.setattr(
+            HTTPClient,
+            "get_json",
+            self._fake_get_json({url: {"url": url} for url in urls}),
+        )
+
+        async with HTTPClient(verify_ssl=False) as client:
+            results = await client.batch_get_json(urls)
+
+        assert results == {url: {"url": url} for url in urls}
+
+    async def test_a_failed_package_does_not_fail_the_batch(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """One private or misspelled package must not abandon the other 200.
+
+        The empty dict is the contract the checker relies on to emit an
+        "unavailable" stub rather than aborting the run.
+        """
+        requests_url, private_url, dead_url = self._urls(
+            "requests", "acme-private", "certifi"
+        )
+        monkeypatch.setattr(
+            HTTPClient,
+            "get_json",
+            self._fake_get_json(
+                {
+                    requests_url: REQUESTS_PAYLOAD,
+                    private_url: PyPIError("not found", status_code=404),
+                    dead_url: NetworkError("timed out"),
+                }
+            ),
+        )
+
+        async with HTTPClient(verify_ssl=False) as client:
+            results = await client.batch_get_json(
+                [requests_url, private_url, dead_url]
+            )
+
+        assert results[requests_url] == REQUESTS_PAYLOAD
+        assert results[private_url] == {}
+        assert results[dead_url] == {}
+
+    async def test_progress_is_reported_once_per_url_with_a_stable_total(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The progress bar reads these values; a drifting total makes it jump."""
+        urls = self._urls("requests", "urllib3", "certifi", "idna")
+        monkeypatch.setattr(
+            HTTPClient, "get_json", self._fake_get_json({url: {} for url in urls})
+        )
+        progress: List[Tuple[int, int]] = []
+
+        async with HTTPClient(verify_ssl=False) as client:
+            await client.batch_get_json(
+                urls, progress_callback=lambda done, total: progress.append((done, total))
+            )
+
+        assert progress == [(1, 4), (2, 4), (3, 4), (4, 4)]
+
+    async def test_empty_batch_is_a_no_op(self) -> None:
+        """An empty requirements file must not open a connection at all."""
+        progress: List[Tuple[int, int]] = []
+
+        async with HTTPClient(verify_ssl=False) as client:
+            results = await client.batch_get_json(
+                [], progress_callback=lambda done, total: progress.append((done, total))
+            )
 
         assert results == {}
-
-    @pytest.mark.asyncio
-    async def test_batch_get_json_single_url(self) -> None:
-        """Test batch fetch with single URL.
-
-        Edge case: Should work with just one URL.
-        """
-        client = HTTPClient(max_retries=0)
-
-        urls = ["https://example.com/1"]
-
-        async def mock_get_json(url: str, **kwargs: Any) -> Dict[str, Any]:
-            return {"url": url}
-
-        with patch.object(HTTPClient, "get_json", side_effect=mock_get_json):
-            async with client:
-                results = await client.batch_get_json(urls)
-
-            assert len(results) == 1
-            assert results["https://example.com/1"]["url"] == "https://example.com/1"
-
-    @pytest.mark.asyncio
-    async def test_batch_get_json_preserves_url_order(self) -> None:
-        """Test batch fetch returns results keyed by original URLs.
-
-        Results dict should contain all original URLs as keys.
-        """
-        client = HTTPClient(max_retries=0)
-
-        urls = ["https://a.com", "https://b.com", "https://c.com"]
-
-        async def mock_get_json(url: str, **kwargs: Any) -> Dict[str, Any]:
-            return {"url": url}
-
-        with patch.object(HTTPClient, "get_json", side_effect=mock_get_json):
-            async with client:
-                results = await client.batch_get_json(urls)
-
-            # All original URLs should be keys
-            assert set(results.keys()) == set(urls)
-
-    @pytest.mark.asyncio
-    async def test_batch_get_json_large_batch(self) -> None:
-        """Test batch fetch handles large number of URLs.
-
-        Edge case: Should handle many concurrent requests (limited by semaphore).
-        """
-        client = HTTPClient(max_retries=0, max_concurrency=5)
-
-        # Create 50 URLs
-        urls = [f"https://example.com/{i}" for i in range(50)]
-
-        async def mock_get_json(url: str, **kwargs: Any) -> Dict[str, Any]:
-            await asyncio.sleep(0.001)  # Tiny delay
-            return {"url": url}
-
-        with patch.object(HTTPClient, "get_json", side_effect=mock_get_json):
-            async with client:
-                results = await client.batch_get_json(urls)
-
-            assert len(results) == 50
-
-
-@pytest.mark.unit
-class TestHTTPClientConcurrency:
-    """Tests for HTTPClient concurrency control and semaphore."""
-
-    @pytest.mark.asyncio
-    async def test_semaphore_limits_concurrency(self) -> None:
-        """Test semaphore limits number of concurrent requests.
-
-        With max_concurrency=2, should never have more than 2 concurrent requests.
-        """
-        client = HTTPClient(max_concurrency=2, max_retries=0)
-
-        concurrent_count = [0]
-        max_concurrent = [0]
-
-        async def mock_request(method: str, url: str, **kwargs: Any) -> MagicMock:
-            concurrent_count[0] += 1
-            max_concurrent[0] = max(max_concurrent[0], concurrent_count[0])
-            await asyncio.sleep(0.01)  # Simulate network delay
-            concurrent_count[0] -= 1
-
-            response = MagicMock(spec=httpx.Response)
-            response.status_code = 200
-            return response
-
-        with patch.object(httpx.AsyncClient, "request", side_effect=mock_request):
-            async with client:
-                # Run 5 requests with max_concurrency=2
-                tasks = [
-                    client._request_with_retry("GET", f"https://example.com/{i}")
-                    for i in range(5)
-                ]
-                await asyncio.gather(*tasks)
-
-        # Max concurrent should not exceed semaphore limit
-        assert max_concurrent[0] <= 2
-
-    @pytest.mark.asyncio
-    async def test_different_concurrency_limits(self) -> None:
-        """Test different max_concurrency values work correctly.
-
-        Edge case: Test with concurrency of 1, 5, and 10.
-        """
-        for max_conc in [1, 5, 10]:
-            client = HTTPClient(max_concurrency=max_conc, max_retries=0)
-
-            concurrent_count = [0]
-            max_concurrent = [0]
-
-            async def mock_request(method: str, url: str, **kwargs: Any) -> MagicMock:
-                concurrent_count[0] += 1
-                max_concurrent[0] = max(max_concurrent[0], concurrent_count[0])
-                await asyncio.sleep(0.005)
-                concurrent_count[0] -= 1
-
-                response = MagicMock(spec=httpx.Response)
-                response.status_code = 200
-                return response
-
-            with patch.object(httpx.AsyncClient, "request", side_effect=mock_request):
-                async with client:
-                    tasks = [
-                        client._request_with_retry("GET", f"https://example.com/{i}")
-                        for i in range(15)
-                    ]
-                    await asyncio.gather(*tasks)
-
-            assert max_concurrent[0] <= max_conc
-
-    @pytest.mark.asyncio
-    async def test_semaphore_releases_on_error(self) -> None:
-        """Test semaphore is released even when request fails.
-
-        Edge case: Errors should not cause semaphore leaks.
-        """
-        client = HTTPClient(max_concurrency=2, max_retries=0)
-
-        concurrent_count = [0]
-
-        async def mock_request(method: str, url: str, **kwargs: Any) -> MagicMock:
-            concurrent_count[0] += 1
-            await asyncio.sleep(0.01)
-            concurrent_count[0] -= 1
-            raise httpx.TimeoutException("Timeout")
-
-        with patch.object(httpx.AsyncClient, "request", side_effect=mock_request):
-            async with client:
-                tasks = [
-                    client._request_with_retry("GET", f"https://example.com/{i}")
-                    for i in range(5)
-                ]
-                # All should fail but not block
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # All should have failed
-        assert all(isinstance(r, NetworkError) for r in results)
-
-        # Concurrent count should be back to 0
-        assert concurrent_count[0] == 0
-
-
-@pytest.mark.integration
-@pytest.mark.network
-class TestHTTPClientIntegration:
-    """Integration tests combining multiple features."""
-
-    @pytest.mark.asyncio
-    async def test_rate_limit_and_retry_together(self) -> None:
-        """Test rate limiting works correctly with retry logic.
-
-        Integration test: Retries should still respect rate limits.
-        """
-        client = HTTPClient(rate_limit_delay=0.05, max_retries=2)
-
-        import time
-
-        success_response = MagicMock(spec=httpx.Response)
-        success_response.status_code = 200
-
-        with patch.object(
-            httpx.AsyncClient, "request", new_callable=AsyncMock
-        ) as mock_request:
-            # First call fails, second succeeds
-            mock_request.side_effect = [
-                httpx.TimeoutException("Timeout"),
-                success_response,
-            ]
-
-            async with client:
-                start = time.time()
-                await client._request_with_retry("GET", "https://example.com")
-                elapsed = time.time() - start
-
-            # Should have waited for rate limit + backoff
-            assert elapsed >= 0.04
-
-    @pytest.mark.asyncio
-    async def test_concurrent_requests_with_rate_limit(self) -> None:
-        """Test concurrent requests all respect rate limit.
-
-        Integration test: Rate limit should serialize requests even
-        when fired concurrently.
-        """
-        client = HTTPClient(rate_limit_delay=0.05, max_concurrency=10, max_retries=0)
-
-        import time
-
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-
-        with patch.object(
-            httpx.AsyncClient, "request", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.return_value = mock_response
-
-            async with client:
-                start = time.time()
-
-                tasks = [
-                    client._request_with_retry("GET", f"https://example.com/{i}")
-                    for i in range(3)
-                ]
-                await asyncio.gather(*tasks)
-
-                elapsed = time.time() - start
-
-            # Should take at least 2 * rate_limit_delay (3 requests - first is immediate)
-            assert elapsed >= 0.08
-
-    @pytest.mark.asyncio
-    async def test_batch_with_mixed_success_and_failure(self) -> None:
-        """Test batch fetch with mix of successes and failures.
-
-        Integration test: Complex scenario with various outcomes.
-        Note: batch_get_json catches exceptions at the individual request level,
-        so retry logic needs to be simulated within the mock itself.
-        """
-        client = HTTPClient(max_retries=1, max_concurrency=3)
-
-        async def mock_get_json(url: str, **kwargs: Any) -> Dict[str, Any]:
-            if "success" in url:
-                return {"url": url, "status": "ok"}
-            elif "partial" in url:
-                # Simulate partial data return
-                return {"url": url, "status": "ok", "incomplete": True}
-            else:  # "fail" in url
-                # This will be caught by batch_get_json and return empty dict
-                raise NetworkError("Permanent failure", url=url)
-
-        urls = [
-            "https://example.com/success",
-            "https://example.com/partial",
-            "https://example.com/fail",
-        ]
-
-        with patch.object(HTTPClient, "get_json", side_effect=mock_get_json):
-            async with client:
-                results = await client.batch_get_json(urls)
-
-        # Success case
-        assert results["https://example.com/success"]["status"] == "ok"
-
-        # Partial data case
-        assert results["https://example.com/partial"]["status"] == "ok"
-        assert results["https://example.com/partial"]["incomplete"] is True
-
-        # Failure case - should return empty dict
-        assert results["https://example.com/fail"] == {}
-
-    @pytest.mark.asyncio
-    async def test_retry_logic_with_actual_request(self) -> None:
-        """Test retry logic integration with real request flow.
-
-        Integration test: Verifies retry happens at the request level
-        and succeeds after transient failure.
-        """
-        client = HTTPClient(max_retries=2, max_concurrency=3)
-
-        call_count = [0]
-
-        async def mock_request(method: str, url: str, **kwargs: Any) -> MagicMock:
-            call_count[0] += 1
-
-            if "retry" in url and call_count[0] < 2:
-                # First attempt fails
-                raise httpx.TimeoutException("Timeout")
-
-            # Second attempt succeeds
-            response = MagicMock(spec=httpx.Response)
-            response.status_code = 200
-            response.json.return_value = {"url": url, "status": "ok after retry"}
-            return response
-
-        with patch.object(httpx.AsyncClient, "request", side_effect=mock_request):
-            async with client:
-                data = await client.get_json("https://example.com/retry")
-
-        # Should succeed after retry
-        assert data["status"] == "ok after retry"
-        # Should have been called twice (initial + 1 retry)
-        assert call_count[0] == 2
-
-    @pytest.mark.asyncio
-    async def test_client_reuse_across_multiple_operations(self) -> None:
-        """Test client can be reused for multiple operations.
-
-        Integration test: Client should maintain state correctly across calls.
-        """
-        client = HTTPClient(rate_limit_delay=0.01, max_retries=1)
-
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"data": "test"}
-
-        with patch.object(
-            httpx.AsyncClient, "request", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.return_value = mock_response
-
-            async with client:
-                # Multiple different operations
-                await client.get("https://example.com/1")
-                await client.post("https://example.com/2", json={"key": "value"})
-                data = await client.get_json("https://example.com/3")
-
-                results = await client.batch_get_json(
-                    [
-                        "https://example.com/4",
-                        "https://example.com/5",
-                    ]
-                )
-
-        # All operations should have succeeded
-        assert data == {"data": "test"}
-        assert len(results) == 2
-
-        # Total of 5 requests made
-        assert mock_request.call_count == 5
+        assert progress == []

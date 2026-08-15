@@ -19,8 +19,8 @@ Typical usage::
 
     from depkeeper.utils.http import HTTPClient
     from depkeeper.core.data_store import PyPIDataStore
-    from depkeeper.core.version_checker import VersionChecker
-    from depkeeper.parser import RequirementsParser
+    from depkeeper.core.checker import VersionChecker
+    from depkeeper.core.parser import RequirementsParser
 
     async with HTTPClient() as http:
         store   = PyPIDataStore(http)
@@ -41,12 +41,17 @@ Typical usage::
 from __future__ import annotations
 
 import asyncio
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 from packaging.version import InvalidVersion, parse
-from typing import Any, Coroutine, Dict, List, Optional
 
-from depkeeper.exceptions import PyPIError
+from depkeeper.exceptions import NetworkError
 from depkeeper.models.package import Package
 from depkeeper.utils.logger import get_logger
+from depkeeper.utils.version_utils import (
+    retained_specs,
+    specs_allow_version,
+    specs_to_string,
+)
 from depkeeper.models.requirement import Requirement
 from depkeeper.core.data_store import PyPIDataStore, PyPIPackageData
 
@@ -73,15 +78,6 @@ class VersionChecker:
 
     Raises:
         TypeError: If *data_store* is ``None``.
-
-    Example::
-
-        >>> async with HTTPClient() as http:
-        ...     store   = PyPIDataStore(http)
-        ...     checker = VersionChecker(data_store=store)
-        ...     pkg     = await checker.get_package_info("flask", current_version="2.0.0")
-        ...     print(pkg.recommended_version)
-        '2.3.3'  # Never 3.x.x, even if 3.0.0 is available
     """
 
     def __init__(
@@ -105,6 +101,7 @@ class VersionChecker:
         self,
         name: str,
         current_version: Optional[str] = None,
+        constraints: Optional[Sequence[Tuple[str, str]]] = None,
     ) -> Package:
         """Fetch metadata and compute a recommended version for *name*.
 
@@ -125,31 +122,30 @@ class VersionChecker:
                 major version. If no compatible version exists in that
                 major, stays on current version rather than crossing
                 the boundary.
+            constraints: Additional ``(operator, version)`` specifiers the
+                recommendation must satisfy — typically the upper bounds and
+                exclusions declared by the requirement itself (see
+                :func:`~depkeeper.utils.version_utils.retained_specs`).
+                Recommending a version that violates them would produce an
+                unsatisfiable requirement line.
 
         Returns:
             A :class:`Package` with ``latest_version``,
-            ``recommended_version``, and metadata fields populated.
-
-        Raises:
-            PyPIError: The package does not exist on PyPI or the API
-                returned an unexpected status.
-
-        Example::
-
-            >>> pkg = await checker.get_package_info("requests", current_version="2.25.0")
-            >>> pkg.latest_version
-            '2.31.0'
-            >>> pkg.recommended_version
-            '2.31.0'  # Stays in major version 2
+            ``recommended_version``, and metadata fields populated. When PyPI
+            data cannot be retrieved (missing package, unexpected status,
+            timeout, rate limiting) an *unavailable stub* is returned instead
+            — see :meth:`create_unavailable_package`.
         """
         try:
             pkg_data = await self.data_store.get_package_data(name)
-        except PyPIError:
-            # Package not found or API error — return unavailable stub
+        except NetworkError:
+            # 404, unexpected status, timeout or rate limiting (PyPIError is a
+            # NetworkError) — return an unavailable stub rather than failing
+            # the whole run.
             logger.warning("Package '%s' unavailable; creating stub", name)
             return self.create_unavailable_package(name, current_version)
 
-        return self._build_package_from_data(pkg_data, current_version)
+        return self._build_package_from_data(pkg_data, current_version, constraints)
 
     async def check_packages(
         self,
@@ -167,18 +163,8 @@ class VersionChecker:
 
         Returns:
             List of :class:`Package` objects, one per requirement.
-
-        Example::
-
-            >>> requirements = parser.parse_file("requirements.txt")
-            >>> packages = await checker.check_packages(requirements)
-            >>> [p.name for p in packages if p.recommended_version]
-            ['flask', 'requests', 'click']
         """
-        tasks = [
-            asyncio.create_task(self._create_package_check_task(req))
-            for req in requirements
-        ]
+        tasks = [self._create_package_check_task(req) for req in requirements]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         return self._process_check_results(requirements, results)
 
@@ -203,32 +189,16 @@ class VersionChecker:
         Returns:
             The inferred version string, or ``None`` when inference is not
             possible.
-
-        Example::
-
-            >>> req1 = Requirement(name="flask", specs=[("==", "2.0.0")], ...)
-            >>> checker.extract_current_version(req1)
-            '2.0.0'
-
-            >>> req2 = Requirement(name="flask", specs=[(">=", "2.0"), ("<", "3")], ...)
-            >>> checker.extract_current_version(req2)
-            '2.0'
-
-            >>> req3 = Requirement(name="flask", specs=[], ...)
-            >>> checker.extract_current_version(req3) is None
-            True
         """
         if not req.specs:
             return None
 
-        # Exact pin: treat as the current version
         if len(req.specs) == 1 and req.specs[0][0] == "==":
             return req.specs[0][1]
 
         if not self.infer_version_from_constraints:
             return None
 
-        # Infer from range lower-bound operators
         for operator, version in req.specs:
             if operator in (">=", ">", "~="):
                 return version
@@ -242,8 +212,9 @@ class VersionChecker:
     ) -> Package:
         """Create a stub :class:`Package` when PyPI data is unavailable.
 
-        Used when a package lookup fails (404, network error, etc.) so that
-        the caller can still process the rest of the package list.
+        Keeps the package in the result list (rather than dropping it) so the
+        report still shows what is declared in the file, while the missing
+        ``latest_version`` renders as an error row and no update is proposed.
 
         Args:
             name: Package name.
@@ -252,12 +223,6 @@ class VersionChecker:
         Returns:
             A :class:`Package` with ``latest_version`` and
             ``recommended_version`` both set to ``None``.
-
-        Example::
-
-            >>> pkg = checker.create_unavailable_package("nonexistent", "1.0.0")
-            >>> pkg.latest_version is None
-            True
         """
         return Package(
             name=name,
@@ -274,21 +239,28 @@ class VersionChecker:
     def _create_package_check_task(
         self,
         requirement: Requirement,
-    ) -> Coroutine[Any, Any, Package]:
-        """Build the coroutine to check a single requirement.
+    ) -> asyncio.Task[Package]:
+        """Spawn an async task to check a single requirement.
 
-        Returns a coroutine (not a scheduled Task) so that scheduling
-        decisions remain with the async caller. This allows the method
-        to be called and tested without a running event loop.
+        Extracts the current version from *requirement* and delegates to
+        :meth:`get_package_info`, forwarding the requirement's retained
+        constraints (upper bounds, exclusions, wildcard bands) so the
+        recommendation cannot violate the user's declared range.
 
         Args:
             requirement: A parsed requirement.
 
         Returns:
-            A coroutine that resolves to a :class:`Package` when awaited.
+            An :class:`asyncio.Task` that will resolve to a :class:`Package`.
         """
         current_version = self.extract_current_version(requirement)
-        return self.get_package_info(requirement.name, current_version)
+        return asyncio.create_task(
+            self.get_package_info(
+                requirement.name,
+                current_version,
+                retained_specs(requirement.specs),
+            )
+        )
 
     def _process_check_results(
         self,
@@ -335,6 +307,7 @@ class VersionChecker:
         self,
         pkg_data: PyPIPackageData,
         current_version: Optional[str],
+        constraints: Optional[Sequence[Tuple[str, str]]] = None,
     ) -> Package:
         """Construct a :class:`Package` from cached PyPI metadata.
 
@@ -344,29 +317,26 @@ class VersionChecker:
            major version number.
         2. Find **all** Python-compatible versions within that same major
            (using :meth:`PyPIPackageData.get_python_compatible_versions`).
-        3. Return the **highest** version from that filtered list as the
+        3. Discard candidates rejected by *constraints* (the requirement's
+           own upper bounds / exclusions).
+        4. Return the **highest** version from that filtered list as the
            recommendation.
-        4. If no compatible version exists in the current major, **stay on
+        5. If no compatible version exists in the current major, **stay on
            current version** rather than suggesting a major upgrade.
-        5. If no *current_version* is provided, find the highest
+        6. If no *current_version* is provided, find the highest
            Python-compatible stable version across all majors.
 
         This ensures that recommendations **never** cross major version
-        boundaries, preventing inadvertent breaking changes.
+        boundaries, preventing inadvertent breaking changes, and never
+        violate the range the user declared in the requirements file.
 
         Args:
             pkg_data: Cached package metadata from the data store.
             current_version: The version currently installed (if known).
+            constraints: Specifiers the recommendation must satisfy.
 
         Returns:
             A fully populated :class:`Package`.
-
-        Example (internal)::
-
-            >>> # Current is 2.0.0, latest is 3.1.0
-            >>> pkg = self._build_package_from_data(pkg_data, "2.0.0")
-            >>> pkg.recommended_version
-            '2.3.3'  # Highest in major 2, NOT 3.1.0
         """
         latest_version: Optional[str] = pkg_data.latest_version
         python_version: str = PyPIDataStore.get_current_python_version()
@@ -375,7 +345,6 @@ class VersionChecker:
         recommended_version: Optional[str] = None
 
         if current_version:
-            # CRITICAL: Stay within current major version
             try:
                 current_parsed = parse(current_version)
                 current_major = (
@@ -383,14 +352,16 @@ class VersionChecker:
                 )
 
                 if current_major is not None:
-                    # Get all Python-compatible versions in the current major
                     compatible_in_major = pkg_data.get_python_compatible_versions(
                         python_version, major=current_major
                     )
+                    allowed_in_major = self._filter_by_constraints(
+                        compatible_in_major, constraints, pkg_data.name
+                    )
 
-                    if compatible_in_major:
-                        # First one is the highest (already sorted descending)
-                        recommended_version = compatible_in_major[0]
+                    if allowed_in_major:
+                        # Candidates arrive sorted descending.
+                        recommended_version = allowed_in_major[0]
                         logger.debug(
                             "%s: current=%s (major=%d), recommended=%s within major %d",
                             pkg_data.name,
@@ -400,11 +371,16 @@ class VersionChecker:
                             current_major,
                         )
                     else:
-                        # No compatible version in current major - stay on current
+                        # Staying put is deliberate: crossing into the next
+                        # major would risk breaking changes the user did not ask
+                        # for, so "no eligible version" means "no update".
                         logger.warning(
-                            "%s: no Python-compatible version found in major %d, staying on %s",
+                            "%s: no eligible version found in major %d "
+                            "(Python %s, constraints '%s'), staying on %s",
                             pkg_data.name,
                             current_major,
+                            python_version,
+                            specs_to_string(constraints or []),
                             current_version,
                         )
                         recommended_version = current_version
@@ -424,12 +400,16 @@ class VersionChecker:
                 )
                 recommended_version = None
         else:
-            # No current version - just find highest compatible stable version
+            # Without a current version there is no major-version anchor, so
+            # the highest compatible stable release is the best answer.
             compatible_versions = pkg_data.get_python_compatible_versions(
                 python_version
             )
-            if compatible_versions:
-                recommended_version = compatible_versions[0]
+            allowed_versions = self._filter_by_constraints(
+                compatible_versions, constraints, pkg_data.name
+            )
+            if allowed_versions:
+                recommended_version = allowed_versions[0]
 
         # ── Build metadata dict ────────────────────────────────────────
         metadata: Dict[str, Any] = {
@@ -458,3 +438,46 @@ class VersionChecker:
             recommended_version=recommended_version,
             metadata=metadata,
         )
+
+    @staticmethod
+    def _filter_by_constraints(
+        versions: List[str],
+        constraints: Optional[Sequence[Tuple[str, str]]],
+        package_name: str,
+    ) -> List[str]:
+        """Drop candidate versions rejected by the requirement's own range.
+
+        Upper bounds (``<``), exclusions (``!=``) and wildcard bands declared
+        in the requirements file are preserved when the line is rewritten, so
+        a recommendation that violates them would yield an unsatisfiable
+        requirement (e.g. ``flask>=2.3.3,<2.3``).
+
+        Args:
+            versions: Candidate versions, highest first.
+            constraints: Specifiers every candidate must satisfy. ``None`` or
+                empty disables filtering.
+            package_name: Used for debug logging only.
+
+        Returns:
+            The subset of *versions* satisfying *constraints*, order preserved.
+        """
+        if not constraints:
+            return versions
+
+        allowed = [
+            version
+            for version in versions
+            if specs_allow_version(constraints, version)
+        ]
+
+        if len(allowed) != len(versions):
+            logger.debug(
+                "%s: %d of %d candidate version(s) excluded by declared "
+                "constraint '%s'",
+                package_name,
+                len(versions) - len(allowed),
+                len(versions),
+                specs_to_string(constraints),
+            )
+
+        return allowed

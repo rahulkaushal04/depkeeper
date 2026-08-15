@@ -1,8 +1,7 @@
-"""
-Shared context object for depkeeper CLI commands.
+"""Shared context object for depkeeper CLI commands.
 
-This module defines the global Click context used to share configuration,
-loaded file-based settings, and runtime options across CLI subcommands.
+Defines the global Click context used to share configuration, loaded
+file-based settings, and runtime options across CLI subcommands.
 """
 
 from __future__ import annotations

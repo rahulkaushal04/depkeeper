@@ -1,20 +1,19 @@
 ---
 title: License
-description: Licensing information for depkeeper and its dependencies
+description: depkeeper is distributed under the Apache License 2.0
 ---
 
 # License
 
-This page covers the licensing terms for depkeeper and its third-party dependencies.
+depkeeper is distributed under the **Apache License, Version 2.0**.
 
----
-
-## Apache License 2.0
-
-depkeeper is released under the **Apache License, Version 2.0**.
+The authoritative text is
+[`LICENSE`](https://github.com/rahulkaushal04/depkeeper/blob/main/LICENSE) in the repository, and
+the canonical version is published at
+[apache.org/licenses/LICENSE-2.0](https://www.apache.org/licenses/LICENSE-2.0).
 
 ```text
-Copyright 2025 Rahul Kaushal
+Copyright 2024-2026 Rahul Kaushal
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,39 +30,57 @@ limitations under the License.
 
 ---
 
-## License Summary
+## Summary
 
-The Apache License 2.0 is a permissive open source license that provides flexibility for both personal and commercial use.
+This summary is informational. The licence text governs.
 
-### Permissions
-
-- **Commercial Use** -- Use depkeeper in commercial projects
-- **Modification** -- Modify the source code as needed
-- **Distribution** -- Share depkeeper with others
-- **Sublicensing** -- Grant the same rights to others
-- **Private Use** -- Use privately without sharing changes
-- **Patent Grant** -- Express grant of patent rights from contributors
-
-### Requirements
-
-- **License and Copyright Notice** -- Include the original license and copyright notice in copies or substantial portions of the software
-- **State Changes** -- Document any modifications made to the code
-
-### Limitations
-
-- **Trademark Use** -- Does not grant rights to use project trademarks or logos
-- **Liability** -- Software is provided "as is" without warranty
-- **Warranty** -- No warranty of any kind is provided
+| You may | Conditions | Not granted |
+|---|---|---|
+| Use commercially | Include the licence and copyright notice | Trademark rights |
+| Modify | State significant changes | Warranty |
+| Distribute | Retain notices in redistributed source | Liability protection for you as redistributor |
+| Sublicense | | |
+| Use privately | | |
+| Use patents granted by contributors | Patent grant terminates if you initiate patent litigation over the work | |
 
 ---
 
-## Third-Party Dependencies
+## Using depkeeper in a commercial product
 
-depkeeper depends on the following open source libraries. All dependencies use permissive licenses compatible with Apache 2.0.
+Permitted. When redistributing depkeeper — modified or not — include:
 
-| Library | License | Type |
-|---|---|---|
-| click | BSD-3-Clause | Permissive |
-| httpx | BSD-3-Clause | Permissive |
-| rich | MIT | Permissive |
-| packaging | Apache-2.0 / BSD-2-Clause | Permissive |
+1. A copy of the Apache License 2.0.
+2. The original copyright notice.
+3. A `NOTICE` file if one is present in the distribution.
+4. A statement of any significant modifications you made.
+
+Using depkeeper as a development tool, without redistributing it, imposes no obligations.
+
+---
+
+## Contributions
+
+Contributions are licensed under the same terms, per section 5 of the licence: a contribution
+intentionally submitted for inclusion is licensed to the project under Apache-2.0 without
+additional terms, unless you state otherwise explicitly.
+
+---
+
+## Third-party licences
+
+depkeeper's runtime dependencies carry their own licences:
+
+| Dependency | Licence |
+|---|---|
+| `click` | BSD-3-Clause |
+| `packaging` | Apache-2.0 / BSD-2-Clause (dual) |
+| `httpx` | BSD-3-Clause |
+| `rich` | MIT |
+| `tomli` | MIT |
+
+Verify the licence of the exact version you ship:
+
+```bash
+pip install pip-licenses
+pip-licenses --packages click packaging httpx rich tomli
+```

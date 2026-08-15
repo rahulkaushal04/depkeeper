@@ -1,1563 +1,510 @@
+"""Tests for :class:`depkeeper.models.Requirement`.
+
+``Requirement`` is the only component that turns depkeeper's internal state
+back into a line of ``requirements.txt``. Anything it renders is written
+verbatim to a user's file and then fed to pip, so the bar for every assertion
+here is *installability*, not merely "the expected substring is present".
+
+Test data uses real distributions and real published versions. A rendering bug
+that only shows up on a line like ``celery[redis]>=5.0,<6.0`` is exactly the
+bug that reaches production, and it is invisible when the fixture is ``pkg==1.0``.
+"""
+
 from __future__ import annotations
 
 import pytest
 
-from depkeeper.models.requirement import Requirement
+from depkeeper.models import Requirement
+from tests.support.factories import make_requirement, specs
 
+# A real editable checkout line, used wherever a direct reference is needed.
+INTERNAL_SDK_URL = "git+ssh://git@github.com/acme/internal-sdk.git@main#egg=internal-sdk"
 
-@pytest.fixture
-def simple_requirement() -> Requirement:
-    """Create a simple Requirement with only a package name.
+# Real-length sha256 digests, so tests exercise realistic line lengths.
+CLICK_SHA256 = (
+    "sha256:ae74fb96c20a0277a1d615f1e4d73c8414f5a98db8b799a7931d1582f3390c28"
+)
+CLICK_SHA256_SDIST = (
+    "sha256:ca9853ad459e787e2192211578cc907e7594e294c7ccc834310722b41b9ca6de"
+)
 
-    Returns:
-        Requirement: A minimal requirement instance for testing.
-    """
-    return Requirement(name="requests")
 
+# ---------------------------------------------------------------------------
+# Construction
+# ---------------------------------------------------------------------------
 
-@pytest.fixture
-def requirement_with_version() -> Requirement:
-    """Create a Requirement with version specifiers.
 
-    Returns:
-        Requirement: A requirement with version constraints.
-    """
-    return Requirement(name="requests", specs=[(">=", "2.0.0")])
+class TestConstruction:
+    """Field defaults and dataclass semantics."""
 
+    def test_only_name_is_required(self) -> None:
+        req = Requirement(name="requests")
 
-@pytest.fixture
-def complex_requirement() -> Requirement:
-    """Create a Requirement with multiple features.
-
-    Returns:
-        Requirement: A requirement with specs, extras, and markers.
-    """
-    return Requirement(
-        name="requests",
-        specs=[(">=", "2.0.0"), ("<", "3.0.0")],
-        extras=["security", "socks"],
-        markers='python_version >= "3.7"',
-    )
-
-
-@pytest.fixture
-def requirement_with_hashes() -> Requirement:
-    """Create a Requirement with hash verification.
-
-    Returns:
-        Requirement: A requirement with multiple hash values.
-    """
-    return Requirement(
-        name="requests",
-        specs=[(">=", "2.0.0")],
-        hashes=["sha256:abc123", "sha256:def456"],
-    )
-
-
-@pytest.fixture
-def requirement_with_comment() -> Requirement:
-    """Create a Requirement with an inline comment.
-
-    Returns:
-        Requirement: A requirement with comment metadata.
-    """
-    return Requirement(
-        name="requests",
-        specs=[(">=", "2.0.0")],
-        comment="Production dependency",
-    )
-
-
-@pytest.fixture
-def editable_requirement() -> Requirement:
-    """Create an editable Requirement.
-
-    Returns:
-        Requirement: An editable installation requirement.
-    """
-    return Requirement(
-        name="mypackage",
-        url="/path/to/local/package",
-        editable=True,
-    )
-
-
-@pytest.fixture
-def url_requirement() -> Requirement:
-    """Create a URL-based Requirement.
-
-    Returns:
-        Requirement: A requirement with direct URL.
-    """
-    return Requirement(
-        name="requests",
-        url="https://github.com/psf/requests/archive/v2.28.0.tar.gz",
-    )
-
-
-@pytest.fixture
-def full_featured_requirement() -> Requirement:
-    """Create a Requirement with all features enabled.
-
-    Returns:
-        Requirement: A requirement using all available features.
-    """
-    return Requirement(
-        name="requests",
-        specs=[(">=", "2.0.0"), ("<", "3.0.0")],
-        extras=["security", "socks"],
-        markers='python_version >= "3.7"',
-        url="https://github.com/psf/requests/archive/v2.28.0.tar.gz",
-        editable=True,
-        hashes=["sha256:abc123", "sha256:def456"],
-        comment="Production dependency",
-        line_number=42,
-        raw_line="-e https://github.com/psf/requests/archive/v2.28.0.tar.gz",
-    )
-
-
-@pytest.fixture
-def requirement_factory():
-    """Factory fixture for creating Requirement instances with custom parameters.
-
-    Returns:
-        Callable: Function to create Requirements with specified attributes.
-    """
-
-    def _create(**kwargs):
-        defaults = {"name": "requests"}
-        defaults.update(kwargs)
-        return Requirement(**defaults)
-
-    return _create
-
-
-@pytest.fixture
-def spec_factory():
-    """Factory for creating common version specifiers.
-
-    Returns:
-        dict: Common spec patterns for reuse.
-    """
-    return {
-        "pinned": [("==", "2.28.0")],
-        "range": [(">=", "2.0.0"), ("<", "3.0.0")],
-        "exclude": [(">=", "2.0.0"), ("<", "3.0.0"), ("!=", "2.5.0")],
-        "min_only": [(">=", "2.0.0")],
-        "wildcard": [("==", "2.*")],
-        "complex": [(">=", "3.2"), ("<", "5.0"), ("!=", "4.0")],
-    }
-
-
-@pytest.fixture
-def url_factory():
-    """Factory for creating common URL patterns.
-
-    Returns:
-        dict: Common URL patterns for testing.
-    """
-    return {
-        "github_archive": "https://github.com/psf/requests/archive/v2.28.0.tar.gz",
-        "github_main": "https://github.com/psf/requests/archive/main.zip",
-        "git_https": "git+https://github.com/user/repo.git@main#egg=mypackage",
-        "git_ssh": "git+ssh://git@github.com/user/repo.git",
-        "git_branch": "git+https://github.com/user/my-lib.git@develop",
-        "git_subdirectory": "git+https://github.com/user/repo.git@feature-branch#subdirectory=packages/mypackage",
-        "local": ".",
-    }
-
-
-@pytest.fixture
-def marker_factory():
-    """Factory for creating common environment markers.
-
-    Returns:
-        dict: Common marker expressions for testing.
-    """
-    return {
-        "python_version": 'python_version >= "3.7"',
-        "python_version_38": 'python_version >= "3.8"',
-        "python_version_39": 'python_version >= "3.9"',
-        "linux": 'sys_platform == "linux"',
-        "windows": 'sys_platform == "win32"',
-        "not_windows": 'sys_platform != "win32"',
-        "complex": 'python_version >= "3.7" and sys_platform == "linux" and platform_machine == "x86_64"',
-        "or_condition": 'sys_platform == "win32" or sys_platform == "darwin"',
-    }
-
-
-@pytest.fixture
-def extras_factory():
-    """Factory for common extra specifications.
-
-    Returns:
-        dict: Common extra combinations for testing.
-    """
-    return {
-        "single": ["security"],
-        "multiple": ["security", "socks"],
-        "dev": ["dev", "test"],
-        "ordered": ["z-extra", "a-extra", "m-extra"],
-        "django": ["bcrypt"],
-        "numpy": ["dev"],
-        "flask": ["async"],
-    }
-
-
-@pytest.fixture
-def hash_factory():
-    """Factory for hash values.
-
-    Returns:
-        dict: Common hash patterns for testing.
-    """
-    return {
-        "single_sha256": ["sha256:abc123def456"],
-        "multiple_sha256": ["sha256:abc123", "sha256:def456"],
-        "multiple_sha256_three": ["sha256:abc123", "sha256:def456", "sha256:ghi789"],
-        "mixed_algorithms": ["sha256:abc123", "sha256:def456"],
-        "different_algorithms": ["sha256:abc123", "sha512:def456ghi789", "md5:xyz890"],
-        "security": ["sha256:hash1", "sha256:hash2"],
-    }
-
-
-@pytest.fixture
-def version_factory():
-    """Factory for version strings.
-
-    Returns:
-        dict: Common version patterns for testing.
-    """
-    return {
-        "stable": "2.28.0",
-        "updated": "2.31.0",
-        "new_major": "3.0.0",
-        "prerelease": "3.0.0a1",
-        "dev": "3.0.0.dev1",
-        "local": "2.28.0+local",
-        "epoch": "1!2.0.0",
-        "wildcard": "2.*",
-    }
-
-
-# ============================================================================
-# Reusable Data Fixtures
-# ============================================================================
-
-
-@pytest.fixture
-def package_names():
-    """Common package names for testing.
-
-    Returns:
-        dict: Package names categorized by use case.
-    """
-    return {
-        "simple": "requests",
-        "django": "django",
-        "flask": "flask",
-        "numpy": "numpy",
-        "pytest": "pytest",
-        "pillow": "pillow",
-        "pywin32": "pywin32",
-        "mypackage": "mypackage",
-        "myproject": "myproject",
-        "my-lib": "my-lib",
-        "empty": "",
-        "special_chars": "my-package.name_v2",
-        "long": "package-" * 50 + "name",
-    }
-
-
-@pytest.fixture
-def all_operators():
-    """All valid PEP 440 operators.
-
-    Returns:
-        list: All comparison operators.
-    """
-    return ["==", "!=", ">=", "<=", ">", "<", "~=", "==="]
-
-
-@pytest.fixture
-def comment_factory():
-    """Factory for common comment patterns.
-
-    Returns:
-        dict: Common comment strings for testing.
-    """
-    return {
-        "simple": "Production dependency",
-        "security": "Pinned for security",
-        "web_framework": "Web framework",
-        "testing": "Testing framework",
-        "local_dev": "Local development",
-        "develop_branch": "Latest develop branch",
-        "breaking_changes": "Avoid Django 4.0 due to breaking changes",
-        "cve": "Exclude vulnerable versions (CVE-2023-XXXXX)",
-        "windows": "Windows-specific",
-        "scientific": "Scientific computing",
-        "special_chars": "Critical! ⚠️ Don't update (see issue #123)",
-        "hash_symbols": "See issue #123 and PR #456",
-        "long": "This is a very long comment " * 20,
-    }
-
-
-@pytest.mark.unit
-class TestRequirementInit:
-    """Tests for Requirement initialization."""
-
-    @pytest.mark.unit
-    def test_minimal_initialization(self, simple_requirement: Requirement) -> None:
-        """Test Requirement with only package name.
-
-        Happy path: Minimal requirement with just name.
-
-        Args:
-            simple_requirement: Fixture providing a minimal Requirement.
-        """
-        # Act & Assert
-        assert simple_requirement.name == "requests"
-        assert simple_requirement.specs == []
-        assert simple_requirement.extras == []
-        assert simple_requirement.markers is None
-        assert simple_requirement.url is None
-        assert simple_requirement.editable is False
-        assert simple_requirement.hashes == []
-        assert simple_requirement.comment is None
-        assert simple_requirement.line_number == 0
-        assert simple_requirement.raw_line is None
-
-    @pytest.mark.unit
-    def test_full_initialization(self, full_featured_requirement: Requirement) -> None:
-        """Test Requirement with all parameters.
-
-        Should accept and store all optional parameters.
-
-        Args:
-            full_featured_requirement: Fixture with all features.
-        """
-        # Act & Assert
-        assert full_featured_requirement.name == "requests"
-        assert full_featured_requirement.specs == [(">=", "2.0.0"), ("<", "3.0.0")]
-        assert full_featured_requirement.extras == ["security", "socks"]
-        assert full_featured_requirement.markers == 'python_version >= "3.7"'
-        assert (
-            full_featured_requirement.url
-            == "https://github.com/psf/requests/archive/v2.28.0.tar.gz"
-        )
-        assert full_featured_requirement.editable is True
-        assert full_featured_requirement.hashes == ["sha256:abc123", "sha256:def456"]
-        assert full_featured_requirement.comment == "Production dependency"
-        assert full_featured_requirement.line_number == 42
-
-    @pytest.mark.unit
-    def test_default_factories_create_new_instances(self, requirement_factory) -> None:
-        """Test default factories create independent instances.
-
-        Edge case: Multiple requirements shouldn't share lists.
-        """
-        req1 = requirement_factory(name="requests")
-        req2 = requirement_factory(name="django")
-
-        req1.specs.append((">=", "2.0.0"))
-        req2.specs.append((">=", "4.0.0"))
-
-        assert req1.specs != req2.specs
-        assert req1.extras is not req2.extras
-        assert req1.hashes is not req2.hashes
-
-    @pytest.mark.unit
-    def test_initialization_with_empty_lists(self, requirement_factory) -> None:
-        """Test Requirement with explicitly empty lists.
-
-        Edge case: Empty lists should be accepted.
-        """
-        req = requirement_factory(name="requests", specs=[], extras=[], hashes=[])
-
-        assert req.specs == []
-        assert req.extras == []
-        assert req.hashes == []
-
-
-@pytest.mark.unit
-class TestToStringBasic:
-    """Tests for Requirement.to_string method - basic cases."""
-
-    @pytest.mark.unit
-    def test_simple_package_name_only(self, simple_requirement) -> None:
-        """Test rendering requirement with only package name.
-
-        Happy path: Simplest possible requirement.
-        """
-        result = simple_requirement.to_string()
-        assert result == "requests"
-
-    @pytest.mark.unit
-    def test_with_single_spec(self, requirement_with_version) -> None:
-        """Test rendering requirement with single version specifier.
-
-        Happy path: Common format with version constraint.
-        """
-        result = requirement_with_version.to_string()
-        assert result == "requests>=2.0.0"
-
-    @pytest.mark.unit
-    def test_with_multiple_specs(self, requirement_factory, spec_factory) -> None:
-        """Test rendering requirement with multiple version specifiers.
-
-        Should concatenate specifiers with commas.
-        """
-        req = requirement_factory(
-            name="requests", specs=[(">=", "2.0.0"), ("<", "3.0.0"), ("!=", "2.5.0")]
-        )
-        result = req.to_string()
-        assert result == "requests>=2.0.0,<3.0.0,!=2.5.0"
-
-    @pytest.mark.unit
-    def test_with_single_extra(self, requirement_factory, extras_factory) -> None:
-        """Test rendering requirement with single extra.
-
-        Extras should be enclosed in square brackets.
-        """
-        req = requirement_factory(name="requests", extras=extras_factory["single"])
-        result = req.to_string()
-        assert result == "requests[security]"
-
-    @pytest.mark.unit
-    def test_with_multiple_extras(self, requirement_factory, extras_factory) -> None:
-        """Test rendering requirement with multiple extras.
-
-        Multiple extras should be comma-separated.
-        """
-        req = requirement_factory(name="requests", extras=extras_factory["multiple"])
-        result = req.to_string()
-        assert result == "requests[security,socks]"
-
-    @pytest.mark.unit
-    def test_with_extras_and_specs(
-        self, requirement_factory, spec_factory, extras_factory
-    ) -> None:
-        """Test rendering requirement with both extras and specs.
-
-        Format should be: package[extras]specs
-        """
-        req = requirement_factory(
-            name="requests",
-            specs=spec_factory["min_only"],
-            extras=extras_factory["single"],
-        )
-        result = req.to_string()
-        assert result == "requests[security]>=2.0.0"
-
-    @pytest.mark.unit
-    def test_with_markers(
-        self, requirement_factory, marker_factory, spec_factory
-    ) -> None:
-        """Test rendering requirement with environment markers.
-
-        Markers should be preceded by semicolon and space.
-        """
-        req = requirement_factory(
-            name="requests",
-            specs=spec_factory["min_only"],
-            markers=marker_factory["python_version"],
-        )
-        result = req.to_string()
-        assert result == 'requests>=2.0.0 ; python_version >= "3.7"'
-
-    @pytest.mark.unit
-    def test_with_url(self, requirement_factory, url_factory) -> None:
-        """Test rendering URL-based requirement.
-
-        URL should replace package name in output.
-        """
-        req = requirement_factory(name="requests", url=url_factory["github_main"])
-        result = req.to_string()
-        assert result == "https://github.com/psf/requests/archive/main.zip"
-
-    @pytest.mark.unit
-    def test_editable_package(self, requirement_factory) -> None:
-        """Test rendering editable installation.
-
-        Should prefix with -e flag.
-        """
-        req = requirement_factory(name="mypackage", editable=True)
-        result = req.to_string()
-        assert result == "-e mypackage"
-
-    @pytest.mark.unit
-    def test_editable_url(self, requirement_factory, url_factory) -> None:
-        """Test rendering editable URL installation.
-
-        Should prefix URL with -e flag.
-        """
-        req = requirement_factory(
-            name="mypackage", url=url_factory["git_https"], editable=True
-        )
-        result = req.to_string()
-        assert result == "-e git+https://github.com/user/repo.git@main#egg=mypackage"
-
-
-@pytest.mark.unit
-class TestToStringWithHashes:
-    """Tests for Requirement.to_string with hash handling."""
-
-    @pytest.mark.unit
-    def test_single_hash(self, requirement_factory, spec_factory, hash_factory) -> None:
-        """Test rendering requirement with single hash.
-
-        Hash should be appended with --hash= prefix.
-        """
-        req = requirement_factory(
-            name="requests",
-            specs=spec_factory["pinned"],
-            hashes=hash_factory["single_sha256"],
-        )
-        result = req.to_string(include_hashes=True)
-        assert result == "requests==2.28.0 --hash=sha256:abc123def456"
-
-    @pytest.mark.unit
-    def test_multiple_hashes(
-        self, requirement_factory, spec_factory, hash_factory
-    ) -> None:
-        """Test rendering requirement with multiple hashes.
-
-        Multiple hashes should each have --hash= prefix.
-        """
-        req = requirement_factory(
-            name="requests",
-            specs=spec_factory["pinned"],
-            hashes=hash_factory["multiple_sha256_three"],
-        )
-        result = req.to_string(include_hashes=True)
-
-        assert "requests==2.28.0" in result
-        assert "--hash=sha256:abc123" in result
-        assert "--hash=sha256:def456" in result
-        assert "--hash=sha256:ghi789" in result
-
-    @pytest.mark.unit
-    def test_hashes_excluded_when_flag_false(
-        self, requirement_factory, spec_factory, hash_factory
-    ) -> None:
-        """Test hashes are omitted when include_hashes=False.
-
-        Should not include hash entries when flag is False.
-        """
-        req = requirement_factory(
-            name="requests",
-            specs=spec_factory["pinned"],
-            hashes=hash_factory["single_sha256"],
-        )
-        result = req.to_string(include_hashes=False)
-        assert result == "requests==2.28.0"
-        assert "--hash=" not in result
-
-    @pytest.mark.unit
-    def test_no_hashes_with_flag_true(self, requirement_factory, spec_factory) -> None:
-        """Test rendering with include_hashes=True but no hashes.
-
-        Edge case: Flag is True but no hashes to include.
-        """
-        req = requirement_factory(name="requests", specs=spec_factory["pinned"])
-        result = req.to_string(include_hashes=True)
-        assert result == "requests==2.28.0"
-        assert "--hash=" not in result
-
-
-@pytest.mark.unit
-class TestToStringWithComments:
-    """Tests for Requirement.to_string with comment handling."""
-
-    @pytest.mark.unit
-    def test_simple_comment(self, requirement_with_comment) -> None:
-        """Test rendering requirement with comment.
-
-        Comment should be appended with # prefix and space.
-        """
-        result = requirement_with_comment.to_string(include_comment=True)
-        assert result == "requests>=2.0.0  # Production dependency"
-
-    @pytest.mark.unit
-    def test_comment_excluded_when_flag_false(self, requirement_with_comment) -> None:
-        """Test comment is omitted when include_comment=False.
-
-        Should not include comment when flag is False.
-        """
-        result = requirement_with_comment.to_string(include_comment=False)
-        assert result == "requests>=2.0.0"
-        assert "#" not in result
-
-    @pytest.mark.unit
-    def test_no_comment_with_flag_true(self, requirement_with_version) -> None:
-        """Test rendering with include_comment=True but no comment.
-
-        Edge case: Flag is True but no comment to include.
-        """
-        result = requirement_with_version.to_string(include_comment=True)
-        assert result == "requests>=2.0.0"
-        assert "#" not in result
-
-    @pytest.mark.unit
-    def test_comment_with_hashes(
-        self, requirement_factory, spec_factory, hash_factory, comment_factory
-    ) -> None:
-        """Test rendering with both hashes and comment.
-
-        Comment should come after hashes.
-        """
-        req = requirement_factory(
-            name="requests",
-            specs=spec_factory["pinned"],
-            hashes=["sha256:abc123"],
-            comment=comment_factory["security"],
-        )
-        result = req.to_string(include_hashes=True, include_comment=True)
-        assert result.endswith("# Pinned for security")
-        assert "--hash=sha256:abc123  #" in result
-
-    @pytest.mark.unit
-    def test_comment_without_hashes(
-        self, requirement_factory, spec_factory, comment_factory
-    ) -> None:
-        """Test rendering with comment but hashes excluded.
-
-        Comment should still appear when hashes are excluded.
-        """
-        req = requirement_factory(
-            name="requests",
-            specs=spec_factory["pinned"],
-            hashes=["sha256:abc123"],
-            comment="Pinned",
-        )
-        result = req.to_string(include_hashes=False, include_comment=True)
-        assert result == "requests==2.28.0  # Pinned"
-
-
-@pytest.mark.unit
-class TestToStringComplex:
-    """Tests for Requirement.to_string with complex combinations."""
-
-    @pytest.mark.unit
-    def test_all_features_combined(
-        self,
-        requirement_factory,
-        spec_factory,
-        extras_factory,
-        marker_factory,
-        comment_factory,
-    ) -> None:
-        """Test rendering with all features enabled.
-
-        Integration test: extras, specs, markers, hashes, comment.
-        """
-        req = requirement_factory(
-            name="requests",
-            specs=spec_factory["range"],
-            extras=extras_factory["single"],
-            markers=marker_factory["python_version"],
-            hashes=["sha256:abc123"],
-            comment="Production",
-        )
-        result = req.to_string(include_hashes=True, include_comment=True)
-
-        assert "requests[security]>=2.0.0,<3.0.0" in result
-        assert '; python_version >= "3.7"' in result
-        assert "--hash=sha256:abc123" in result
-        assert "# Production" in result
-
-    @pytest.mark.unit
-    def test_editable_with_all_features(
-        self, requirement_factory, url_factory, marker_factory, comment_factory
-    ) -> None:
-        """Test editable requirement with multiple features.
-
-        Should handle -e flag with extras and markers.
-        """
-        req = requirement_factory(
-            name="mypackage",
-            url=url_factory["git_https"],
-            editable=True,
-            markers='sys_platform == "linux"',
-            comment=comment_factory["local_dev"],
-        )
-        result = req.to_string(include_comment=True)
-
-        assert result.startswith("-e")
-        assert "git+https://github.com/user/repo.git" in result
-        assert '; sys_platform == "linux"' in result
-        assert "# Local development" in result
-
-    @pytest.mark.unit
-    def test_url_with_extras(
-        self, requirement_factory, url_factory, extras_factory
-    ) -> None:
-        """Test URL-based requirement with extras.
-
-        Edge case: Extras should be added to URL.
-        """
-        req = requirement_factory(
-            name="requests",
-            url=url_factory["github_main"],
-            extras=extras_factory["single"],
-        )
-        result = req.to_string()
-        # URL should include extras
-        assert "https://github.com/psf/requests/archive/main.zip[security]" in result
-
-
-@pytest.mark.unit
-class TestUpdateVersion:
-    """Tests for Requirement.update_version method."""
-
-    @pytest.mark.unit
-    def test_update_simple_requirement(
-        self, requirement_factory, spec_factory, version_factory
-    ) -> None:
-        """Test updating version of simple requirement.
-
-        Happy path: Basic version update with == operator.
-        """
-        req = requirement_factory(name="requests", specs=[("==", "2.20.0")])
-        result = req.update_version(
-            version_factory["stable"], preserve_trailing_newline=False
-        )
-        assert result == "requests==2.28.0"
-
-    @pytest.mark.unit
-    def test_update_replaces_all_specs(
-        self, requirement_factory, spec_factory, version_factory
-    ) -> None:
-        """Test update replaces all existing specifiers.
-
-        Multiple old specifiers should be replaced with single ==.
-        """
-        req = requirement_factory(name="requests", specs=spec_factory["exclude"])
-        result = req.update_version(
-            version_factory["stable"], preserve_trailing_newline=False
-        )
-        assert result == "requests==2.28.0"
-        assert "<3.0.0" not in result
-        assert "!=2.5.0" not in result
-
-    @pytest.mark.unit
-    def test_update_preserves_extras(
-        self, requirement_factory, extras_factory, version_factory
-    ) -> None:
-        """Test update preserves extras.
-
-        Extras should remain in updated requirement.
-        """
-        req = requirement_factory(
-            name="requests", specs=[("==", "2.20.0")], extras=extras_factory["multiple"]
-        )
-        result = req.update_version(version_factory["stable"])
-        assert result == "requests[security,socks]==2.28.0\n"
-
-    @pytest.mark.unit
-    def test_update_preserves_markers(
-        self, requirement_factory, marker_factory, version_factory
-    ) -> None:
-        """Test update preserves environment markers.
-
-        Markers should remain in updated requirement.
-        """
-        req = requirement_factory(
-            name="requests",
-            specs=[("==", "2.20.0")],
-            markers=marker_factory["python_version"],
-        )
-        result = req.update_version(version_factory["stable"])
-        assert 'python_version >= "3.7"' in result
-
-    @pytest.mark.unit
-    def test_update_preserves_url(
-        self, requirement_factory, url_factory, version_factory
-    ) -> None:
-        """Test update preserves URL.
-
-        URL-based requirements should keep URL.
-        """
-        req = requirement_factory(
-            name="requests",
-            url=url_factory["github_main"],
-            specs=[("==", "2.20.0")],
-        )
-        result = req.update_version(version_factory["stable"])
-        assert "https://github.com/psf/requests/archive/main.zip" in result
-
-    @pytest.mark.unit
-    def test_update_preserves_editable_flag(
-        self, requirement_factory, version_factory
-    ) -> None:
-        """Test update preserves editable flag.
-
-        Editable installs should remain editable.
-        """
-        req = requirement_factory(
-            name="mypackage", specs=[("==", "1.0.0")], editable=True
-        )
-        result = req.update_version("1.5.0")
-        assert result.startswith("-e")
-
-    @pytest.mark.unit
-    def test_update_removes_hashes(
-        self, requirement_factory, hash_factory, version_factory
-    ) -> None:
-        """Test update removes hash entries.
-
-        Hashes are version-specific and should be removed.
-        """
-        req = requirement_factory(
-            name="requests",
-            specs=[("==", "2.20.0")],
-            hashes=hash_factory["multiple_sha256"],
-        )
-        result = req.update_version(version_factory["stable"])
-        assert "--hash=" not in result
-
-    @pytest.mark.unit
-    def test_update_preserves_comment(
-        self, requirement_with_comment, version_factory
-    ) -> None:
-        """Test update preserves inline comment.
-
-        Comments should remain in updated requirement.
-        """
-        req = requirement_with_comment
-        result = req.update_version(version_factory["stable"])
-        assert "# Production dependency" in result
-
-    @pytest.mark.unit
-    def test_update_with_newline_preserved(
-        self, requirement_factory, version_factory
-    ) -> None:
-        """Test update with trailing newline preservation.
-
-        Default behavior should add trailing newline.
-        """
-        req = requirement_factory(name="requests", specs=[("==", "2.20.0")])
-        result = req.update_version(
-            version_factory["stable"], preserve_trailing_newline=True
-        )
-        assert result.endswith("\n")
-
-    @pytest.mark.unit
-    def test_update_without_newline(self, requirement_factory, version_factory) -> None:
-        """Test update without trailing newline.
-
-        preserve_trailing_newline=False should not add newline.
-        """
-        req = requirement_factory(name="requests", specs=[("==", "2.20.0")])
-        result = req.update_version(
-            version_factory["stable"], preserve_trailing_newline=False
-        )
-        assert not result.endswith("\n")
-        assert result == "requests==2.28.0"
-
-    @pytest.mark.unit
-    def test_update_with_all_features(
-        self,
-        requirement_factory,
-        spec_factory,
-        extras_factory,
-        marker_factory,
-        comment_factory,
-        version_factory,
-    ) -> None:
-        """Test update with complex requirement.
-
-        Integration test: Update requirement with all features.
-        """
-        req = requirement_factory(
-            name="requests",
-            specs=spec_factory["range"],
-            extras=extras_factory["single"],
-            markers=marker_factory["python_version"],
-            hashes=["sha256:abc123"],
-            comment=comment_factory["security"],
-            editable=False,
-        )
-        result = req.update_version(version_factory["stable"])
-
-        # Should have new version
-        assert "==2.28.0" in result
-        # Should preserve extras, markers, comment
-        assert "[security]" in result
-        assert 'python_version >= "3.7"' in result
-        assert "# Pinned for security" in result
-        # Should not have old specs or hashes
-        assert "<3.0.0" not in result
-        assert "--hash=" not in result
-
-    @pytest.mark.unit
-    def test_update_preserves_line_number(self, requirement_factory) -> None:
-        """Test update preserves original line number.
-
-        Line number tracking should be maintained.
-        """
-        req = requirement_factory(
-            name="requests", specs=[("==", "2.20.0")], line_number=42
-        )
-        # Create updated requirement object to verify
-        updated_req = Requirement(
-            name=req.name, specs=[(">=", "2.28.0")], line_number=req.line_number
-        )
-        assert updated_req.line_number == 42
-
-
-@pytest.mark.unit
-class TestStringRepresentations:
-    """Tests for Requirement.__str__ and __repr__ methods."""
-
-    @pytest.mark.unit
-    def test_str_simple(self, requirement_with_version) -> None:
-        """Test __str__ with simple requirement.
-
-        Should delegate to to_string().
-        """
-        result = str(requirement_with_version)
-        assert result == "requests>=2.0.0"
-
-    @pytest.mark.unit
-    def test_str_complex(
-        self,
-        requirement_factory,
-        spec_factory,
-        extras_factory,
-        hash_factory,
-        comment_factory,
-    ) -> None:
-        """Test __str__ with complex requirement.
-
-        Should include all features via to_string().
-        """
-        req = requirement_factory(
-            name="requests",
-            specs=spec_factory["min_only"],
-            extras=extras_factory["single"],
-            hashes=["sha256:abc123"],
-            comment="Production",
-        )
-        result = str(req)
-
-        assert "requests[security]>=2.0.0" in result
-        assert "--hash=sha256:abc123" in result
-        assert "# Production" in result
-
-    @pytest.mark.unit
-    def test_repr_minimal(self, simple_requirement) -> None:
-        """Test __repr__ with minimal data.
-
-        Should show constructor format for debugging.
-        """
-        result = repr(simple_requirement)
-
-        assert result.startswith("Requirement(")
-        assert "name='requests'" in result
-        assert "specs=[]" in result
-        assert "extras=[]" in result
-        assert "editable=False" in result
-        assert "line_number=0" in result
-
-    @pytest.mark.unit
-    def test_repr_full(self, requirement_factory, spec_factory, extras_factory) -> None:
-        """Test __repr__ with full data.
-
-        Should show key fields in constructor format.
-        """
-        req = requirement_factory(
-            name="requests",
-            specs=spec_factory["range"],
-            extras=extras_factory["single"],
-            editable=True,
-            line_number=42,
-        )
-        result = repr(req)
-
-        assert "name='requests'" in result
-        assert "specs=[('>=', '2.0.0'), ('<', '3.0.0')]" in result
-        assert "extras=['security']" in result
-        assert "editable=True" in result
-        assert "line_number=42" in result
-
-    @pytest.mark.unit
-    def test_str_vs_repr_difference(self, requirement_with_version) -> None:
-        """Test str() and repr() produce different outputs.
-
-        str() should be user-friendly, repr() for debugging.
-        """
-        str_result = str(requirement_with_version)
-        repr_result = repr(requirement_with_version)
-
-        assert str_result == "requests>=2.0.0"
-        assert "Requirement(" in repr_result
-        assert str_result != repr_result
-
-
-@pytest.mark.unit
-class TestEdgeCases:
-    """Tests for edge cases and unusual inputs."""
-
-    @pytest.mark.unit
-    def test_empty_package_name(self, requirement_factory, package_names) -> None:
-        """Test requirement with empty package name.
-
-        Edge case: Empty string as name.
-        """
-        req = requirement_factory(name=package_names["empty"])
-        result = req.to_string()
-        assert result == ""
-
-    @pytest.mark.unit
-    def test_package_name_with_special_characters(
-        self, requirement_factory, package_names
-    ) -> None:
-        """Test package name with special characters.
-
-        Edge case: Names with dots, dashes, underscores.
-        """
-        req = requirement_factory(name=package_names["special_chars"])
-        result = req.to_string()
-        assert result == "my-package.name_v2"
-
-    @pytest.mark.unit
-    def test_very_long_package_name(self, requirement_factory, package_names) -> None:
-        """Test requirement with very long package name.
-
-        Edge case: Extremely long names should be handled.
-        """
-        long_name = package_names["long"]
-        req = requirement_factory(name=long_name)
-        result = req.to_string()
-        assert result == long_name
-
-    @pytest.mark.unit
-    def test_spec_with_wildcards(self, requirement_factory, spec_factory) -> None:
-        """Test version specifier with wildcards.
-
-        Edge case: Wildcard versions like ==2.*.
-        """
-        req = requirement_factory(name="requests", specs=spec_factory["wildcard"])
-        result = req.to_string()
-        assert result == "requests==2.*"
-
-    @pytest.mark.unit
-    def test_spec_with_local_version(
-        self, requirement_factory, version_factory
-    ) -> None:
-        """Test version specifier with local identifier.
-
-        Edge case: PEP 440 local versions like 1.0+local.
-        """
-        req = requirement_factory(
-            name="requests", specs=[("==", version_factory["local"])]
-        )
-        result = req.to_string()
-        assert result == "requests==2.28.0+local"
-
-    @pytest.mark.unit
-    def test_spec_with_epoch(self, requirement_factory, version_factory) -> None:
-        """Test version specifier with epoch.
-
-        Edge case: PEP 440 epochs like 1!2.0.0.
-        """
-        req = requirement_factory(
-            name="requests", specs=[("==", version_factory["epoch"])]
-        )
-        result = req.to_string()
-        assert result == "requests==1!2.0.0"
-
-    @pytest.mark.unit
-    def test_marker_with_complex_expression(
-        self, requirement_factory, marker_factory
-    ) -> None:
-        """Test requirement with complex marker expression.
-
-        Edge case: Multiple conditions in markers.
-        """
-        req = requirement_factory(
-            name="requests",
-            markers=marker_factory["complex"],
-        )
-        result = req.to_string()
-
-        assert 'python_version >= "3.7"' in result
-        assert 'sys_platform == "linux"' in result
-        assert 'platform_machine == "x86_64"' in result
-
-    @pytest.mark.unit
-    def test_marker_with_or_condition(
-        self, requirement_factory, marker_factory
-    ) -> None:
-        """Test requirement with OR marker expression.
-
-        Edge case: Markers with or operator.
-        """
-        req = requirement_factory(
-            name="requests",
-            markers=marker_factory["or_condition"],
-        )
-        result = req.to_string()
-        assert 'sys_platform == "win32" or sys_platform == "darwin"' in result
-
-    @pytest.mark.unit
-    def test_url_with_git_protocol(self, requirement_factory, url_factory) -> None:
-        """Test URL with git+ protocol.
-
-        Edge case: VCS URLs.
-        """
-        req = requirement_factory(
-            name="mypackage",
-            url=url_factory["git_https"],
-        )
-        result = req.to_string()
-        assert "git+https://github.com/user/repo.git@main#egg=mypackage" in result
-
-    @pytest.mark.unit
-    def test_url_with_ssh(self, requirement_factory, url_factory) -> None:
-        """Test URL with SSH protocol.
-
-        Edge case: SSH-based VCS URLs.
-        """
-        req = requirement_factory(name="mypackage", url=url_factory["git_ssh"])
-        result = req.to_string()
-        assert "git+ssh://git@github.com/user/repo.git" in result
-
-    @pytest.mark.unit
-    def test_url_with_branch_and_subdirectory(
-        self, requirement_factory, url_factory
-    ) -> None:
-        """Test URL with branch and subdirectory.
-
-        Edge case: Complex VCS URL with path.
-        """
-        req = requirement_factory(
-            name="mypackage",
-            url=url_factory["git_subdirectory"],
-        )
-        result = req.to_string()
-
-        assert "feature-branch" in result
-        assert "subdirectory=packages/mypackage" in result
-
-    @pytest.mark.unit
-    def test_comment_with_special_characters(
-        self, requirement_factory, comment_factory
-    ) -> None:
-        """Test comment with special characters.
-
-        Edge case: Comments with unicode, symbols.
-        """
-        req = requirement_factory(
-            name="requests", comment=comment_factory["special_chars"]
-        )
-        result = req.to_string(include_comment=True)
-        assert "Critical! ⚠️ Don't update (see issue #123)" in result
-
-    @pytest.mark.unit
-    def test_comment_with_hash_symbol(
-        self, requirement_factory, comment_factory
-    ) -> None:
-        """Test comment containing # symbol.
-
-        Edge case: Hash symbols within comment text.
-        """
-        req = requirement_factory(
-            name="requests", comment=comment_factory["hash_symbols"]
-        )
-        result = req.to_string(include_comment=True)
-        assert "# See issue #123 and PR #456" in result
-
-    @pytest.mark.unit
-    def test_multiple_extras_ordering(
-        self, requirement_factory, extras_factory
-    ) -> None:
-        """Test extras maintain insertion order.
-
-        Edge case: Order of extras should be preserved.
-        """
-        req = requirement_factory(name="requests", extras=extras_factory["ordered"])
-        result = req.to_string()
-        assert result == "requests[z-extra,a-extra,m-extra]"
-
-    @pytest.mark.unit
-    def test_hash_with_different_algorithms(
-        self, requirement_factory, spec_factory, hash_factory
-    ) -> None:
-        """Test hashes with different algorithms.
-
-        Edge case: Multiple hash algorithms (sha256, sha512, md5).
-        """
-        req = requirement_factory(
-            name="requests",
-            specs=spec_factory["pinned"],
-            hashes=hash_factory["different_algorithms"],
-        )
-        result = req.to_string(include_hashes=True)
-
-        assert "--hash=sha256:abc123" in result
-        assert "--hash=sha512:def456ghi789" in result
-        assert "--hash=md5:xyz890" in result
-
-    @pytest.mark.unit
-    def test_very_long_comment(self, requirement_factory, comment_factory) -> None:
-        """Test requirement with very long comment.
-
-        Edge case: Comments can be arbitrarily long.
-        """
-        long_comment = comment_factory["long"]
-        req = requirement_factory(name="requests", comment=long_comment)
-        result = req.to_string(include_comment=True)
-        assert long_comment in result
-
-    @pytest.mark.unit
-    def test_zero_line_number(self, requirement_factory) -> None:
-        """Test requirement with line number 0.
-
-        Edge case: Zero is valid line number (default).
-        """
-        req = requirement_factory(name="requests", line_number=0)
+        assert (req.specs, req.extras, req.hashes) == ([], [], [])
+        assert (req.markers, req.url, req.comment, req.raw_line) == (None,) * 4
+        assert req.editable is False
         assert req.line_number == 0
+        assert req.source_file is None
 
-    @pytest.mark.unit
-    def test_large_line_number(self, requirement_factory) -> None:
-        """Test requirement with very large line number.
+    def test_mutable_defaults_are_not_shared_between_instances(self) -> None:
+        """A shared default list would let one parsed line corrupt another."""
+        first = Requirement(name="requests")
+        second = Requirement(name="flask")
 
-        Edge case: Large files can have high line numbers.
+        first.specs.append(("==", "2.31.0"))
+        first.extras.append("socks")
+        first.hashes.append(CLICK_SHA256)
+
+        assert second.specs == []
+        assert second.extras == []
+        assert second.hashes == []
+
+    def test_source_file_is_excluded_from_equality(self) -> None:
+        """Provenance is bookkeeping for the writer, not part of identity.
+
+        The same requirement reached through ``-r base.txt`` and read directly
+        must still compare equal; only the file it gets written back to differs.
         """
-        req = requirement_factory(name="requests", line_number=999999)
-        assert req.line_number == 999999
-
-    @pytest.mark.unit
-    def test_raw_line_with_whitespace(self, requirement_factory) -> None:
-        """Test raw_line preserves whitespace.
-
-        Edge case: Original line might have leading/trailing space.
-        """
-        req = requirement_factory(
-            name="requests", raw_line="  requests>=2.0.0 # comment  "
+        via_include = make_requirement(
+            "requests",
+            specs=specs("==2.31.0"),
+            source_file="/app/requirements/base.txt",
         )
-        assert req.raw_line == "  requests>=2.0.0 # comment  "
-
-    @pytest.mark.unit
-    def test_operator_variations(self, requirement_factory, all_operators) -> None:
-        """Test all valid PEP 440 operators.
-
-        Edge case: All comparison operators should work.
-        """
-        for op in all_operators:
-            req = requirement_factory(name="requests", specs=[(op, "2.0.0")])
-            result = req.to_string()
-            assert f"requests{op}2.0.0" in result
-
-    @pytest.mark.unit
-    def test_compatible_release_operator(self, requirement_factory) -> None:
-        """Test compatible release operator ~=.
-
-        Edge case: Tilde equal operator for compatible releases.
-        """
-        req = requirement_factory(name="requests", specs=[("~=", "2.28")])
-        result = req.to_string()
-        assert result == "requests~=2.28"
-
-    @pytest.mark.unit
-    def test_arbitrary_equality_operator(self, requirement_factory) -> None:
-        """Test arbitrary equality operator ===.
-
-        Edge case: Triple equals for string matching.
-        """
-        req = requirement_factory(name="requests", specs=[("===", "2.28.0-local")])
-        result = req.to_string()
-        assert result == "requests===2.28.0-local"
-
-    @pytest.mark.unit
-    def test_update_version_with_prerelease(
-        self, requirement_factory, spec_factory, version_factory
-    ) -> None:
-        """Test updating to pre-release version.
-
-        Edge case: Pre-release versions like 3.0.0a1.
-        """
-        req = requirement_factory(name="requests", specs=spec_factory["pinned"])
-        result = req.update_version(version_factory["prerelease"])
-        assert "==3.0.0a1" in result
-
-    @pytest.mark.unit
-    def test_update_version_with_dev_version(
-        self, requirement_factory, spec_factory, version_factory
-    ) -> None:
-        """Test updating to development version.
-
-        Edge case: Dev versions like 3.0.0.dev1.
-        """
-        req = requirement_factory(name="requests", specs=spec_factory["pinned"])
-        result = req.update_version(version_factory["dev"])
-        assert "==3.0.0.dev1" in result
-
-    @pytest.mark.unit
-    def test_empty_specs_list_to_string(self, simple_requirement) -> None:
-        """Test to_string with explicitly empty specs list.
-
-        Edge case: Empty list should produce name only.
-        """
-        result = simple_requirement.to_string()
-        assert result == "requests"
-
-    @pytest.mark.unit
-    def test_empty_extras_list_to_string(self, requirement_factory) -> None:
-        """Test to_string with explicitly empty extras list.
-
-        Edge case: Empty list should not add brackets.
-        """
-        req = requirement_factory(name="requests", extras=[])
-        result = req.to_string()
-        assert result == "requests"
-        assert "[" not in result
-
-    @pytest.mark.unit
-    def test_empty_hashes_list_to_string(self, requirement_factory) -> None:
-        """Test to_string with explicitly empty hashes list.
-
-        Edge case: Empty list should not add --hash entries.
-        """
-        req = requirement_factory(name="requests", hashes=[])
-        result = req.to_string(include_hashes=True)
-        assert result == "requests"
-        assert "--hash=" not in result
-
-
-@pytest.mark.unit
-class TestIntegrationScenarios:
-    """Integration tests for real-world requirement scenarios."""
-
-    @pytest.mark.unit
-    def test_typical_pinned_requirement(
-        self, requirement_factory, spec_factory, hash_factory, version_factory
-    ) -> None:
-        """Test typical pinned requirement with hash.
-
-        Integration: Common pattern for reproducible installs.
-        """
-        req = requirement_factory(
-            name="requests",
-            specs=spec_factory["pinned"],
-            hashes=hash_factory["single_sha256"],
-            line_number=15,
-            raw_line="requests==2.28.0 --hash=sha256:abc123def456",
+        direct = make_requirement(
+            "requests", specs=specs("==2.31.0"), source_file="/app/requirements.txt"
         )
 
-        # Test string rendering
-        result = req.to_string()
-        assert "requests==2.28.0" in result
-        assert "--hash=sha256:abc123def456" in result
+        assert via_include == direct
 
-        # Test version update
-        updated = req.update_version(version_factory["updated"])
-        assert "==2.31.0" in updated
-        assert "--hash=" not in updated  # Hashes removed
-
-    @pytest.mark.unit
-    def test_development_dependency_workflow(
-        self, requirement_factory, marker_factory, comment_factory, version_factory
-    ) -> None:
-        """Test development dependency with markers and comment.
-
-        Integration: Dev dependency with platform markers.
-        """
-        req = requirement_factory(
-            name="pytest",
-            specs=[(">=", "7.0.0")],
-            markers=marker_factory["python_version_38"],
-            comment=comment_factory["testing"],
-            line_number=25,
+    def test_differing_specs_are_not_equal(self) -> None:
+        """Guard for the above: equality must still notice real differences."""
+        assert make_requirement("requests", specs=specs("==2.31.0")) != make_requirement(
+            "requests", specs=specs("==2.32.3")
         )
 
-        # Render with all features
-        result = req.to_string()
-        assert "pytest>=7.0.0" in result
-        assert 'python_version >= "3.8"' in result
-        assert "# Testing framework" in result
 
-        # Update version
-        updated = req.update_version("7.4.0")
-        assert "==7.4.0" in updated
-        assert "# Testing framework" in updated
+# ---------------------------------------------------------------------------
+# Rendering
+# ---------------------------------------------------------------------------
 
-    @pytest.mark.unit
-    def test_editable_local_package_workflow(
-        self, requirement_factory, url_factory, extras_factory, comment_factory
-    ) -> None:
-        """Test editable local package installation.
 
-        Integration: Common development workflow.
-        """
-        req = requirement_factory(
-            name="myproject",
-            url=url_factory["local"],
-            editable=True,
-            extras=extras_factory["dev"],
-            comment=comment_factory["local_dev"],
-            line_number=1,
+class TestToString:
+    """``to_string`` must emit a line pip can install."""
+
+    @pytest.mark.parametrize(
+        ("req", "expected"),
+        [
+            pytest.param(make_requirement("urllib3"), "urllib3", id="bare-name"),
+            pytest.param(
+                make_requirement("requests", specs=specs("==2.31.0")),
+                "requests==2.31.0",
+                id="exact-pin",
+            ),
+            pytest.param(
+                make_requirement("django", specs=specs(">=3.2", "<5.0", "!=4.0.*")),
+                "django>=3.2,<5.0,!=4.0.*",
+                id="range-with-exclusion-keeps-declaration-order",
+            ),
+            pytest.param(
+                make_requirement("sqlalchemy", specs=specs("~=2.0")),
+                "sqlalchemy~=2.0",
+                id="compatible-release",
+            ),
+            pytest.param(
+                make_requirement("celery", extras=["redis"], specs=specs(">=5.3.4")),
+                "celery[redis]>=5.3.4",
+                id="single-extra",
+            ),
+            pytest.param(
+                make_requirement("django", extras=["argon2", "bcrypt"]),
+                "django[argon2,bcrypt]",
+                id="multiple-extras-keep-order",
+            ),
+            pytest.param(
+                make_requirement(
+                    "typing-extensions",
+                    specs=specs(">=4.6.0"),
+                    markers='python_version < "3.11"',
+                ),
+                'typing-extensions>=4.6.0 ; python_version < "3.11"',
+                id="environment-marker",
+            ),
+            pytest.param(
+                make_requirement("internal-sdk", url=INTERNAL_SDK_URL, editable=True),
+                f"-e {INTERNAL_SDK_URL}",
+                id="editable-vcs-checkout",
+            ),
+            pytest.param(
+                make_requirement(
+                    "flask", specs=specs("==2.3.3"), comment="CVE-2023-30861"
+                ),
+                "flask==2.3.3  # CVE-2023-30861",
+                id="inline-comment",
+            ),
+        ],
+    )
+    def test_renders_expected_line(self, req: Requirement, expected: str) -> None:
+        assert req.to_string() == expected
+
+    def test_renders_every_component_in_pip_order(self) -> None:
+        """The full grammar: -e, name, extras, specs, marker, hashes, comment."""
+        req = make_requirement(
+            "celery",
+            specs=specs(">=5.3.4", "<6.0"),
+            extras=["redis", "msgpack"],
+            markers='python_version >= "3.8"',
+            hashes=[CLICK_SHA256],
+            comment="broker client",
         )
 
-        result = req.to_string()
-        assert result.startswith("-e")
-        assert ".[dev,test]" in result
-        assert "# Local development" in result
-
-    @pytest.mark.unit
-    def test_vcs_requirement_with_branch(
-        self, requirement_factory, url_factory, marker_factory, comment_factory
-    ) -> None:
-        """Test VCS requirement with specific branch.
-
-        Integration: Installing from git repository.
-        """
-        req = requirement_factory(
-            name="my-lib",
-            url=url_factory["git_branch"],
-            editable=False,
-            markers=marker_factory["not_windows"],
-            comment=comment_factory["develop_branch"],
+        assert req.to_string() == (
+            "celery[redis,msgpack]>=5.3.4,<6.0"
+            ' ; python_version >= "3.8"'
+            f" --hash={CLICK_SHA256}"
+            "  # broker client"
         )
 
-        result = req.to_string()
-        assert "git+https://github.com/user/my-lib.git@develop" in result
-        assert '; sys_platform != "win32"' in result
-        assert "# Latest develop branch" in result
-
-    @pytest.mark.unit
-    def test_requirement_with_all_operators(
-        self,
-        requirement_factory,
-        spec_factory,
-        extras_factory,
-        comment_factory,
-        version_factory,
-    ) -> None:
-        """Test requirement using multiple operators.
-
-        Integration: Complex version constraints.
-        """
-        req = requirement_factory(
-            name="django",
-            specs=spec_factory["complex"],
-            extras=extras_factory["django"],
-            comment=comment_factory["breaking_changes"],
+    def test_multiple_hashes_are_each_prefixed(self) -> None:
+        """``pip --require-hashes`` needs one ``--hash`` per published artifact."""
+        req = make_requirement(
+            "click", specs=specs("==8.1.7"), hashes=[CLICK_SHA256, CLICK_SHA256_SDIST]
         )
 
-        result = req.to_string()
-        assert "django[bcrypt]>=3.2,<5.0,!=4.0" in result
-        assert "# Avoid Django 4.0" in result
-
-        # Update should replace all specs
-        updated = req.update_version("4.2.0")
-        assert "==4.2.0" in updated
-        assert "<5.0" not in updated
-        assert "!=4.0" not in updated
-
-    @pytest.mark.unit
-    def test_security_constrained_requirement(
-        self, requirement_factory, hash_factory, comment_factory
-    ) -> None:
-        """Test requirement with security-related constraints.
-
-        Integration: Security fix with exclusions.
-        """
-        req = requirement_factory(
-            name="pillow",
-            specs=[(">=", "9.0.0"), ("!=", "9.1.0"), ("!=", "9.1.1")],
-            comment=comment_factory["cve"],
-            hashes=hash_factory["security"],
-            line_number=50,
+        assert req.to_string() == (
+            f"click==8.1.7 --hash={CLICK_SHA256} --hash={CLICK_SHA256_SDIST}"
         )
 
-        result = req.to_string()
-        assert "pillow>=9.0.0,!=9.1.0,!=9.1.1" in result
-        assert "CVE-2023-XXXXX" in result
-        assert "--hash=sha256:hash1" in result
-
-    @pytest.mark.unit
-    def test_platform_specific_requirement(
-        self, requirement_factory, marker_factory, comment_factory
+    @pytest.mark.parametrize(
+        ("include_hashes", "include_comment", "expected"),
+        [
+            (True, True, f"click==8.1.7 --hash={CLICK_SHA256}  # pinned by lockfile"),
+            (True, False, f"click==8.1.7 --hash={CLICK_SHA256}"),
+            (False, True, "click==8.1.7  # pinned by lockfile"),
+            (False, False, "click==8.1.7"),
+        ],
+        ids=["both", "hashes-only", "comment-only", "neither"],
+    )
+    def test_hash_and_comment_flags_are_independent(
+        self, include_hashes: bool, include_comment: bool, expected: str
     ) -> None:
-        """Test requirement specific to certain platforms.
-
-        Integration: Platform-conditional dependency.
-        """
-        req = requirement_factory(
-            name="pywin32",
-            specs=[(">=", "300")],
-            markers=marker_factory["windows"],
-            comment=comment_factory["windows"],
+        req = make_requirement(
+            "click",
+            specs=specs("==8.1.7"),
+            hashes=[CLICK_SHA256],
+            comment="pinned by lockfile",
         )
 
-        result = req.to_string()
-        assert "pywin32>=300" in result
-        assert '; sys_platform == "win32"' in result
-
-    @pytest.mark.unit
-    def test_requirement_update_preserves_context(
-        self,
-        requirement_factory,
-        spec_factory,
-        extras_factory,
-        marker_factory,
-        comment_factory,
-    ) -> None:
-        """Test version update preserves all context.
-
-        Integration: Full update workflow maintaining metadata.
-        """
-        original = requirement_factory(
-            name="flask",
-            specs=spec_factory["range"],
-            extras=extras_factory["flask"],
-            markers=marker_factory["python_version_38"],
-            comment=comment_factory["web_framework"],
-            line_number=10,
-            raw_line='flask[async]>=2.0.0,<3.0.0 ; python_version >= "3.8" # Web framework',
+        assert (
+            req.to_string(
+                include_hashes=include_hashes, include_comment=include_comment
+            )
+            == expected
         )
 
-        # Update version
-        updated_str = original.update_version("2.3.0")
-
-        # Verify preservation
-        assert "flask[async]==2.3.0" in updated_str
-        assert 'python_version >= "3.8"' in updated_str
-        assert "# Web framework" in updated_str
-        assert "<3.0.0" not in updated_str
-
-    @pytest.mark.unit
-    def test_roundtrip_string_consistency(
-        self,
-        requirement_factory,
-        spec_factory,
-        extras_factory,
-        marker_factory,
-        comment_factory,
-    ) -> None:
-        """Test to_string output can represent requirement.
-
-        Integration: String rendering should be consistent.
-        """
-        req = requirement_factory(
-            name="numpy",
-            specs=spec_factory["range"],
-            extras=extras_factory["numpy"],
-            markers=marker_factory["python_version_39"],
-            comment=comment_factory["scientific"],
+    def test_comment_containing_a_hash_symbol_is_not_escaped(self) -> None:
+        """Issue references are the most common comment; ``#`` must survive."""
+        req = make_requirement(
+            "urllib3", specs=specs("<2.0"), comment="see acme/platform#4127"
         )
 
-        # Render twice
-        first = req.to_string()
-        second = req.to_string()
+        assert req.to_string() == "urllib3<2.0  # see acme/platform#4127"
 
-        # Should be identical
-        assert first == second
-        # Should contain all components
-        assert "numpy[dev]>=2.0.0,<3.0.0" in first
-        assert 'python_version >= "3.9"' in first
-        assert "# Scientific computing" in first
+
+class TestDirectReferenceRendering:
+    """Regression C2: specifiers must never be appended to a direct reference.
+
+    PEP 508 direct references carry their version in the URL. Emitting
+    ``git+https://...#egg=pkg==9.9.9`` produces a line pip cannot install, and
+    depkeeper used to do exactly that whenever a URL requirement also carried
+    specs (which the constraint machinery can attach).
+    """
+
+    @pytest.mark.parametrize(
+        ("req", "expected"),
+        [
+            pytest.param(
+                make_requirement(
+                    "internal-sdk", url=INTERNAL_SDK_URL, specs=specs("==9.9.9")
+                ),
+                INTERNAL_SDK_URL,
+                id="vcs",
+            ),
+            pytest.param(
+                make_requirement(
+                    "internal-sdk",
+                    url=INTERNAL_SDK_URL,
+                    specs=specs("==9.9.9"),
+                    editable=True,
+                ),
+                f"-e {INTERNAL_SDK_URL}",
+                id="editable-vcs",
+            ),
+            pytest.param(
+                make_requirement(
+                    "rich",
+                    url=(
+                        "https://files.pythonhosted.org/packages/"
+                        "rich-13.7.1-py3-none-any.whl"
+                    ),
+                    specs=specs(">=13.0.0"),
+                ),
+                (
+                    "https://files.pythonhosted.org/packages/"
+                    "rich-13.7.1-py3-none-any.whl"
+                ),
+                id="wheel-url",
+            ),
+        ],
+    )
+    def test_specs_are_dropped(self, req: Requirement, expected: str) -> None:
+        assert req.to_string() == expected
+
+    def test_extras_are_still_rendered(self) -> None:
+        """Guard: dropping specs must not also drop the extras selector.
+
+        The extra still selects which optional dependency group pip installs
+        from the direct reference, so it carries meaning the URL does not.
+        """
+        req = make_requirement(
+            "celery",
+            url="https://github.com/celery/celery/archive/v5.4.0.zip",
+            extras=["redis"],
+            specs=specs("==9.9.9"),
+        )
+
+        assert req.to_string() == (
+            "https://github.com/celery/celery/archive/v5.4.0.zip[redis]"
+        )
+
+    def test_update_version_leaves_the_reference_installable(self) -> None:
+        req = make_requirement("internal-sdk", url=INTERNAL_SDK_URL, editable=True)
+
+        assert req.update_version("2.4.0") == f"-e {INTERNAL_SDK_URL}\n"
+
+
+# ---------------------------------------------------------------------------
+# Version updates
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateVersionPreservesDeclaredRanges:
+    """Regression M5: an update moves the floor and nothing else.
+
+    Upper bounds, exclusions and wildcard bands are deliberate compatibility
+    statements. Collapsing ``celery[redis]>=5.0,<6.0`` to ``celery[redis]==5.4.0``
+    silently discards the author's guarantee that 6.x is untested, and the next
+    engineer has no way to recover that intent from the diff.
+    """
+
+    @pytest.mark.parametrize(
+        ("declared", "target", "expected"),
+        [
+            pytest.param(
+                ">=5.0,<6.0", "5.4.0", "celery>=5.4.0,<6.0", id="floor-moves-cap-stays"
+            ),
+            pytest.param(
+                ">=2.28,<3,!=2.30.0",
+                "2.32.3",
+                "celery>=2.32.3,<3,!=2.30.0",
+                id="exclusion-survives",
+            ),
+            pytest.param(
+                ">2.0",
+                "2.32.3",
+                "celery>=2.32.3",
+                id="strict-floor-widens-to-inclusive",
+            ),
+            pytest.param("~=2.0", "2.3.3", "celery~=2.3", id="tilde-keeps-precision"),
+            pytest.param(
+                "~=2.0.1", "2.3.3", "celery~=2.3.3", id="tilde-keeps-finer-precision"
+            ),
+            pytest.param("==1.26.5", "1.26.18", "celery==1.26.18", id="pin-is-repinned"),
+            pytest.param(
+                # A cap-only requirement has no floor to move, so one is
+                # appended rather than inserted; the cap keeps its position.
+                "<3.0",
+                "2.32.3",
+                "celery<3.0,>=2.32.3",
+                id="cap-only-gains-a-floor",
+            ),
+        ],
+    )
+    def test_rewrite(self, declared: str, target: str, expected: str) -> None:
+        req = make_requirement("celery", specs=specs(*declared.split(",")))
+
+        assert req.update_version(target, preserve_trailing_newline=False) == expected
+
+    def test_unspecified_requirement_gains_a_pin(self) -> None:
+        """A bare ``urllib3`` is an implicit "whatever is latest", so pin it."""
+        req = make_requirement("urllib3")
+
+        assert req.update_version("2.2.2", preserve_trailing_newline=False) == (
+            "urllib3==2.2.2"
+        )
+
+    def test_pin_mode_collapses_the_range(self) -> None:
+        """``--pin`` is the explicit opt-in to lock-everything behaviour."""
+        req = make_requirement("celery", extras=["redis"], specs=specs(">=5.0", "<6.0"))
+
+        assert (
+            req.update_version("5.4.0", pin=True, preserve_trailing_newline=False)
+            == "celery[redis]==5.4.0"
+        )
+
+    def test_target_excluded_by_its_own_constraint_is_rejected(self) -> None:
+        """Writing 2.3.3 under ``<2.3`` would emit ``flask>=2.3.3,<2.3``.
+
+        That line is unsatisfiable: pip fails at install time, far away from the
+        command that produced it. Failing here keeps the error next to its cause.
+        """
+        req = make_requirement("flask", specs=specs(">=2.0", "<2.3"))
+
+        with pytest.raises(ValueError, match="excludes that version"):
+            req.update_version("2.3.3")
+
+    def test_pin_mode_can_override_an_excluding_constraint(self) -> None:
+        """``pin=True`` discards the constraint, so there is nothing left to violate."""
+        req = make_requirement("flask", specs=specs(">=2.0", "<2.3"))
+
+        assert (
+            req.update_version("2.3.3", pin=True, preserve_trailing_newline=False)
+            == "flask==2.3.3"
+        )
+
+    def test_compatible_release_rewrite_converges(self) -> None:
+        """Re-applying the same target must not churn the file.
+
+        ``~=`` is rewritten at the author's declared precision, so the output of
+        one update is the input of the next. If that were not a fixed point,
+        depkeeper would report the same update forever and every run would
+        produce a diff.
+        """
+        first_pass = make_requirement("flask", specs=specs("~=2.0")).update_version(
+            "2.3.3", preserve_trailing_newline=False
+        )
+        second_pass = make_requirement(
+            "flask", specs=specs(first_pass[len("flask"):])
+        ).update_version("2.3.3", preserve_trailing_newline=False)
+
+        assert first_pass == second_pass == "flask~=2.3"
+
+    def test_target_already_inside_the_compatible_band_is_a_no_op(self) -> None:
+        """``~=2.0`` already admits 2.0.30, so the line must not be rewritten.
+
+        Emitting ``~=2.0.30`` here would narrow the author's band on every patch
+        release — a silent tightening of the dependency contract.
+        """
+        req = make_requirement("sqlalchemy", specs=specs("~=2.0"))
+
+        assert req.update_version("2.0.30", preserve_trailing_newline=False) == (
+            "sqlalchemy~=2.0"
+        )
+
+
+class TestUpdateVersionPreservesLineContent:
+    """Everything the author wrote that is not a version must survive."""
+
+    def test_extras_markers_and_comment_are_carried_through(self) -> None:
+        req = make_requirement(
+            "django",
+            specs=specs(">=3.2", "<5.0", "!=4.0.*"),
+            extras=["argon2", "bcrypt"],
+            markers='python_version >= "3.8"',
+            comment="4.0.x is EOL",
+            line_number=17,
+            source_file="/app/requirements/base.txt",
+        )
+
+        assert req.update_version("4.2.11", preserve_trailing_newline=False) == (
+            'django[argon2,bcrypt]>=4.2.11,<5.0,!=4.0.* ; python_version >= "3.8"'
+            "  # 4.0.x is EOL"
+        )
+
+    def test_editable_flag_survives(self) -> None:
+        req = make_requirement("internal-sdk", specs=specs("==2.3.0"), editable=True)
+
+        assert req.update_version("2.4.0").startswith("-e ")
+
+    @pytest.mark.parametrize(
+        ("preserve", "expected"),
+        [(True, "requests==2.32.3\n"), (False, "requests==2.32.3")],
+        ids=["with-newline", "without-newline"],
+    )
+    def test_trailing_newline_is_caller_controlled(
+        self, preserve: bool, expected: str
+    ) -> None:
+        """The file writer re-attaches each line's own terminator, so it opts out."""
+        req = make_requirement("requests", specs=specs("==2.31.0"))
+
+        assert (
+            req.update_version("2.32.3", preserve_trailing_newline=preserve) == expected
+        )
+
+
+class TestUpdateVersionHashGuard:
+    """Regression C3: a version bump must not silently strip ``--hash`` pins.
+
+    Hashes are version-specific, so an update necessarily invalidates them.
+    Dropping them turns a hash-verified install into an unverified one — a
+    supply-chain regression no diff reviewer would flag, because the line still
+    looks like a routine version bump.
+    """
+
+    @pytest.fixture
+    def hashed(self) -> Requirement:
+        """A hash-pinned line as ``pip-compile --generate-hashes`` emits it."""
+        return make_requirement(
+            "click",
+            specs=specs("==8.1.3"),
+            hashes=[CLICK_SHA256, CLICK_SHA256_SDIST],
+        )
+
+    def test_update_is_refused_by_default(self, hashed: Requirement) -> None:
+        with pytest.raises(ValueError, match="hash-removal opt-in"):
+            hashed.update_version("8.1.7")
+
+    def test_refusal_is_not_bypassable_via_pin(self, hashed: Requirement) -> None:
+        with pytest.raises(ValueError, match="hash-removal opt-in"):
+            hashed.update_version("8.1.7", pin=True)
+
+    def test_explicit_opt_in_updates_and_drops_stale_hashes(
+        self, hashed: Requirement
+    ) -> None:
+        result = hashed.update_version(
+            "8.1.7", allow_hash_removal=True, preserve_trailing_newline=False
+        )
+
+        assert result == "click==8.1.7"
+
+    def test_unhashed_requirements_are_unaffected(self) -> None:
+        req = make_requirement("click", specs=specs("==8.1.3"))
+
+        assert req.update_version("8.1.7", preserve_trailing_newline=False) == (
+            "click==8.1.7"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Representations
+# ---------------------------------------------------------------------------
+
+
+class TestRepresentations:
+    def test_str_is_the_rendered_line(self) -> None:
+        """``str`` reaches user-facing output, so it must be the real line."""
+        req = make_requirement(
+            "celery", extras=["redis"], specs=specs(">=5.3.4", "<6.0")
+        )
+
+        assert str(req) == "celery[redis]>=5.3.4,<6.0"
+
+    def test_repr_exposes_the_fields_needed_to_triage_a_bad_write(self) -> None:
+        """Line number and specs are what a corrupted-file report is triaged on."""
+        req = make_requirement(
+            "flask", specs=specs(">=2.2", "<3.0"), extras=["async"], line_number=42
+        )
+
+        assert repr(req) == (
+            "Requirement(name='flask', specs=[('>=', '2.2'), ('<', '3.0')], "
+            "extras=['async'], editable=False, line_number=42)"
+        )

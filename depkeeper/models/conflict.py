@@ -1,8 +1,7 @@
-"""
-Dependency conflict data models for depkeeper.
+"""Dependency conflict data models for depkeeper.
 
-This module defines structured representations for dependency conflicts
-and utilities to reason about compatible versions.
+Defines structured representations for dependency conflicts and the utilities
+used to reason about versions that satisfy every recorded constraint.
 """
 
 from __future__ import annotations
@@ -13,17 +12,26 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from packaging.version import InvalidVersion, Version, parse
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
+from depkeeper.utils.naming import normalize_package_name
+
 
 def _normalize_name(name: str) -> str:
-    """Normalize a package name according to PEP 503."""
-    return name.lower().replace("_", "-")
+    """Normalize a package name according to PEP 503.
+
+    Thin alias for :func:`depkeeper.utils.naming.normalize_package_name`,
+    so conflict endpoints stay comparable to ``Package.name`` keys.
+    """
+    return normalize_package_name(name)
 
 
 @dataclass(frozen=True)
 class Conflict:
-    """Represents a dependency conflict between two packages.
+    """A dependency conflict between two packages.
 
-    Args:
+    Frozen so a conflict can be hashed and deduplicated while the resolution
+    loop accumulates findings across iterations.
+
+    Attributes:
         source_package: Package declaring the dependency.
         target_package: Package being constrained.
         required_spec: Version specifier required by the source package.
@@ -38,6 +46,8 @@ class Conflict:
     source_version: Optional[str] = None
 
     def __post_init__(self) -> None:
+        """Normalize both endpoints so they match ``Package.name`` keys."""
+        # object.__setattr__ is required: the dataclass is frozen.
         object.__setattr__(self, "source_package", _normalize_name(self.source_package))
         object.__setattr__(self, "target_package", _normalize_name(self.target_package))
 
@@ -82,7 +92,7 @@ class Conflict:
 class ConflictSet:
     """Collection of conflicts affecting a single package.
 
-    Args:
+    Attributes:
         package_name: Name of the affected package.
         conflicts: Conflicts associated with this package.
     """
@@ -91,30 +101,33 @@ class ConflictSet:
     conflicts: List[Conflict] = field(default_factory=list)
 
     def __post_init__(self) -> None:
+        """Normalize the package name so it matches ``Package.name`` keys."""
         self.package_name = _normalize_name(self.package_name)
 
     def add_conflict(self, conflict: Conflict) -> None:
-        """Add a conflict to the set."""
+        """Append a conflict to the set."""
         self.conflicts.append(conflict)
 
     def has_conflicts(self) -> bool:
-        """Return True if any conflicts exist."""
+        """Return ``True`` when the set holds at least one conflict."""
         return bool(self.conflicts)
 
     def get_max_compatible_version(
         self,
         available_versions: List[str],
     ) -> Optional[str]:
-        """Return the highest version compatible with all conflicts.
+        """Return the highest version satisfying *every* recorded conflict.
 
-        Pre-release versions are ignored.
+        All ``required_spec`` values are intersected into a single specifier
+        set, so the answer is compatible with all conflicting dependents at
+        once. Pre-releases are never returned.
 
         Args:
-            available_versions: List of available version strings.
+            available_versions: Candidate version strings, in any order.
 
         Returns:
-            Highest compatible version string, or None if no compatible
-            version exists.
+            The highest compatible version, or ``None`` when the set is empty,
+            a specifier is unparseable, or no candidate satisfies them all.
         """
         if not self.conflicts:
             return None

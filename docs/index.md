@@ -1,197 +1,141 @@
 ---
 title: Home
-description: Modern, intelligent Python dependency management for requirements.txt files
+description: depkeeper — safe, conflict-aware dependency updates for pip requirements files
 ---
 
 # depkeeper
 
-<div class="hero" markdown>
+depkeeper analyses `requirements.txt`-style files, computes a **safe upgrade target** for every
+requirement, cross-validates those targets against each other, and rewrites the file in place
+without discarding the constraints you authored.
 
-**Modern, intelligent Python dependency management for `requirements.txt` files.**
+It is a single-purpose CLI. It does not manage virtual environments, does not install packages,
+does not replace `pip`, and does not introduce a lock file format.
 
-Keep your dependencies up-to-date and conflict-free -- without switching from pip.
-
-[:material-download: Install](getting-started/installation.md){ .md-button .md-button--primary }
-[:material-book-open-variant: Get Started](getting-started/quickstart.md){ .md-button }
-[:material-github: GitHub](https://github.com/rahulkaushal04/depkeeper){ .md-button }
-
-</div>
+[Install](getting-started/installation.md){ .md-button .md-button--primary }
+[Quick Start](getting-started/quickstart.md){ .md-button }
+[Architecture](concepts/architecture.md){ .md-button }
 
 ---
 
-## Why depkeeper?
+## What it does
 
-Managing Python dependencies shouldn't be painful. While `pip` is simple and Poetry is powerful, depkeeper bridges the gap -- giving you **smart automation** without abandoning your existing workflow.
+| Capability | Summary |
+|---|---|
+| Update discovery | Queries the PyPI JSON API concurrently for every requirement and reports the latest and the **recommended** version. |
+| Major-version safety | A recommendation never crosses a major version boundary. `1.2.3` can become `1.9.9`, never `2.0.0`. |
+| Python compatibility | Candidate versions whose `requires_python` excludes the running interpreter are discarded. |
+| Constraint preservation | `celery>=5.0,<6.0` becomes `celery>=5.6.3,<6.0`. Upper bounds, exclusions and `~=` bands survive the rewrite. |
+| Conflict resolution | Cross-validates proposed versions against each package's `requires_dist` metadata and iteratively adjusts until the set is self-consistent. |
+| Safe writes | Every file is rendered in memory, written atomically, and rolled back as a unit if any write fails. |
+| Machine-readable output | `--format json` emits a document on stdout and diverts every diagnostic to stderr, so the output is pipeable. |
+
+---
+
+## Why it exists
+
+`pip` has no opinion about *which* newer version you should move to. `pip list --outdated`
+reports the latest release, which is frequently a major version that will break your build.
+Lock-file tools solve this by owning the whole dependency workflow, which is a large migration
+for an existing project.
+
+depkeeper occupies the gap:
+
+- It reads and writes the files you already have.
+- It answers "what is the largest upgrade I can take **without** a major version bump, that my
+  interpreter supports, that my declared constraints permit, and that does not conflict with my
+  other pinned packages?"
+- It leaves resolution of everything else to `pip`.
+
+The trade-off is explicit: depkeeper is deliberately conservative. It will not propose the
+major upgrade you eventually need. See [Known limitations](reference/limitations.md).
+
+---
+
+## Verified example
+
+Given this `requirements.txt`:
+
+```text title="requirements.txt"
+requests==2.28.0
+flask>=2.0,<2.3
+celery[redis]>=5.0,<6.0
+click~=8.0
+certifi
+urllib3==1.26.0
+```
+
+`depkeeper update -y` produces:
+
+```text title="requirements.txt (after)" hl_lines="2 3 4"
+requests==2.34.2
+flask>=2.2.5,<2.3
+celery[redis]>=5.6.3,<6.0
+click~=8.4
+certifi==2026.7.22
+urllib3==1.26.20
+```
+
+Note what did **not** happen:
+
+- `flask` did not reach `3.1.3` — the declared `<2.3` cap holds.
+- `urllib3` did not reach `2.7.0` — that is a major boundary crossing.
+- `celery`'s `[redis]` extra, its `<6.0` cap and `click`'s compatible-release form were preserved.
+- Running the command a second time reports `All packages are up to date!` — the rewrite converges.
+
+---
+
+## Where to go next
 
 <div class="grid cards" markdown>
 
-- :material-lightning-bolt:{ .lg .middle } **Smart Updates**
+- :material-download:{ .lg .middle } **[Install](getting-started/installation.md)**
 
-  ---
+    ---
 
-  Automatically discover available updates with intelligent recommendations that respect semantic versioning boundaries.
-
-- :material-shield-check:{ .lg .middle } **Safe by Default**
-
-  ---
-
-  Never accidentally cross major version boundaries. depkeeper keeps your environment stable while staying current.
-
-- :material-vector-triangle:{ .lg .middle } **Conflict Resolution**
-
-  ---
-
-  Detect and resolve dependency conflicts before they break your builds.
-
-- :material-rocket-launch:{ .lg .middle } **Fast & Concurrent**
-
-  ---
-
-  Async PyPI queries maximize performance. Check hundreds of packages in seconds.
-
-- :material-format-list-bulleted:{ .lg .middle } **Multiple Formats**
-
-  ---
-
-  Output as beautiful tables, simple text, or JSON for seamless CI/CD integration.
-
-- :material-puzzle:{ .lg .middle } **Pip Compatible**
-
-  ---
-
-  Works alongside pip, not instead of it. No need to change your workflow.
-
-</div>
-
----
-
-## Quick Example
-
-```bash
-# Check for available updates
-$ depkeeper check
-
-Checking requirements.txt...
-Found 5 package(s)
-
-Package       Current    Latest     Recommended  Status
-─────────────────────────────────────────────────────────
-requests      2.28.0     2.32.0     2.32.0       Outdated (minor)
-flask         2.0.0      3.0.1      2.3.3        Outdated (patch)
-click         8.0.0      8.1.7      8.1.7        Outdated (minor)
-django        3.2.0      5.0.2      3.2.24       Outdated (patch)
-pytest        7.4.0      8.0.0      7.4.4        Outdated (patch)
-
-✓ Found 5 packages with available updates
-```
-
-```bash
-# Update all packages safely
-$ depkeeper update
-
-Updating requirements.txt...
-
-Package       Current    →  Recommended  Type
-─────────────────────────────────────────────
-requests      2.28.0     →  2.32.0       minor
-flask         2.0.0      →  2.3.3        patch
-click         8.0.0      →  8.1.7        minor
-
-Apply 3 updates? [y/N]: y
-
-✓ Successfully updated 3 packages
-```
-
----
-
-## Feature Comparison
-
-| Feature | pip | Poetry | depkeeper |
-|---|---|---|---|
-| Simple workflow          | ✅  | ⚠️     | ✅        |
-| Dependency resolution    | ❌  | ✅     | ✅        |
-| Update recommendations   | ❌  | ⚠️     | ✅        |
-| Major version boundaries | ❌  | ❌     | ✅        |
-| Conflict detection       | ❌  | ✅     | ✅        |
-| CI/CD friendly           | ✅  | ✅     | ✅        |
-| requirements.txt support | ✅  | ❌     | ✅        |
-| No lock-in               | ✅  | ❌     | ✅        |
-
----
-
-## Installation
-
-=== "pip"
-
-    ```bash
-    pip install depkeeper
-    ```
-
-=== "pipx (isolated)"
-
-    ```bash
-    pipx install depkeeper
-    ```
-
-=== "From source"
-
-    ```bash
-    git clone https://github.com/rahulkaushal04/depkeeper.git
-    cd depkeeper
-    pip install -e .
-    ```
-
----
-
-## What's Next?
-
-<div class="grid cards" markdown>
+    Requirements, install methods, and verification.
 
 - :material-play-circle:{ .lg .middle } **[Quick Start](getting-started/quickstart.md)**
 
-  ---
+    ---
 
-  Get up and running in 5 minutes with the essentials.
+    The five commands that cover most day-to-day use.
 
-- :material-school:{ .lg .middle } **[User Guide](guides/index.md)**
+- :material-sitemap:{ .lg .middle } **[Architecture](concepts/architecture.md)**
 
-  ---
+    ---
 
-  Deep dive into all features and workflows.
+    Module responsibilities, data flow, and design decisions.
 
-- :material-api:{ .lg .middle } **[API Reference](reference/python-api.md)**
+- :material-console:{ .lg .middle } **[CLI reference](reference/cli-commands.md)**
 
-  ---
+    ---
 
-  Integrate depkeeper programmatically.
+    Every flag, its default, and its precedence.
 
-- :material-account-group:{ .lg .middle } **[Contributing](contributing/index.md)**
+- :material-vector-triangle:{ .lg .middle } **[Conflict resolution](concepts/conflict-resolution.md)**
 
-  ---
+    ---
 
-  Help make depkeeper even better.
+    The resolution loop, its guarantees, and its failure modes.
+
+- :material-wrench:{ .lg .middle } **[Troubleshooting](guides/troubleshooting.md)**
+
+    ---
+
+    Symptom-indexed diagnosis for the errors you will actually hit.
 
 </div>
 
 ---
 
-## Acknowledgments
+## Project status
 
-Built with amazing open source libraries:
+depkeeper is at version **0.1.0** and is classified `Development Status :: 3 - Alpha`.
 
-- [Click](https://click.palletsprojects.com/) -- CLI framework
-- [Rich](https://rich.readthedocs.io/) -- Beautiful terminal formatting
-- [httpx](https://www.python-httpx.org/) -- Async HTTP client
-- [packaging](https://packaging.pypa.io/) -- PEP 440/508 compliance
-
-Inspired by [pip-tools](https://pip-tools.readthedocs.io/), [Poetry](https://python-poetry.org/), and [Dependabot](https://github.com/dependabot).
-
----
-
-<div class="footer-cta" markdown>
-
-**Ready to simplify your dependency management?**
-
-[:material-download: Get Started](getting-started/installation.md){ .md-button .md-button--primary }
-
-</div>
+- Supported Python: **3.8+**. The interpreter running depkeeper is also the interpreter it
+  filters candidate versions against — see [Python compatibility](concepts/version-recommendation.md#python-compatibility-filtering).
+- Supported input: pip requirements files only. See [File formats](reference/file-formats.md).
+- Public API stability: the CLI surface is stable within `0.1.x`. The Python API is documented
+  but not yet covered by a compatibility guarantee — see [Python API](reference/python-api.md).
+- License: [Apache-2.0](community/license.md).

@@ -81,11 +81,15 @@ test = [
     "pytest-httpx>=0.22.0",
 ]
 docs = [
-    "mkdocs>=1.6.1",
-    "mkdocs-material>=9.7.1",
-    "mkdocstrings[python]>=0.26.1",
-    "pymdown-extensions>=10.15",
-    "mkdocs-minify-plugin>=0.8.0",
+    # Upper bounds are deliberate: MkDocs 2.0 removes the plugin system and
+    # rewrites theming, which would break mkdocstrings, mkdocs-material and the
+    # theme overrides this site depends on. Raise a cap only after verifying
+    # `mkdocs build --strict` still passes.
+    "mkdocs>=1.6.1,<2.0",
+    "mkdocs-material>=9.7.1,<10.0",
+    "mkdocstrings[python]>=0.26.1,<2.0",
+    "pymdown-extensions>=10.15,<11.0",
+    "mkdocs-minify-plugin>=0.8.0,<1.0",
 ]
 
 
