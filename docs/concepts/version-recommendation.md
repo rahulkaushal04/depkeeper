@@ -262,7 +262,7 @@ Rendering:
 
 | Format | Result |
 |---|---|
-| table | `✗ ERROR` row, `Latest` = `error` |
+| table | `[ERROR]` row, `Latest` = `error` |
 | json, `--no-check-conflicts` | `"status": "no-update"` plus `"error": "Package information unavailable"` |
 | json, conflict checking enabled (default) | `"status": "latest"` with `recommended` equal to `current` |
 

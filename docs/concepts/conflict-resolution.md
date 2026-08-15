@@ -35,20 +35,55 @@ proposed version satisfies *P*'s specifier.
 
 ## Algorithm
 
-```mermaid
-flowchart TD
-    A[Build update set:<br/>name → recommended or current] --> B[Prefetch metadata]
-    B --> C{Scan for cross-conflicts}
-    C -->|none| Z[Converged]
-    C -->|found| D[Record conflicts<br/>deduplicated]
-    D --> E[Resolve within major boundaries]
-    E -->|a version changed| C
-    E -->|nothing changed| S[Stalled — stop]
-    Z --> F[Compute advisory alternatives]
-    S --> F
-    F --> G[Adopt alternative only where<br/>a live conflict remains]
-    G --> H[Annotate packages,<br/>build ResolutionResult]
-```
+<figure>
+<svg viewBox="0 0 700 700" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Build the update set, prefetch metadata, then loop: scan for cross-conflicts, record them, and resolve within major boundaries until converged or stalled, then compute and selectively adopt advisory alternatives before annotating packages">
+<defs><marker id="cr-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+<g font-family="var(--md-text-font-family, sans-serif)" fill="currentColor">
+<rect x="170" y="20" width="260" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="300" y="41" text-anchor="middle" font-size="14">Build update set</text>
+<text x="300" y="58" text-anchor="middle" font-size="11">name → recommended or current</text>
+<line x1="300" y1="70" x2="300" y2="98" stroke="currentColor" stroke-width="1.5" marker-end="url(#cr-arrow)"/>
+<rect x="170" y="100" width="260" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="300" y="121" text-anchor="middle" font-size="14">Prefetch metadata</text>
+<text x="300" y="138" text-anchor="middle" font-size="11">one concurrent round-trip</text>
+<line x1="300" y1="150" x2="300" y2="173" stroke="currentColor" stroke-width="1.5" marker-end="url(#cr-arrow)"/>
+<polygon points="300,175 430,225 300,275 170,225" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="300" y="220" text-anchor="middle" font-size="14">Cross-conflicts</text>
+<text x="300" y="236" text-anchor="middle" font-size="14">found?</text>
+<path d="M430,225 H468" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#cr-arrow)"/>
+<text x="449" y="217" text-anchor="middle" font-size="11" font-style="italic">no</text>
+<path d="M300,275 V298" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#cr-arrow)"/>
+<text x="316" y="290" text-anchor="start" font-size="11" font-style="italic">yes</text>
+<rect x="170" y="300" width="260" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="300" y="321" text-anchor="middle" font-size="14">Record conflicts</text>
+<text x="300" y="338" text-anchor="middle" font-size="11">deduplicated</text>
+<line x1="300" y1="350" x2="300" y2="373" stroke="currentColor" stroke-width="1.5" marker-end="url(#cr-arrow)"/>
+<rect x="170" y="375" width="260" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="300" y="396" text-anchor="middle" font-size="14">Resolve within major</text>
+<text x="300" y="413" text-anchor="middle" font-size="11">boundaries</text>
+<path d="M430,400 H468" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#cr-arrow)"/>
+<text x="450" y="392" text-anchor="middle" font-size="11" font-style="italic">stalled</text>
+<path d="M170,400 H100 V225 H172" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#cr-arrow)"/>
+<text x="90" y="312" text-anchor="middle" font-size="11" font-style="italic" transform="rotate(-90 90 312)">version changed</text>
+<rect x="470" y="175" width="170" height="250" rx="6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3"/>
+<text x="555" y="285" text-anchor="middle" font-size="14">Loop exit</text>
+<text x="555" y="303" text-anchor="middle" font-size="11">converged, stalled,</text>
+<text x="555" y="318" text-anchor="middle" font-size="11">or 100 passes</text>
+<path d="M555,425 V440 H300 V468" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#cr-arrow)"/>
+<rect x="170" y="470" width="260" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="300" y="491" text-anchor="middle" font-size="14">Compute advisory</text>
+<text x="300" y="508" text-anchor="middle" font-size="11">alternatives</text>
+<line x1="300" y1="520" x2="300" y2="543" stroke="currentColor" stroke-width="1.5" marker-end="url(#cr-arrow)"/>
+<rect x="170" y="545" width="260" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="300" y="566" text-anchor="middle" font-size="14">Adopt alternative where a</text>
+<text x="300" y="583" text-anchor="middle" font-size="11">live conflict remains</text>
+<line x1="300" y1="595" x2="300" y2="618" stroke="currentColor" stroke-width="1.5" marker-end="url(#cr-arrow)"/>
+<rect x="170" y="620" width="260" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="300" y="641" text-anchor="middle" font-size="14">Annotate packages,</text>
+<text x="300" y="658" text-anchor="middle" font-size="11">build ResolutionResult</text>
+</g></svg>
+<figcaption>Up to 100 passes; a pass that changes nothing stops the loop early (stalled).</figcaption>
+</figure>
 
 ### Phase 1 — Initialise
 
@@ -180,8 +215,8 @@ Version changes:
 ┏━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃   Status   ┃ Package  ┃ Current ┃ Latest ┃ Recommended ┃ Update Type ┃ Conflicts             ┃
 ┡━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━┩
-│  ⚠ INCOMP  │ flask    │   2.3   │ 3.1.3  │    2.2.5    │  downgrade  │ -                     │
-│ ⬆ OUTDATED │ werkzeug │   2.2   │ 3.1.8  │    2.2.3    │    patch    │ ⚠ flask needs >=2.3.7 │
+│  [INCOMP]  │ flask    │   2.3   │ 3.1.3  │    2.2.5    │  downgrade  │ -                     │
+│[OUTDATED]  │ werkzeug │   2.2   │ 3.1.8  │    2.2.3    │    patch    │ ⚠ flask needs >=2.3.7 │
 └────────────┴──────────┴─────────┴────────┴─────────────┴─────────────┴───────────────────────┘
 [WARNING] 1 package(s) have unresolved conflicts — see 'Conflicts' column
 ```
@@ -213,7 +248,7 @@ A downgrade is proposed when the declared version cannot be used:
 - another package in the file requires an older release, or
 - the declared version is not compatible with the running interpreter.
 
-Downgrades render as `⚠ INCOMP` in the table, `downgrade` in JSON, and `downgrade` in the update
+Downgrades render as `[INCOMP]` in the table, `downgrade` in JSON, and `downgrade` in the update
 plan's `Change` column. They **are** applied by `update`. If you do not want that, run with
 `--no-check-conflicts` and resolve manually, or exclude the package with `--packages`.
 

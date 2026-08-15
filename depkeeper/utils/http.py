@@ -2,7 +2,7 @@
 
 Provides an asynchronous HTTP client with retry logic, rate limiting,
 concurrency control, and PyPI-specific error handling. Every network call
-depkeeper makes goes through :class:`HTTPClient`, so retry and throttling
+depkeeper makes goes through `HTTPClient`, so retry and throttling
 policy is defined in exactly one place.
 """
 
@@ -114,7 +114,7 @@ class HTTPClient:
     async def _ensure_client(self) -> None:
         """Create the underlying ``httpx`` client on first use.
 
-        Construction is deferred so an :class:`HTTPClient` can be built
+        Construction is deferred so an `HTTPClient` can be built
         outside a running event loop and still bind its connection pool to
         the loop that actually issues requests.
         """
@@ -167,11 +167,11 @@ class HTTPClient:
         - Timeouts, network errors and 5xx responses are retried up to
           ``max_retries`` times with exponential backoff plus jitter.
         - ``429`` responses honor the ``Retry-After`` header (see
-          :func:`_parse_retry_after`) and are capped separately by
+          `_parse_retry_after`) and are capped separately by
           ``_max_429_retries``. Because the loop ``continue``s, a 429 retry
           also consumes one of the outer ``max_retries`` attempts.
-        - ``404`` raises :class:`PyPIError` immediately; other 4xx responses
-          raise :class:`NetworkError`. Client errors are not retried because
+        - ``404`` raises `PyPIError` immediately; other 4xx responses
+          raise `NetworkError`. Client errors are not retried because
           repeating them cannot change the outcome.
 
         Args:
@@ -181,7 +181,7 @@ class HTTPClient:
             **kwargs: Forwarded to ``httpx.AsyncClient.request``.
 
         Returns:
-            The successful :class:`httpx.Response`.
+            The successful `httpx.Response`.
 
         Raises:
             PyPIError: The resource returned ``404``.
@@ -290,7 +290,7 @@ class HTTPClient:
             The successful response.
 
         Raises:
-            NetworkError: The request failed; see :meth:`_request_with_retry`.
+            NetworkError: The request failed; see `_request_with_retry`.
         """
         return await self._request_with_retry("GET", url, **kwargs)
 
@@ -305,7 +305,7 @@ class HTTPClient:
             The successful response.
 
         Raises:
-            NetworkError: The request failed; see :meth:`_request_with_retry`.
+            NetworkError: The request failed; see `_request_with_retry`.
         """
         return await self._request_with_retry("POST", url, **kwargs)
 

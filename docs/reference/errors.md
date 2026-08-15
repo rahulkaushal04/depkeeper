@@ -110,7 +110,7 @@ Network errors for an individual package rarely reach the user as an error:
 | `PyPIDataStore._fetch_version_dependencies` | Any exception is logged at DEBUG and an empty dependency list is returned. |
 
 The consequence: a run completes and reports, even with total network failure. Every package
-simply becomes an `✗ ERROR` row.
+simply becomes an `[ERROR]` row.
 
 ---
 

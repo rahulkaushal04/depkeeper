@@ -124,9 +124,9 @@ def parse_version_lenient(version: Optional[str]) -> Optional[Version]:
     """Parse *version*, tolerating a PEP 440 wildcard band as its floor.
 
     A concrete version (``2.3.3``) parses exactly as
-    :func:`~packaging.version.parse` would. A wildcard band (``2.*``) is not
-    itself a valid :class:`Version` — a wildcard is only meaningful inside a
-    :class:`~packaging.specifiers.SpecifierSet` — so it is resolved from its
+    `parse` would. A wildcard band (``2.*``) is not
+    itself a valid `Version` — a wildcard is only meaningful inside a
+    `SpecifierSet` — so it is resolved from its
     release prefix instead, giving ``2.*`` the same comparable value as
     ``2``. This lets callers that need a comparable version (major-boundary
     checks, "is an update available") treat a wildcard exact pin
@@ -136,7 +136,7 @@ def parse_version_lenient(version: Optional[str]) -> Optional[Version]:
         version: Version string, wildcard band, or ``None``.
 
     Returns:
-        The parsed :class:`Version`, or ``None`` when *version* is ``None``
+        The parsed `Version`, or ``None`` when *version* is ``None``
         or cannot be resolved to a version by either path.
 
     Examples:
@@ -222,7 +222,7 @@ def retained_specs(specs: Iterable[Spec]) -> List[Spec]:
         specs: The requirement's declared specifier pairs.
 
     Returns:
-        The subset of *specs* that :func:`rewrite_version_specs` preserves.
+        The subset of *specs* that `rewrite_version_specs` preserves.
 
     Examples:
         >>> retained_specs([(">=", "5.0"), ("<", "6.0")])
@@ -245,7 +245,7 @@ def specs_allow_version(specs: Iterable[Spec], version: str) -> bool:
     Mirrors pip's permissive behavior: an unparseable specifier or version
     is treated as "allowed" rather than silently discarding an update.
     Pre-releases are accepted so that an explicitly requested pre-release
-    target is not rejected by :class:`~packaging.specifiers.SpecifierSet`
+    target is not rejected by `SpecifierSet`
     defaults.
 
     Args:

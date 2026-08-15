@@ -68,10 +68,15 @@ def rewrite_version_specs(specs: Sequence[Spec], new_version: str) -> List[Spec]
 | `Raises:` lists every exception a caller can reasonably catch. | |
 | American English throughout. | normalize, behavior, color, initialize, canonicalize. |
 
-### Sphinx roles
+### Referencing other symbols
 
-Valid: `:class:`, `:func:`, `:meth:`, `:attr:`, `:exc:`, `:data:`.
-Invalid: `:pymeth:`, `:pyattr:` — these do not resolve and have been removed from the codebase.
+Use a plain Markdown code span — `` `Requirement` ``, `` `_find_updates` `` — never a Sphinx
+role such as `:class:` or `:meth:`. This project's `mkdocs.yml` uses
+`docstring_style: google` without the `autorefs` plugin, so Sphinx interpreted-text roles are
+not resolved by `mkdocstrings`: they render as literal, broken text (`:meth:reset` instead of a
+link or even a code span). A prior revision of the codebase used them throughout; they were
+mechanically converted to plain code spans after the defect was found on the generated
+[Python API](../reference/python-api.md) page.
 
 ### Doctest examples
 

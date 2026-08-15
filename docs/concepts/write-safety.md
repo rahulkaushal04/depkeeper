@@ -29,17 +29,47 @@ a rejected requirement cannot leave a corrupted or half-updated file.
 
 ## Two-phase commit
 
-```mermaid
-flowchart TD
-    A[Group updates by source file] --> B[For each file: read, render in memory]
-    B --> C{All files rendered<br/>successfully?}
-    C -->|no| X[Raise. Nothing written.]
-    C -->|yes| D[Commit file 1 atomically]
-    D --> E[Commit file 2 atomically]
-    E --> F{Any commit failed?}
-    F -->|yes| R[Roll back committed files<br/>in reverse order]
-    F -->|no| Z[Done]
-```
+<figure>
+<svg viewBox="0 0 700 620" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Group updates by file and render each in memory; if any file failed to render, raise and write nothing; otherwise commit every file atomically in sorted order, rolling back already-committed files if a later commit fails">
+<defs><marker id="ws-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+<g font-family="var(--md-text-font-family, sans-serif)" fill="currentColor">
+<rect x="170" y="20" width="260" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="300" y="50" text-anchor="middle" font-size="14">Group updates by source file</text>
+<line x1="300" y1="70" x2="300" y2="98" stroke="currentColor" stroke-width="1.5" marker-end="url(#ws-arrow)"/>
+<rect x="170" y="100" width="260" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="300" y="121" text-anchor="middle" font-size="14">Read + render each file</text>
+<text x="300" y="138" text-anchor="middle" font-size="14">in memory</text>
+<line x1="300" y1="150" x2="300" y2="173" stroke="currentColor" stroke-width="1.5" marker-end="url(#ws-arrow)"/>
+<polygon points="300,175 430,225 300,275 170,225" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="300" y="220" text-anchor="middle" font-size="14">All files rendered</text>
+<text x="300" y="236" text-anchor="middle" font-size="14">successfully?</text>
+<path d="M430,225 H468" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#ws-arrow)"/>
+<text x="449" y="217" text-anchor="middle" font-size="11" font-style="italic">no</text>
+<rect x="470" y="175" width="170" height="100" rx="6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3"/>
+<text x="555" y="220" text-anchor="middle" font-size="14">Raise.</text>
+<text x="555" y="237" text-anchor="middle" font-size="11">Nothing written.</text>
+<path d="M300,275 V298" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#ws-arrow)"/>
+<text x="316" y="290" text-anchor="start" font-size="11" font-style="italic">yes</text>
+<rect x="170" y="300" width="260" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="300" y="321" text-anchor="middle" font-size="14">Commit files atomically,</text>
+<text x="300" y="338" text-anchor="middle" font-size="11">in sorted order</text>
+<line x1="300" y1="350" x2="300" y2="373" stroke="currentColor" stroke-width="1.5" marker-end="url(#ws-arrow)"/>
+<polygon points="300,375 430,430 300,485 170,430" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="300" y="425" text-anchor="middle" font-size="14">A later commit</text>
+<text x="300" y="441" text-anchor="middle" font-size="14">fails?</text>
+<path d="M430,430 H468" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#ws-arrow)"/>
+<text x="449" y="422" text-anchor="middle" font-size="11" font-style="italic">yes</text>
+<rect x="470" y="380" width="170" height="100" rx="6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3"/>
+<text x="555" y="418" text-anchor="middle" font-size="14">Roll back committed</text>
+<text x="555" y="435" text-anchor="middle" font-size="11">files, reverse order,</text>
+<text x="555" y="449" text-anchor="middle" font-size="11">then raise</text>
+<path d="M300,485 V508" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#ws-arrow)"/>
+<text x="316" y="500" text-anchor="start" font-size="11" font-style="italic">no</text>
+<rect x="170" y="510" width="260" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="300" y="540" text-anchor="middle" font-size="14">Done — file(s) updated</text>
+</g></svg>
+<figcaption>Nothing is written until every file has rendered; a failed commit restores the files already committed, in reverse order.</figcaption>
+</figure>
 
 **Phase 1 — render.** Every affected file is read and rewritten in memory into a `_PendingWrite`
 holding the path, the original content, the updated content and the encoding to use. Rejections

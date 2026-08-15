@@ -17,7 +17,7 @@ Design guarantees:
 4. **Explicit tracking** — every conflict is reported, including ones that
    could not be resolved within the boundaries above.
 
-All network I/O is routed through the shared :class:`~depkeeper.core.data_store.PyPIDataStore`
+All network I/O is routed through the shared `PyPIDataStore`
 so that package metadata is fetched at most once per process.
 
 Typical usage::
@@ -100,14 +100,14 @@ class PackageResolution:
         original: Version that was initially proposed (from recommended_version
             or current_version).
         resolved: Final version chosen after conflict resolution. This is the
-            version that is applied — :attr:`Package.recommended_version` is
+            version that is applied — `Package.recommended_version` is
             set to exactly this value.
         status: Why this version was chosen.
         conflicts: Every conflict recorded for this package during resolution,
             including ones a later iteration went on to resolve.
         compatible_alternative: Advisory only. Best version satisfying *all*
             recorded conflicts at once, or None if no such version exists.
-            It is adopted into :attr:`resolved` only when the resolution loop
+            It is adopted into `resolved` only when the resolution loop
             left a conflict unresolved; otherwise it is display data and does
             not affect what gets written.
     """
@@ -205,7 +205,7 @@ class ResolutionResult:
 def _normalize(name: str) -> str:
     """Normalize a package name to its canonical PEP 503 form.
 
-    Thin alias for :func:`depkeeper.utils.naming.normalize_package_name`.
+    Thin alias for `depkeeper.utils.naming.normalize_package_name`.
     Upstream ``requires_dist`` metadata spells names however the author
     typed them (``zope.interface``), while the update set is keyed by the
     parser's canonical form (``zope-interface``); both sides must use this
@@ -300,8 +300,8 @@ def _satisfies(version: Optional[str], required_spec: str) -> bool:
 def _specifier_allows(version: Optional[str], specifier: SpecifierSet) -> bool:
     """Return ``True`` when *version* satisfies an already-parsed *specifier*.
 
-    Same permissive-on-unparseable-version handling as :func:`_satisfies`,
-    for callers that already hold a :class:`SpecifierSet` rather than a
+    Same permissive-on-unparseable-version handling as `_satisfies`,
+    for callers that already hold a `SpecifierSet` rather than a
     specifier string. *version* is parsed explicitly first rather than
     relying on ``in specifier`` to raise on a bad version: as of
     ``packaging`` 26.0, that no longer raises ``InvalidVersion`` for an
@@ -390,7 +390,7 @@ class DependencyAnalyzer:
     so resolving one dependency's requirement cannot silently introduce a
     breaking change elsewhere.
 
-    The analyzer works exclusively through a :class:`PyPIDataStore`
+    The analyzer works exclusively through a `PyPIDataStore`
     instance, which guarantees that every ``/pypi/{pkg}/json`` call is
     made at most once. All public entry points are ``async``.
 
@@ -429,7 +429,7 @@ class DependencyAnalyzer:
         """Fetch metadata for *name*, degrading to ``None`` when unavailable.
 
         Mirrors the stub strategy used by
-        :meth:`~depkeeper.core.checker.VersionChecker.get_package_info`: a
+        `get_package_info`: a
         package that PyPI cannot serve (deleted project, private-index-only
         distribution, rate limiting, network outage) must not abort the whole
         run. The first failure for a given name is logged at WARNING and
@@ -440,7 +440,7 @@ class DependencyAnalyzer:
             name: Package name (any casing / separator style).
 
         Returns:
-            The :class:`PyPIPackageData` snapshot, or ``None`` when metadata
+            The `PyPIPackageData` snapshot, or ``None`` when metadata
             could not be retrieved.
         """
         normalized = _normalize(name)
@@ -501,7 +501,7 @@ class DependencyAnalyzer:
            otherwise ``current_version``). Recommended versions already
            respect major version boundaries.
         2. Prefetch metadata for every package in one concurrent burst.
-        3. Loop up to :data:`_MAX_RESOLUTION_ITERATIONS` times:
+        3. Loop up to `_MAX_RESOLUTION_ITERATIONS` times:
 
            a. Scan for cross-conflicts in the current update set.
            b. If none remain, stop — the set is self-consistent.
@@ -515,13 +515,13 @@ class DependencyAnalyzer:
 
         4. For packages the loop could not fix, adopt the best version that
            satisfies every conflict at once, when one exists.
-        5. Annotate each :class:`Package` with its final version and any
+        5. Annotate each `Package` with its final version and any
            conflicts still live against that final version.
-        6. Return a :class:`ResolutionResult` with complete details.
+        6. Return a `ResolutionResult` with complete details.
 
         Invariant: after this call, ``pkg.recommended_version`` equals
         ``result.resolved_versions[pkg.name].resolved`` for every package
-        declared **once**. :class:`ResolutionResult` is therefore the
+        declared **once**. `ResolutionResult` is therefore the
         single source of truth for a singly-declared package — the version
         reported in the summary is always the version applied by
         ``depkeeper update``.
@@ -536,16 +536,16 @@ class DependencyAnalyzer:
         keeps the recommendation it already had. ``resolved_versions``
         still holds one summary entry per *name*, so for a duplicated name
         it reports a single representative outcome — consult each
-        :class:`Package.recommended_version` directly for the authoritative
+        `Package.recommended_version` directly for the authoritative
         per-declaration outcome.
 
         Args:
-            packages: Mutable list of :class:`Package` objects. Each
+            packages: Mutable list of `Package` objects. Each
                 object is updated in place with the resolved version and
                 conflict metadata.
 
         Returns:
-            :class:`ResolutionResult` containing the final version for each
+            `ResolutionResult` containing the final version for each
             package, conflict details, and resolution statistics.
         """
         # ── initialize update set ─────────────────────────────────────
@@ -849,7 +849,7 @@ class DependencyAnalyzer:
         For every package *P* at its proposed version *V*, fetch *V*'s
         dependency list. For each dependency *D* that also appears in the
         update set, check whether the proposed version of *D* satisfies
-        *P*'s requirement specifier. If not, emit a :class:`Conflict`.
+        *P*'s requirement specifier. If not, emit a `Conflict`.
 
         Args:
             packages: Full package list (provides iteration order).
@@ -932,7 +932,7 @@ class DependencyAnalyzer:
         a warning is logged.
 
         Args:
-            pkg_lookup: Name → :class:`Package` mapping for quick access.
+            pkg_lookup: Name → `Package` mapping for quick access.
             update_set: Mutable name → proposed-version mapping; updated
                 in place when a resolution is found.
             cross_conflicts: Conflicts to process.
@@ -1050,12 +1050,12 @@ class DependencyAnalyzer:
         *compatible* when it either has no dependency on *target_name* at all,
         or its dependency specifier is satisfied by *target_proposed_version*.
 
-        The search is bounded by :data:`_MAX_SOURCE_CANDIDATES` to avoid
+        The search is bounded by `_MAX_SOURCE_CANDIDATES` to avoid
         scanning packages with very long release histories. Pre-releases are
         skipped but do **not** count against the candidate budget.
 
         Args:
-            source_pkg: The source :class:`Package` being adjusted.
+            source_pkg: The source `Package` being adjusted.
             source_major: Major version the source must stay within (or
                 ``None`` if major cannot be determined).
             target_name: Normalized name of the dependency that caused the
@@ -1254,7 +1254,7 @@ def _extract_specifier_for(deps: List[str], target_name: str) -> Optional[Specif
         target_name: Normalized package name to search for.
 
     Returns:
-        The :class:`SpecifierSet` for *target_name*, or ``None`` when the
+        The `SpecifierSet` for *target_name*, or ``None`` when the
         target does not appear in *deps*. The set may be empty, which means
         "any version".
     """

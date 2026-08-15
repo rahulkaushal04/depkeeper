@@ -160,10 +160,10 @@ def load_config(config_path: Optional[Path] = None) -> DepKeeperConfig:
 
     Args:
         config_path: Explicit path to config file. If ``None``, uses
-            auto-discovery (see :func:`discover_config_file`).
+            auto-discovery (see `discover_config_file`).
 
     Returns:
-        Validated :class:`DepKeeperConfig` with values from file or defaults.
+        Validated `DepKeeperConfig` with values from file or defaults.
 
     Raises:
         ConfigError: File cannot be parsed, has unknown keys, or invalid values.
@@ -263,7 +263,7 @@ def _parse_section(
         config_path: Path string for error messages.
 
     Returns:
-        Validated :class:`DepKeeperConfig` with values from section and defaults.
+        Validated `DepKeeperConfig` with values from section and defaults.
 
     Raises:
         ConfigError: Unknown keys or incorrect types (e.g., string for boolean).

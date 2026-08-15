@@ -87,7 +87,7 @@ Either the version you declared is incompatible with the running interpreter, or
 in your file requires an older release. Review it — this rewrites your floor downwards. See
 [Downgrades](../concepts/conflict-resolution.md#downgrades).
 
-### Why did it change a package that `check` showed as `✓ OK`?
+### Why did it change a package that `check` showed as `[OK]`?
 
 The requirement had no version specifier, so there was nothing to compare against and the table
 fell through to its up-to-date branch. `update` correctly adds a pin. The JSON and simple formats
@@ -164,7 +164,7 @@ file that contains an updated requirement. There is no directory or recursive mo
 ### Can I point it at a private index?
 
 No. depkeeper always queries `pypi.org`; `--index-url` lines are parsed and ignored. Private
-packages report as `✗ ERROR`.
+packages report as `[ERROR]`.
 
 ### Can I change the timeout or concurrency?
 

@@ -47,15 +47,13 @@ depkeeper/
 
 ### Layering rules
 
-```mermaid
-flowchart TD
-    CLI[cli.py / commands] --> CORE[core]
-    CLI --> MODELS[models]
-    CORE --> MODELS
-    CORE --> UTILS[utils]
-    MODELS --> UTILS
-    CLI --> UTILS
+```text
+commands  →  core  →  models  →  utils
+    └──────────────────────────────┘
 ```
+
+Dependencies point rightwards only; the bracket marks that `commands` may also reach `utils`
+directly (for rendering and file I/O) without routing through `core`.
 
 - `utils` depends on nothing inside depkeeper except `constants`, `exceptions` and other `utils`.
 - `models` are pure data + behaviour: **no I/O, no network, no filesystem**.
@@ -69,35 +67,17 @@ rejected. See [Extending depkeeper](../contributing/extending.md).
 
 ## Request pipeline
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant C as commands/check.py
-    participant P as RequirementsParser
-    participant S as PyPIDataStore
-    participant V as VersionChecker
-    participant A as DependencyAnalyzer
-    participant R as Renderer
+| # | Stage | Component | Notes |
+|---|---|---|---|
+| 1 | Parse | `RequirementsParser` | Follows `-r` includes, loads `-c` constraints, records provenance per requirement |
+| 2 | Prefetch | `PyPIDataStore.prefetch_packages` | One concurrent burst; one HTTP request per unique package |
+| 3 | Recommend | `VersionChecker.check_packages` | Per-package target; served from the prefetch cache |
+| 4 | Resolve | `DependencyAnalyzer.resolve_and_annotate_conflicts` | Optional (`--check-conflicts`); mutates `Package` objects in place |
+| 5a | Render | `commands/check.py` | `table` / `simple` / `json` |
+| 5b | Write | `commands/update.py` | Render all files in memory → commit atomically → roll back on failure |
 
-    U->>C: depkeeper check
-    C->>P: parse_file(path)
-    P-->>C: List[Requirement]
-    C->>S: prefetch_packages(names)
-    S-->>C: cache warmed (one HTTP call per package)
-    C->>V: check_packages(requirements)
-    V->>S: get_package_data(name) (cache hit)
-    V-->>C: List[Package] with recommendations
-    opt --check-conflicts (default)
-        C->>A: resolve_and_annotate_conflicts(packages)
-        A->>S: get_version_dependencies(name, version)
-        A-->>C: ResolutionResult (packages mutated in place)
-    end
-    C->>R: render(packages)
-    R-->>U: table / simple / json
-```
-
-`update` reuses stages 1–4 verbatim, then diverges: filter → plan → confirm → render all files in
-memory → commit atomically.
+`check` runs stages 1–4 then 5a. `update` runs stages 1–4, then diverges: filter → plan →
+confirm → 5b.
 
 ---
 
@@ -204,15 +184,13 @@ multi-threaded.
 
 ## Error propagation
 
-```mermaid
-flowchart TD
-    E1[FileOperationError] --> DK[DepKeeperError]
-    E2[ParseError] --> DK
-    E3[ConfigError] --> DK
-    E4[NetworkError] --> DK
-    E5[PyPIError] --> E4
-    DK --> CLI[cli.main]
-    CLI --> X1[exit 1]
+```text
+DepKeeperError                    message + structured `details`
+├── ParseError                    line_number, line_content, file_path
+├── ConfigError                   config_path, option
+├── FileOperationError            file_path, operation, original_error
+└── NetworkError                  url, status_code, response_body
+    └── PyPIError                 package_name
 ```
 
 - Every depkeeper exception derives from `DepKeeperError` and carries a structured `details`

@@ -185,10 +185,10 @@ async def _check_async(
     Core logic:
 
     1. Parse the requirements file.
-    2. Create a shared :class:`PyPIDataStore` (guarantees each package is
+    2. Create a shared `PyPIDataStore` (guarantees each package is
        fetched once).
-    3. Run :class:`VersionChecker` to compute initial recommendations.
-    4. Optionally run :class:`DependencyAnalyzer` to resolve conflicts.
+    3. Run `VersionChecker` to compute initial recommendations.
+    4. Optionally run `DependencyAnalyzer` to resolve conflicts.
     5. Filter packages if ``--outdated-only`` is set.
     6. Display results in the requested format.
 
@@ -325,7 +325,7 @@ def _display_resolution_summary(
     - Details of each version change (original → resolved)
 
     Args:
-        result: The :class:`ResolutionResult` from the dependency analyzer.
+        result: The `ResolutionResult` from the dependency analyzer.
         stderr: Render to stderr instead of stdout. Required for the
             ``json``/``simple`` formats, whose payload owns stdout.
 
@@ -390,7 +390,7 @@ def _display_table(packages: List[Package]) -> None:
     in any font and matches ``--format simple``'s status labels.
 
     Args:
-        packages: List of :class:`Package` objects to display.
+        packages: List of `Package` objects to display.
     """
     data = [_create_table_row(pkg) for pkg in packages]
 
@@ -416,11 +416,11 @@ def _display_table(packages: List[Package]) -> None:
 def _create_table_row(pkg: Package) -> Dict[str, str]:
     """Build a Rich-formatted table row for a single package.
 
-    Status determination is delegated to :meth:`Package.get_display_data`, so
+    Status determination is delegated to `Package.get_display_data`, so
     this function only maps a known state to markup.
 
     Args:
-        pkg: The :class:`Package` to render.
+        pkg: The `Package` to render.
 
     Returns:
         A dictionary mapping column names to Rich markup strings.
@@ -536,7 +536,7 @@ def _display_simple(packages: List[Package]) -> None:
     ``[OUTDATED]`` is otherwise parsed as a style tag and swallowed.
 
     Args:
-        packages: List of :class:`Package` objects to display.
+        packages: List of `Package` objects to display.
 
     Example::
 
@@ -596,10 +596,10 @@ def _display_json(packages: List[Package]) -> None:
 
     Always emits a document (``[]`` when there is nothing to report) so
     consumers such as ``jq`` never receive empty input. Uses the builtin
-    :func:`print` rather than Rich so no markup or wrapping is applied.
+    `print` rather than Rich so no markup or wrapping is applied.
 
     Args:
-        packages: List of :class:`Package` objects to serialize.
+        packages: List of `Package` objects to serialize.
 
     Example::
 

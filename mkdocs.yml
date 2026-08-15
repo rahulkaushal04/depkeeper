@@ -188,11 +188,7 @@ markdown_extensions:
       auto_append:
         - includes/abbreviations.md
       check_paths: true
-  # Required for the ```mermaid fences used in the architecture docs.
-  - pymdownx.superfences:
-      custom_fences:
-        - name: mermaid
-          class: mermaid
+  - pymdownx.superfences
   - pymdownx.tabbed:
       alternate_style: true
       combine_header_slug: true

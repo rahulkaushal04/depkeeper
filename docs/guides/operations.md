@@ -21,7 +21,7 @@ Everything an operator needs to run depkeeper predictably in a controlled enviro
 | Outbound data | The package **names** in your requirements file, as URL path segments. Nothing else leaves the machine. |
 
 depkeeper has **no offline mode**. With no egress, every package becomes an unavailable stub and
-the report contains only `✗ ERROR` rows.
+the report contains only `[ERROR]` rows.
 
 ### Only pypi.org is queried
 

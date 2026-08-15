@@ -100,7 +100,7 @@ diff shows whole-file line-ending churn, another tool (an editor, `git` `autocrl
 
 ## PyPI errors
 
-### `✗ ERROR` rows / `Package information unavailable`
+### `[ERROR]` rows / `Package information unavailable`
 
 The metadata fetch failed. In order of likelihood:
 
@@ -216,7 +216,7 @@ the other side of the conflict yourself.
 ### "`update` changed a package that `check` showed as OK"
 
 An unversioned requirement. The table's up-to-date branch doubles as its fallback branch, so it
-renders `✓ OK`; the machine formats correctly report `install`. See
+renders `[OK]`; the machine formats correctly report `install`. See
 [Limitations](../reference/limitations.md#unversioned-requirements-report-as-ok).
 
 ### "A package is skipped with no update"

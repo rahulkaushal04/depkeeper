@@ -1,7 +1,7 @@
 """Custom exception hierarchy for depkeeper.
 
 Defines the structured exception types used across depkeeper. All exceptions
-inherit from :class:`DepKeeperError` and carry optional structured metadata
+inherit from `DepKeeperError` and carry optional structured metadata
 in the ``details`` attribute to improve diagnostics and logging.
 """
 

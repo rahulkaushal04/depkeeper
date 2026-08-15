@@ -110,7 +110,7 @@ class RequirementsParser:
        directives; these are applied to matching package names during
        parsing.
 
-    Call :meth:`reset` to clear state before reusing the parser on an
+    Call `reset` to clear state before reusing the parser on an
     unrelated set of files.
     """
 
@@ -138,24 +138,24 @@ class RequirementsParser:
 
         Reads the file at *file_path*, processes all directives (``-r``,
         ``-c``, ``-e``, ``--hash``), and returns a flat list of
-        :class:`Requirement` objects.  If *file_path* is relative and
+        `Requirement` objects.  If *file_path* is relative and
         *_parent_directory_path* is provided (internal use by ``-r``), the
         path is resolved relative to the parent.
 
         Circular include chains (``A.txt`` includes ``B.txt`` which
-        includes ``A.txt``) are detected and raise :exc:`ParseError`.
+        includes ``A.txt``) are detected and raise `ParseError`.
 
         Args:
             file_path: Path to the requirements file (absolute or relative).
             is_constraint_file: If ``True``, all parsed requirements are
-                stored as constraints (via :attr:`_constraint_requirements`)
+                stored as constraints (via `_constraint_requirements`)
                 rather than returned.  Used internally by ``-c`` handlers.
             _parent_directory_path: Internal parameter used when resolving
                 ``-r`` includes; the parent's directory is used as the base
                 for relative paths.
 
         Returns:
-            List of :class:`Requirement` objects (empty if
+            List of `Requirement` objects (empty if
             *is_constraint_file* is ``True``).
 
         Raises:
@@ -214,7 +214,7 @@ class RequirementsParser:
         """Parse requirements from raw text content.
 
         Splits *requirements_content* into lines and processes each via
-        :meth:`parse_line`.  Requirements loaded from ``-r`` includes are
+        `parse_line`.  Requirements loaded from ``-r`` includes are
         flattened into the result list.
 
         Args:
@@ -222,14 +222,14 @@ class RequirementsParser:
             source_file_path: Optional file path for error messages (purely
                 informational; does not affect parsing).
             is_constraint_file: If ``True``, all parsed requirements are
-                stored in :attr:`_constraint_requirements` instead of being
+                stored in `_constraint_requirements` instead of being
                 returned.
             _current_directory_path: Internal parameter; the directory
                 containing the "file" being parsed (used to resolve
                 relative ``-r`` / ``-c`` paths).
 
         Returns:
-            List of :class:`Requirement` objects.
+            List of `Requirement` objects.
 
         Example::
 
@@ -316,9 +316,9 @@ class RequirementsParser:
         - ``-r file.txt`` → ``List[Requirement]`` (nested parse)
         - ``-c file.txt`` → ``None`` (side-effect: populates constraints)
         - Pip global option lines (e.g. ``--index-url ...``) → ``None``
-        - ``-e <url-or-path>`` → editable :class:`Requirement`
-        - ``pkg==1.0 --hash sha256:...`` → :class:`Requirement` with hashes
-        - Standard PEP 508 specs → :class:`Requirement`
+        - ``-e <url-or-path>`` → editable `Requirement`
+        - ``pkg==1.0 --hash sha256:...`` → `Requirement` with hashes
+        - Standard PEP 508 specs → `Requirement`
 
         Args:
             line_text: Raw line text (may include leading/trailing whitespace).
@@ -443,7 +443,7 @@ class RequirementsParser:
 
         Returns:
             Dictionary mapping normalized package names to their constraint
-            :class:`Requirement` objects.
+            `Requirement` objects.
         """
         return self._constraint_requirements.copy()
 
@@ -526,7 +526,7 @@ class RequirementsParser:
         """Process a ``-c`` or ``--constraint`` directive.
 
         Parses the referenced file with ``is_constraint_file=True`` so that
-        all requirements are stored in :attr:`_constraint_requirements`
+        all requirements are stored in `_constraint_requirements`
         rather than being returned.
 
         Args:
@@ -582,7 +582,7 @@ class RequirementsParser:
         line_number: int,
         source_file_path: Optional[str],
     ) -> Requirement:
-        """Build a :class:`Requirement` from a standard PEP 508 specifier.
+        """Build a `Requirement` from a standard PEP 508 specifier.
 
         Delegates parsing to ``packaging.requirements.Requirement``, then
         extracts name, version specifiers, extras, and markers.
@@ -597,7 +597,7 @@ class RequirementsParser:
             source_file_path: Source file for error context.
 
         Returns:
-            A populated :class:`Requirement` object.
+            A populated `Requirement` object.
 
         Raises:
             ParseError: The spec is not valid PEP 508 syntax.
@@ -646,7 +646,7 @@ class RequirementsParser:
         original_line: str,
         line_number: int,
     ) -> Requirement:
-        """Build a :class:`Requirement` from a direct URL (VCS or network).
+        """Build a `Requirement` from a direct URL (VCS or network).
 
         The package name is extracted from the ``#egg=`` fragment.  If
         absent, the parser attempts to infer it from the URL path.
@@ -654,7 +654,7 @@ class RequirementsParser:
         Args:
             url_string: Full URL string.
             url_components: Dict with ``"scheme"``, ``"path"``, ``"egg"``
-                keys (from :meth:`_parse_direct_url`).
+                keys (from `_parse_direct_url`).
             is_editable: Whether ``-e`` was present.
             hash_values: Hash strings from ``--hash`` directives.
             inline_comment: Inline comment text.
@@ -662,7 +662,7 @@ class RequirementsParser:
             line_number: Line number for error reporting.
 
         Returns:
-            A :class:`Requirement` with the URL stored in the ``url`` field.
+            A `Requirement` with the URL stored in the ``url`` field.
 
         Raises:
             ParseError: The URL lacks ``#egg=`` and the package name cannot
@@ -711,7 +711,7 @@ class RequirementsParser:
         original_line: str,
         line_number: int,
     ) -> Requirement:
-        """Build a :class:`Requirement` from a local file path.
+        """Build a `Requirement` from a local file path.
 
         The path is resolved to an absolute ``file://`` URI.  The package
         name is extracted from ``#egg=`` if present, otherwise inferred
@@ -719,7 +719,7 @@ class RequirementsParser:
 
         Args:
             path_components: Dict with ``"path"`` and ``"egg"`` keys (from
-                :meth:`_parse_local_file_path`).
+                `_parse_local_file_path`).
             current_directory: Directory of the current file (for resolving
                 relative paths).
             is_editable: Whether ``-e`` was present.
@@ -729,7 +729,7 @@ class RequirementsParser:
             line_number: Line number for error reporting.
 
         Returns:
-            A :class:`Requirement` with the ``url`` field set to a
+            A `Requirement` with the ``url`` field set to a
             ``file://`` URI.
 
         Raises:
@@ -780,7 +780,7 @@ class RequirementsParser:
                 directory containing the file currently being parsed).
 
         Returns:
-            Absolute :class:`Path`.
+            Absolute `Path`.
         """
         if parent_directory and not file_path.is_absolute():
             # parent_directory is the including *file*, so relative includes
@@ -1019,7 +1019,7 @@ class RequirementsParser:
 
         When a requirement has no version specs (``specs == []``) and a
         constraint for the same package name exists in
-        :attr:`_constraint_requirements`, the constraint's specs are copied
+        `_constraint_requirements`, the constraint's specs are copied
         to the requirement.
 
         **Side-effect:** Mutates *requirement.specs* in place when a
@@ -1029,7 +1029,7 @@ class RequirementsParser:
             requirement: Requirement to potentially constrain.
 
         Returns:
-            The same :class:`Requirement` object (possibly modified).
+            The same `Requirement` object (possibly modified).
         """
         if requirement.name in self._constraint_requirements:
             constraint = self._constraint_requirements[requirement.name]
@@ -1047,7 +1047,7 @@ class RequirementsParser:
 def _normalize_package_name(package_name: str) -> str:
     """Normalize a package name per PEP 503.
 
-    Thin alias for :func:`depkeeper.utils.naming.normalize_package_name`.
+    Thin alias for `depkeeper.utils.naming.normalize_package_name`.
 
     Args:
         package_name: Raw package name.

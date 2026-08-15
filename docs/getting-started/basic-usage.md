@@ -72,13 +72,13 @@ the boundary. See [Strict version matching](../guides/checking-updates.md#strict
 
 | Badge | Meaning | Written by `update`? |
 |---|---|---|
-| `✓ OK` | No update available *or* no current version to compare against. | Only in the second case (a pin is added). |
-| `⬆ OUTDATED` | A safe upgrade exists. | Yes. |
-| `⚠ CONFLICT` | Conflicts blocked every candidate; no upgrade is possible. | No. |
-| `⚠ INCOMP` | A **downgrade** is required: the declared version is unusable (Python-incompatible, or forced down by another package). | Yes — this rewrites the floor *downwards*. |
-| `✗ ERROR` | PyPI metadata could not be retrieved. | No. |
+| `[OK]` | No update available *or* no current version to compare against. | Only in the second case (a pin is added). |
+| `[OUTDATED]` | A safe upgrade exists. | Yes. |
+| `[CONFLICT]` | Conflicts blocked every candidate; no upgrade is possible. | No. |
+| `[INCOMP]` | A **downgrade** is required: the declared version is unusable (Python-incompatible, or forced down by another package). | Yes — this rewrites the floor *downwards*. |
+| `[ERROR]` | PyPI metadata could not be retrieved. | No. |
 
-`⚠ INCOMP` deliberately outranks `⚠ CONFLICT`: a required downgrade means the version you
+`[INCOMP]` deliberately outranks `[CONFLICT]`: a required downgrade means the version you
 declared cannot be used at all, which you must see first.
 
 ### JSON / simple statuses
@@ -95,7 +95,7 @@ The machine formats use a different, finer-grained ladder:
 
 !!! warning "The two ladders disagree for unversioned requirements"
 
-    `certifi` with no specifier renders as `✓ OK` in the table but as `install` in JSON and
+    `certifi` with no specifier renders as `[OK]` in the table but as `install` in JSON and
     simple output. The table's up-to-date branch is also its fallback branch. Treat the machine
     formats as authoritative. Tracked in [Known limitations](../reference/limitations.md#unversioned-requirements-report-as-ok).
 

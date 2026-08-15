@@ -196,7 +196,7 @@ Example of a real parse failure:
 | **Backslash line continuations are not joined.** | The default output of `pip-compile --generate-hashes`, which wraps hashes onto continuation lines, is unparseable. Use single-line hash form. |
 | URL name inference is unreliable | Add `#egg=`. |
 | Unknown pip options raise `ParseError` | Only the options listed above are recognised. A newer pip flag will fail the parse. |
-| `--index-url` is parsed and ignored | depkeeper always queries `pypi.org`. Packages that exist only on a private index become `✗ ERROR` rows. |
+| `--index-url` is parsed and ignored | depkeeper always queries `pypi.org`. Packages that exist only on a private index become `[ERROR]` rows. |
 
 All of these are tracked in [Known limitations](../reference/limitations.md).
 

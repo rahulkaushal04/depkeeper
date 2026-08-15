@@ -3,7 +3,7 @@
 This module is the **single** source of truth for turning a distribution
 name into its canonical PEP 503 form. Every layer that keys a mapping,
 compares, caches or deduplicates by package name must go through
-:func:`normalize_package_name`.
+`normalize_package_name`.
 
 Why this matters: a name can legitimately reach depkeeper in several
 spellings from independent sources — the requirements file
@@ -14,7 +14,7 @@ normalization rule that disagrees (for example one that folds ``_`` but
 not ``.``) silently splits a single distribution into two identities, so
 cross-package lookups miss and caches duplicate.
 
-The rule is delegated to :func:`packaging.utils.canonicalize_name` rather
+The rule is delegated to `packaging.utils.canonicalize_name` rather
 than re-implemented, so depkeeper always agrees with pip, PyPI and the
 rest of the packaging ecosystem.
 """

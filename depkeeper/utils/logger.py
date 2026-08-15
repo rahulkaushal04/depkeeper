@@ -28,9 +28,9 @@ class ColoredFormatter(logging.Formatter):
 
     Args:
         fmt: Standard :mod:`logging` format string.
-        datefmt: Timestamp format passed to :class:`logging.Formatter`.
+        datefmt: Timestamp format passed to `logging.Formatter`.
         use_color: Master switch. Even when ``True``, color is applied only
-            if the destination stream also passes :meth:`_should_use_color`.
+            if the destination stream also passes `_should_use_color`.
     """
 
     COLORS = {
@@ -127,14 +127,14 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
     """Return a logger within the ``depkeeper`` namespace.
 
     Bare names are prefixed with ``depkeeper.`` so every logger inherits the
-    configuration applied by :func:`setup_logging`.
+    configuration applied by `setup_logging`.
 
     Args:
         name: Logger name, e.g. ``"parser"`` or ``__name__``.
 
     Returns:
         A logger under the ``depkeeper`` hierarchy. When logging has not been
-        configured, a :class:`logging.NullHandler` is attached so importing
+        configured, a `logging.NullHandler` is attached so importing
         depkeeper as a library never emits "no handlers" warnings.
     """
     if not name or name == "depkeeper":
@@ -151,7 +151,7 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
 
 
 def is_logging_configured() -> bool:
-    """Return whether :func:`setup_logging` has run since the last reset."""
+    """Return whether `setup_logging` has run since the last reset."""
     return _logging_configured
 
 

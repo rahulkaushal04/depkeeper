@@ -2,7 +2,7 @@
 
 Provides safe helpers for reading, writing, backing up, restoring, and
 discovering requirement-related files. Writes are atomic and all filesystem
-errors are normalized to :class:`~depkeeper.exceptions.FileOperationError`.
+errors are normalized to `FileOperationError`.
 """
 
 from __future__ import annotations
@@ -118,7 +118,7 @@ def _atomic_write(
 
     The content is written to a temporary file in the destination directory,
     flushed and ``fsync``-ed, then moved over the target with
-    :meth:`Path.replace` (``os.replace``), which is atomic on POSIX and
+    `Path.replace` (``os.replace``), which is atomic on POSIX and
     Windows. A reader therefore never observes a truncated file, and an
     interrupted write leaves the original file untouched.
 
@@ -337,7 +337,7 @@ def restore_backup(
     backup_path: PathLike,
     target_path: Optional[PathLike] = None,
 ) -> None:
-    """Restore a file from a backup created by :func:`create_backup`.
+    """Restore a file from a backup created by `create_backup`.
 
     When *target_path* is omitted the original name is recovered from the
     backup name by dropping the ``.backup`` extension and the trailing
@@ -464,7 +464,7 @@ def validate_path(
 def create_timestamped_backup(file_path: PathLike) -> Path:
     """Create a backup named ``<stem>.<timestamp>_<uuid>.backup<suffix>``.
 
-    Unlike :func:`create_backup`, the original suffix is kept last so the
+    Unlike `create_backup`, the original suffix is kept last so the
     backup remains recognizable by extension (``requirements.txt`` backs up to
     ``requirements.<timestamp>_<uuid>.backup.txt``).
 

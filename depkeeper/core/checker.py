@@ -4,7 +4,7 @@ This module provides the primary interface for determining which version of
 a package should be recommended for upgrade, with **strict enforcement** of
 major version boundaries to prevent breaking changes.
 
-All PyPI metadata is sourced through :class:`~depkeeper.core.data_store.PyPIDataStore`
+All PyPI metadata is sourced through `PyPIDataStore`
 to ensure that every ``/pypi/{pkg}/json`` call is made at most once per process.
 
 The recommendation algorithm prioritises:
@@ -111,7 +111,7 @@ class VersionChecker:
         ``2.y.z`` (never ``3.0.0``), even if ``3.0.0`` is the latest available
         version on PyPI.
 
-        Calls :meth:`PyPIDataStore.get_package_data` (which may trigger a
+        Calls `PyPIDataStore.get_package_data` (which may trigger a
         network fetch or return cached data), then applies the strict
         major-boundary recommendation algorithm to choose the best upgrade
         target.
@@ -126,16 +126,16 @@ class VersionChecker:
             constraints: Additional ``(operator, version)`` specifiers the
                 recommendation must satisfy — typically the upper bounds and
                 exclusions declared by the requirement itself (see
-                :func:`~depkeeper.utils.version_utils.retained_specs`).
+                `retained_specs`).
                 Recommending a version that violates them would produce an
                 unsatisfiable requirement line.
 
         Returns:
-            A :class:`Package` with ``latest_version``,
+            A `Package` with ``latest_version``,
             ``recommended_version``, and metadata fields populated. When PyPI
             data cannot be retrieved (missing package, unexpected status,
             timeout, rate limiting) an *unavailable stub* is returned instead
-            — see :meth:`create_unavailable_package`.
+            — see `create_unavailable_package`.
         """
         try:
             pkg_data = await self.data_store.get_package_data(name)
@@ -155,7 +155,7 @@ class VersionChecker:
         """Check multiple packages concurrently.
 
         For each requirement, extracts the current version (via
-        :meth:`extract_current_version`) and calls :meth:`get_package_info`.
+        `extract_current_version`) and calls `get_package_info`.
         Errors for individual packages are caught and replaced with
         unavailable stubs so that one bad package does not block the rest.
 
@@ -163,7 +163,7 @@ class VersionChecker:
             requirements: Parsed requirements from a requirements file.
 
         Returns:
-            List of :class:`Package` objects, one per requirement.
+            List of `Package` objects, one per requirement.
         """
         tasks = [self._create_package_check_task(req) for req in requirements]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -179,13 +179,13 @@ class VersionChecker:
 
         1. If the requirement has exactly one specifier and it is ``==``,
            return that version (pinned).
-        2. If :attr:`infer_version_from_constraints` is ``False``, stop here.
+        2. If `infer_version_from_constraints` is ``False``, stop here.
         3. Otherwise, scan for the first ``>=``, ``>``, or ``~=`` specifier
            and return its version. This treats ``>=2.0`` as "currently on
            2.0" for major-version boundary purposes.
 
         Args:
-            req: A parsed :class:`Requirement`.
+            req: A parsed `Requirement`.
 
         Returns:
             The inferred version string, or ``None`` when inference is not
@@ -211,7 +211,7 @@ class VersionChecker:
         name: str,
         current_version: Optional[str],
     ) -> Package:
-        """Create a stub :class:`Package` when PyPI data is unavailable.
+        """Create a stub `Package` when PyPI data is unavailable.
 
         Keeps the package in the result list (rather than dropping it) so the
         report still shows what is declared in the file, while the missing
@@ -222,7 +222,7 @@ class VersionChecker:
             current_version: The version that was installed (if known).
 
         Returns:
-            A :class:`Package` with ``latest_version`` and
+            A `Package` with ``latest_version`` and
             ``recommended_version`` both set to ``None``.
         """
         return Package(
@@ -244,7 +244,7 @@ class VersionChecker:
         """Spawn an async task to check a single requirement.
 
         Extracts the current version from *requirement* and delegates to
-        :meth:`get_package_info`, forwarding the requirement's retained
+        `get_package_info`, forwarding the requirement's retained
         constraints (upper bounds, exclusions, wildcard bands) so the
         recommendation cannot violate the user's declared range.
 
@@ -252,7 +252,7 @@ class VersionChecker:
             requirement: A parsed requirement.
 
         Returns:
-            An :class:`asyncio.Task` that will resolve to a :class:`Package`.
+            An `asyncio.Task` that will resolve to a `Package`.
         """
         current_version = self.extract_current_version(requirement)
         return asyncio.create_task(
@@ -268,7 +268,7 @@ class VersionChecker:
         requirements: List[Requirement],
         results: List[Any],
     ) -> List[Package]:
-        """Convert :func:`asyncio.gather` results into a flat package list.
+        """Convert `asyncio.gather` results into a flat package list.
 
         Any exceptions raised during individual checks are caught and
         replaced with unavailable package stubs.
@@ -278,7 +278,7 @@ class VersionChecker:
             results: Output of ``gather(*tasks, return_exceptions=True)``.
 
         Returns:
-            List of :class:`Package` objects (same length as *requirements*).
+            List of `Package` objects (same length as *requirements*).
         """
         packages: List[Package] = []
 
@@ -310,14 +310,14 @@ class VersionChecker:
         current_version: Optional[str],
         constraints: Optional[Sequence[Tuple[str, str]]] = None,
     ) -> Package:
-        """Construct a :class:`Package` from cached PyPI metadata.
+        """Construct a `Package` from cached PyPI metadata.
 
         Applies the **strict major-boundary** recommendation algorithm:
 
         1. If *current_version* is provided and parseable, determine its
            major version number.
         2. Find **all** Python-compatible versions within that same major
-           (using :meth:`PyPIPackageData.get_python_compatible_versions`).
+           (using `PyPIPackageData.get_python_compatible_versions`).
         3. Discard candidates rejected by *constraints* (the requirement's
            own upper bounds / exclusions).
         4. Return the **highest** version from that filtered list as the
@@ -337,7 +337,7 @@ class VersionChecker:
             constraints: Specifiers the recommendation must satisfy.
 
         Returns:
-            A fully populated :class:`Package`.
+            A fully populated `Package`.
         """
         latest_version: Optional[str] = pkg_data.latest_version
         python_version: str = PyPIDataStore.get_current_python_version()
@@ -441,7 +441,7 @@ class VersionChecker:
     def _major_from_version(version: str) -> Optional[int]:
         """Return the major release component of *version*.
 
-        Delegates to :func:`~depkeeper.utils.version_utils.parse_version_lenient`,
+        Delegates to `parse_version_lenient`,
         which also accepts a PEP 440 wildcard band (``2.*``) so a wildcard
         exact pin still anchors the major-boundary search below instead of
         being rejected as unparseable.

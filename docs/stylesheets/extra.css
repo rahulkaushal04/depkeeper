@@ -21,59 +21,6 @@
 }
 
 /* ============================================================
- * Hero Section (Home Page)
- * ============================================================ */
-.hero {
-    text-align: center;
-    padding: 3rem 1rem;
-    margin-bottom: 2rem;
-}
-
-.hero h1 {
-    font-size: 2.5rem;
-    font-weight: 700;
-    margin-bottom: 1rem;
-}
-
-.hero p {
-    font-size: 1.2rem;
-    color: var(--md-default-fg-color--light);
-    margin-bottom: 2rem;
-}
-
-.hero .md-button {
-    margin: 0.5rem;
-    padding: 0.75rem 2rem;
-    font-weight: 500;
-    transition: transform var(--depkeeper-transition), box-shadow var(--depkeeper-transition);
-}
-
-.hero .md-button:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--depkeeper-shadow-light);
-}
-
-/* ============================================================
- * Footer CTA Section
- * ============================================================ */
-.footer-cta {
-    text-align: center;
-    padding: 3rem 1rem;
-    margin-top: 3rem;
-    border-top: 1px solid var(--md-default-fg-color--lightest);
-    background-color: var(--md-default-bg-color);
-}
-
-.footer-cta h2 {
-    margin-bottom: 1rem;
-}
-
-.footer-cta p {
-    color: var(--md-default-fg-color--light);
-    margin-bottom: 1.5rem;
-}
-
-/* ============================================================
  * Grid Cards
  * ============================================================ */
 .md-typeset .grid.cards > ul > li {
@@ -234,34 +181,6 @@
 }
 
 /* ============================================================
- * Badges and Labels
- * ============================================================ */
-.badge {
-    display: inline-block;
-    padding: 0.2em 0.6em;
-    font-size: 0.75em;
-    font-weight: 600;
-    line-height: 1;
-    border-radius: 0.25rem;
-    white-space: nowrap;
-}
-
-.badge-new {
-    background-color: var(--md-success-fg-color);
-    color: white;
-}
-
-.badge-deprecated {
-    background-color: var(--md-error-fg-color);
-    color: white;
-}
-
-.badge-experimental {
-    background-color: var(--md-warning-fg-color);
-    color: white;
-}
-
-/* ============================================================
  * Version Selector
  * ============================================================ */
 .md-version {
@@ -302,22 +221,6 @@ button:focus-visible {
     border-radius: 0.25rem;
 }
 
-/* Skip to content link */
-.skip-to-content {
-    position: absolute;
-    top: -40px;
-    left: 0;
-    background: var(--md-primary-fg-color);
-    color: white;
-    padding: 0.5rem 1rem;
-    z-index: 100;
-    transition: top var(--depkeeper-transition);
-}
-
-.skip-to-content:focus {
-    top: 0;
-}
-
 /* ============================================================
  * Smooth Scrolling
  * ============================================================ */
@@ -334,28 +237,6 @@ html {
  * Mobile Responsiveness
  * ============================================================ */
 @media screen and (max-width: 76.1875em) {
-    .hero {
-        padding: 2rem 1rem;
-    }
-
-    .hero h1 {
-        font-size: 2rem;
-    }
-
-    .hero p {
-        font-size: 1rem;
-    }
-
-    .hero .md-button {
-        display: block;
-        width: 100%;
-        margin: 0.5rem 0;
-    }
-
-    .footer-cta {
-        padding: 2rem 1rem;
-    }
-
     /* Stack tables horizontally on mobile */
     .md-typeset table:not([class]) {
         font-size: 0.75em;
@@ -364,10 +245,6 @@ html {
 
 /* Extra small screens */
 @media screen and (max-width: 480px) {
-    .hero h1 {
-        font-size: 1.75rem;
-    }
-
     .md-typeset pre > code {
         font-size: 0.75em;
     }
@@ -453,27 +330,6 @@ html {
         scroll-behavior: auto;
     }
 }
-
-/* ============================================================
- * Utility Classes
- * ============================================================ */
-.text-center {
-    text-align: center;
-}
-
-.text-muted {
-    color: var(--md-default-fg-color--light);
-}
-
-.mb-0 { margin-bottom: 0; }
-.mb-1 { margin-bottom: 0.5rem; }
-.mb-2 { margin-bottom: 1rem; }
-.mb-3 { margin-bottom: 1.5rem; }
-
-.mt-0 { margin-top: 0; }
-.mt-1 { margin-top: 0.5rem; }
-.mt-2 { margin-top: 1rem; }
-.mt-3 { margin-top: 1.5rem; }
 
 /* ============================================================
  * Dark Mode Specific Adjustments

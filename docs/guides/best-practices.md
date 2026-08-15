@@ -25,7 +25,7 @@ requests>=2.32,<3.0
 
 A requirement with no specifier has no current version, therefore no major-version anchor.
 depkeeper will propose the newest compatible release **across all majors** and `update` will pin
-it. It also renders as `✓ OK` in the table while still being changed by `update` — a genuine
+it. It also renders as `[OK]` in the table while still being changed by `update` — a genuine
 surprise. Give every requirement at least a floor.
 
 ---
@@ -146,7 +146,7 @@ updates keep the blast radius small and the git history meaningful.
 
 ## Review every downgrade
 
-A `downgrade` / `⚠ INCOMP` row means the version you declared cannot be used — because another
+A `downgrade` / `[INCOMP]` row means the version you declared cannot be used — because another
 package requires an older release, or because it is incompatible with the running interpreter.
 depkeeper will rewrite the floor **downwards** to make the set consistent.
 

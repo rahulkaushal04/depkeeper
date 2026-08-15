@@ -219,12 +219,12 @@ async def _update_async(
 
     Core logic:
 
-    1. Parse the requirements file into structured :class:`Requirement`
+    1. Parse the requirements file into structured `Requirement`
        objects.
-    2. Create a shared :class:`PyPIDataStore` (ensures each package is
+    2. Create a shared `PyPIDataStore` (ensures each package is
        fetched once).
-    3. Run :class:`VersionChecker` to compute recommended versions.
-    4. Optionally run :class:`DependencyAnalyzer` to resolve conflicts and
+    3. Run `VersionChecker` to compute recommended versions.
+    4. Optionally run `DependencyAnalyzer` to resolve conflicts and
        adjust recommendations to ensure mutual compatibility.
     5. Filter packages if ``--packages`` is specified.
     6. Identify packages needing updates (newer version available, no
@@ -407,7 +407,7 @@ def _display_resolution_summary(result: ResolutionResult) -> None:
     output for this command.
 
     Args:
-        result: The :class:`ResolutionResult` from the dependency analyzer.
+        result: The `ResolutionResult` from the dependency analyzer.
 
     Example output::
 
@@ -483,14 +483,14 @@ def _find_updates(
     preserved by the writer, so a target version they exclude is skipped
     rather than written as an unsatisfiable line such as ``flask>=2.3.3,<2.3``.
     The conflict resolver can propose such a version even though
-    :class:`~depkeeper.core.checker.VersionChecker` already filters candidates.
+    `VersionChecker` already filters candidates.
     Targets that would leave the line byte-identical are skipped as well, so
     repeated runs converge.
 
     Args:
         packages: List of checked packages with version metadata from
-            :class:`VersionChecker` and optionally adjusted by
-            :class:`DependencyAnalyzer`. Paired positionally with
+            `VersionChecker` and optionally adjusted by
+            `DependencyAnalyzer`. Paired positionally with
             *requirements* (same length, same order), so duplicate
             declarations of the same package are each handled independently.
         requirements: Original parsed requirements from the file, one per
@@ -503,8 +503,8 @@ def _find_updates(
         List of ``(requirement, package, new_version)`` tuples for packages
         that have safe upgrades or changes available. Each tuple contains:
 
-        - The original :class:`Requirement` object for line mapping
-        - The :class:`Package` object with version information
+        - The original `Requirement` object for line mapping
+        - The `Package` object with version information
         - The target version string to apply
     """
     updates: List[Tuple[Requirement, Package, str]] = []
@@ -684,7 +684,7 @@ def _update_target_path(req: Requirement, default_file: Path) -> Path:
     """Return the file that a requirement should be written back to.
 
     Requirements pulled in via ``-r``/``--requirement`` includes carry the
-    path of the *included* file in :attr:`Requirement.source_file`. Standard
+    path of the *included* file in `Requirement.source_file`. Standard
     requirements carry the path of the primary file. When provenance is
     missing (e.g. requirements built via ``parse_string`` without a source
     path), fall back to *default_file*.
@@ -694,7 +694,7 @@ def _update_target_path(req: Requirement, default_file: Path) -> Path:
         default_file: The primary requirements file passed to the command.
 
     Returns:
-        The :class:`Path` of the file the requirement lives in.
+        The `Path` of the file the requirement lives in.
     """
     # The parser stores resolved paths; resolving the fallback too keeps both
     # kinds of provenance comparable, so one file is never written twice under
@@ -715,10 +715,10 @@ def _resolve_affected_files(
 
     Args:
         file: The primary requirements file passed to the command.
-        updates: Updates to apply (from :func:`_find_updates`).
+        updates: Updates to apply (from `_find_updates`).
 
     Returns:
-        Set of :class:`Path` objects that :func:`_apply_updates` will write.
+        Set of `Path` objects that `_apply_updates` will write.
     """
     return {_update_target_path(req, file) for req, _pkg, _new_version in updates}
 
@@ -766,13 +766,13 @@ def _rollback_writes(committed: List[_PendingWrite]) -> None:
 def _commit_pending_writes(pending: List[_PendingWrite]) -> None:
     """Write every rendered file atomically, rolling back on failure.
 
-    Each file is replaced through :func:`safe_write_file`, which writes to a
+    Each file is replaced through `safe_write_file`, which writes to a
     temporary file in the same directory, ``fsync``s it and renames it over
     the target. A crash, ``Ctrl-C`` or a full disk therefore leaves either the
     complete old file or the complete new one -- never a truncated one.
 
     Args:
-        pending: Rendered writes produced by :func:`_apply_updates`.
+        pending: Rendered writes produced by `_apply_updates`.
 
     Raises:
         DepKeeperError: A file could not be written; files already written in
@@ -819,7 +819,7 @@ def _apply_updates(
     the line numbers of the *included* file. Matching on line number alone
     would therefore rewrite unrelated lines in the parent file (destroying
     the ``-r`` directive and corrupting the dependency graph). To avoid this,
-    updates are grouped by their source file (:attr:`Requirement.source_file`)
+    updates are grouped by their source file (`Requirement.source_file`)
     and matched on the ``(source_file, line_number)`` pair, so every file is
     rewritten independently and correctly.
 
@@ -839,7 +839,7 @@ def _apply_updates(
     already written are rolled back. A UTF-8 byte order mark is re-emitted
     for files that originally carried one.
 
-    All updates are rendered via :meth:`Requirement.update_version`, which
+    All updates are rendered via `Requirement.update_version`, which
     changes only the version specifier while preserving comments, whitespace,
     and other metadata. Declared upper bounds, exclusions and
     compatible-release ranges are preserved unless *pin* is set.
@@ -849,7 +849,7 @@ def _apply_updates(
             requirements that lack source-file provenance.
         requirements: All parsed requirements (including those not being
             updated), used to locate the requirement on each updated line.
-        updates: Updates to apply (from :func:`_find_updates`).
+        updates: Updates to apply (from `_find_updates`).
         allow_hash_removal: Whether updates that remove ``--hash`` entries
             are allowed.
         pin: Replace every specifier with an exact ``==`` pin instead of

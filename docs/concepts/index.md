@@ -48,16 +48,39 @@ predict, justify or debug a recommendation, and the prerequisite reading for con
 
 Both commands run the same five stages. `update` adds a sixth.
 
-```mermaid
-flowchart LR
-    A[requirements.txt] --> B[RequirementsParser]
-    B -->|List of Requirement| C[PyPIDataStore]
-    C -->|cached metadata| D[VersionChecker]
-    D -->|List of Package| E[DependencyAnalyzer]
-    E -->|ResolutionResult| F[Renderer<br/>table / simple / json]
-    E -->|ResolutionResult| G[Writer<br/>update only]
-    G --> H[requirements.txt]
-```
+<figure>
+<svg viewBox="0 0 1065 278" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="requirements.txt flows through RequirementsParser, PyPIDataStore, VersionChecker and DependencyAnalyzer, then forks to a Renderer that writes to stdout and a Writer that atomically rewrites requirements.txt">
+<defs>
+<marker id="pipeline-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+</defs>
+<g font-family="var(--md-text-font-family, sans-serif)" fill="currentColor">
+<rect x="40" y="40" width="122" height="48" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="101" y="60" text-anchor="middle" font-size="14">requirements</text>
+<text x="101" y="77" text-anchor="middle" font-size="14">.txt</text>
+<line x1="162" y1="64" x2="186" y2="64" stroke="currentColor" stroke-width="1.5" marker-end="url(#pipeline-arrow)"/>
+<rect x="186" y="40" width="170" height="48" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="271" y="69" text-anchor="middle" font-size="14">RequirementsParser</text>
+<line x1="356" y1="64" x2="380" y2="64" stroke="currentColor" stroke-width="1.5" marker-end="url(#pipeline-arrow)"/>
+<rect x="380" y="40" width="130" height="48" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="445" y="69" text-anchor="middle" font-size="14">PyPIDataStore</text>
+<line x1="510" y1="64" x2="534" y2="64" stroke="currentColor" stroke-width="1.5" marker-end="url(#pipeline-arrow)"/>
+<rect x="534" y="40" width="138" height="48" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="603" y="69" text-anchor="middle" font-size="14">VersionChecker</text>
+<line x1="672" y1="64" x2="696" y2="64" stroke="currentColor" stroke-width="1.5" marker-end="url(#pipeline-arrow)"/>
+<rect x="696" y="40" width="170" height="48" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="781" y="69" text-anchor="middle" font-size="14">DependencyAnalyzer</text>
+<path d="M 781 88 V 110 L 652 110 V 176" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#pipeline-arrow)"/>
+<path d="M 781 88 V 110 L 916 110 V 176" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#pipeline-arrow)"/>
+<rect x="537" y="178" width="230" height="60" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="652" y="202" text-anchor="middle" font-size="14">Renderer</text>
+<text x="652" y="220" text-anchor="middle" font-size="11">table / simple / json → stdout</text>
+<rect x="807" y="178" width="218" height="60" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+<text x="916" y="202" text-anchor="middle" font-size="14">Writer</text>
+<text x="916" y="220" text-anchor="middle" font-size="11">atomic rewrite (update only)</text>
+</g>
+</svg>
+<figcaption>Both commands share the first four stages; only <code>update</code> reaches the Writer.</figcaption>
+</figure>
 
 | Stage | Component | Responsibility |
 |---|---|---|

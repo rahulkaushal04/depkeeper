@@ -24,7 +24,7 @@ class DepKeeperContext:
         verbose: Verbosity level (0=WARNING, 1=INFO, 2+=DEBUG).
         color: Whether colored terminal output is enabled.
         config: Loaded and validated configuration from the configuration
-            file.  ``None`` until :func:`~depkeeper.config.load_config`
+            file.  ``None`` until `load_config`
             is called during CLI initialization.
     """
 
@@ -37,5 +37,5 @@ class DepKeeperContext:
         self.config: Optional["DepKeeperConfig"] = None
 
 
-#: Click decorator for injecting :class:`DepKeeperContext` into commands.
+#: Click decorator for injecting `DepKeeperContext` into commands.
 pass_context = click.make_pass_decorator(DepKeeperContext, ensure=True)

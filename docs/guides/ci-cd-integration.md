@@ -338,5 +338,5 @@ echo "depkeeper_outdated_packages $(jq '[.[] | select(.status==\"outdated\")] | 
 | Empty or unparseable stdout | Diagnostics mixed into the payload by an older version, or the command failed. | Upgrade; redirect stderr; check the exit code before parsing. |
 | Sporadic `Rate limit exceeded after 5 retries` | Many parallel jobs hitting PyPI from one egress IP. | Stagger schedules; use `--no-check-conflicts`; split large files. |
 | Recommendations differ between the pipeline and a laptop | Different Python versions running depkeeper. | Pin the Python version in CI to the project's target. |
-| Every package reports `✗ ERROR` | No egress to `pypi.org`, or TLS interception. | See [Operations → TLS and proxies](operations.md#tls-and-proxies). |
+| Every package reports `[ERROR]` | No egress to `pypi.org`, or TLS interception. | See [Operations → TLS and proxies](operations.md#tls-and-proxies). |
 | Automated PR fails `pip install` | Transitive conflict depkeeper cannot see. | Keep the verification step; fix by adding the transitive package to the file. |

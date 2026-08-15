@@ -191,10 +191,10 @@ done
 
 | Row | Meaning | Action |
 |---|---|---|
-| `✗ ERROR`, `Latest: error` | PyPI metadata unavailable — package does not exist, is private-index-only, or the network failed. | Verify the name; check connectivity; see [Troubleshooting](troubleshooting.md#pypi-errors). |
-| `⚠ CONFLICT`, `Update Type: blocked` | Conflicts eliminated every candidate version. | Read the `Conflicts` column and relax the offending constraint yourself. |
-| `⚠ INCOMP`, `Update Type: downgrade` | The declared version is unusable and a lower version is proposed. | Investigate before applying — this rewrites your floor downwards. |
-| `✓ OK` with an empty `Current` | The requirement has no version specifier. | `update` will add a pin. See [Limitations](../reference/limitations.md#unversioned-requirements-report-as-ok). |
+| `[ERROR]`, `Latest: error` | PyPI metadata unavailable — package does not exist, is private-index-only, or the network failed. | Verify the name; check connectivity; see [Troubleshooting](troubleshooting.md#pypi-errors). |
+| `[CONFLICT]`, `Update Type: blocked` | Conflicts eliminated every candidate version. | Read the `Conflicts` column and relax the offending constraint yourself. |
+| `[INCOMP]`, `Update Type: downgrade` | The declared version is unusable and a lower version is proposed. | Investigate before applying — this rewrites your floor downwards. |
+| `[OK]` with an empty `Current` | The requirement has no version specifier. | `update` will add a pin. See [Limitations](../reference/limitations.md#unversioned-requirements-report-as-ok). |
 | Recommendation far below `Latest` | Major boundary, a declared cap, a Python requirement, or a conflict. | Compare `Latest` with your declared range and the `Conflicts` column. |
 
 ---

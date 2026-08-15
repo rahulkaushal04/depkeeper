@@ -24,7 +24,7 @@ In automated pipelines this step is mandatory.
 ### Only `pypi.org` is queried
 
 `--index-url`, `--extra-index-url`, `-i` and `--find-links` lines are recognised and ignored.
-Packages published only to a private index always report as `✗ ERROR`.
+Packages published only to a private index always report as `[ERROR]`.
 
 **Workaround:** none in 0.1.0. Split private packages into a separate file that you do not run
 depkeeper against, or accept the error rows.
@@ -83,7 +83,7 @@ wheels and sdist disagree may be evaluated against either.
 ### Unversioned requirements report as `OK`
 
 A requirement with no specifier has no current version, so `has_update()` is false and the table
-renderer falls through to its up-to-date branch: `✓ OK`. The machine formats correctly report
+renderer falls through to its up-to-date branch: `[OK]`. The machine formats correctly report
 `install`, and `update` **does** add a pin.
 
 **Workaround:** trust `--format json` / `--format simple`; give every requirement at least a

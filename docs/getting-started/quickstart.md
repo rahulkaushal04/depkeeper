@@ -42,12 +42,12 @@ Converged: Yes (1 iterations)
 ┏━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━┓
 ┃   Status   ┃ Package  ┃ Current ┃  Latest   ┃ Recommended ┃ Update Type ┃ Conflicts ┃
 ┡━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━┩
-│ ⬆ OUTDATED │ requests │ 2.28.0  │  2.34.2   │   2.34.2    │    minor    │ -         │
-│ ⬆ OUTDATED │ flask    │   2.0   │   3.1.3   │    2.2.5    │    minor    │ -         │
-│ ⬆ OUTDATED │ celery   │   5.0   │   5.6.3   │    5.6.3    │    minor    │ -         │
-│ ⬆ OUTDATED │ click    │   8.0   │   8.4.2   │    8.4.2    │    minor    │ -         │
-│    ✓ OK    │ certifi  │    -    │ 2026.7.22 │      -      │      -      │ -         │
-│ ⬆ OUTDATED │ urllib3  │ 1.26.0  │   2.7.0   │   1.26.20   │    patch    │ -         │
+│ [OUTDATED] │ requests │ 2.28.0  │  2.34.2   │   2.34.2    │    minor    │ -         │
+│ [OUTDATED] │ flask    │   2.0   │   3.1.3   │    2.2.5    │    minor    │ -         │
+│ [OUTDATED] │ celery   │   5.0   │   5.6.3   │    5.6.3    │    minor    │ -         │
+│ [OUTDATED] │ click    │   8.0   │   8.4.2   │    8.4.2    │    minor    │ -         │
+│   [OK]     │ certifi  │    -    │ 2026.7.22 │      -      │      -      │ -         │
+│ [OUTDATED] │ urllib3  │ 1.26.0  │   2.7.0   │   1.26.20   │    patch    │ -         │
 └────────────┴──────────┴─────────┴───────────┴─────────────┴─────────────┴───────────┘
 [WARNING]
 5 package(s) have updates available
@@ -64,7 +64,7 @@ Three results are worth understanding immediately:
   propose a version your own constraint forbids.
 - **`urllib3`: latest `2.7.0`, recommended `1.26.20`.** `2.x` is a major boundary crossing and is
   never proposed automatically.
-- **`certifi`: shown as `✓ OK`.** It has no version specifier, so there is nothing to compare
+- **`certifi`: shown as `[OK]`.** It has no version specifier, so there is nothing to compare
   against. `update` will still add a pin for it — see the
   [known inconsistency](../reference/limitations.md#unversioned-requirements-report-as-ok).
 

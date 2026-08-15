@@ -7,7 +7,8 @@ description: Supported versions, vulnerability reporting and depkeeper's securit
 
 The canonical policy lives in
 [`SECURITY.md`](https://github.com/rahulkaushal04/depkeeper/blob/main/SECURITY.md) in the
-repository. This page reproduces it and adds the operational security context for the tool.
+repository. This page summarises it and adds the operational security context for the tool; if
+the two ever disagree, `SECURITY.md` governs.
 
 ---
 
@@ -79,6 +80,29 @@ responsibly.
 
 ---
 
+## Scope
+
+### In scope
+
+- Parser, checker, resolver and writer logic, including malicious or malformed requirements files
+- Unsafe file operations: path traversal, symlink handling, permission or ownership changes
+- Any code execution triggered by analysed input
+- Transport security: TLS verification, downgrade, SSRF, request handling
+- Integrity controls, in particular `--hash` handling
+- Denial of service reachable with a realistically sized input file
+
+### Out of scope
+
+- Vulnerabilities in third-party dependencies (report those upstream; tell us if depkeeper's usage
+  makes them exploitable)
+- Denial of service requiring extreme resources or an input beyond the 10 MB file limit
+- Social engineering and physical access attacks
+- Issues affecting unsupported versions
+- Features depkeeper does not implement — for example private-index authentication, which does not
+  exist (see [Limitations](../reference/limitations.md))
+
+---
+
 ## Security posture
 
 Context for reviewers assessing depkeeper for use in a controlled environment. Mechanisms are
@@ -96,7 +120,7 @@ described in [Operations → Security posture](../guides/operations.md#security-
 | Untrusted input handling | The parser performs no `eval`, no shell invocation and no path writes. |
 | Integrity controls | Updates that would strip `--hash` entries are refused unless `--allow-hash-removal` is passed explicitly. |
 | Write integrity | Atomic replace with `fsync`, mode preservation, and rollback of a partially committed multi-file batch. |
-| Path controls | `validate_path` can confine a resolved path to a base directory. |
+| Path controls | `utils.filesystem.validate_path` exists to confine a resolved path to a base directory, but it is **not** applied to `-r`/`-c` include resolution or to `update`'s write targets — see the residual risk below. |
 
 ### Residual risks
 

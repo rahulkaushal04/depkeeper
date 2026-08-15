@@ -2,7 +2,7 @@
 
 Provides a unified, async-safe cache for PyPI package metadata so that
 ``VersionChecker`` and ``DependencyAnalyzer`` share a single HTTP fetch
-per package.  All public helpers on :class:`PyPIDataStore` are either
+per package.  All public helpers on `PyPIDataStore` are either
 ``async`` (may trigger a network round-trip) or synchronous accessors
 that return only what has already been cached.
 
@@ -52,7 +52,7 @@ _T = TypeVar("_T")
 class PyPIPackageData:
     """Immutable-by-convention snapshot of one PyPI package.
 
-    Populated once by :meth:`PyPIDataStore._parse_package_data` and then
+    Populated once by `PyPIDataStore._parse_package_data` and then
     shared across every caller that requests the same package.  All
     mutable collections use ``field(default_factory=…)`` so that each
     instance owns its own lists / dicts.
@@ -100,7 +100,7 @@ class PyPIPackageData:
 
         Returns:
             Version strings in descending order (inherits the sort order
-            of :attr:`parsed_versions`).
+            of `parsed_versions`).
         """
         result: List[str] = []
 
@@ -207,7 +207,7 @@ class PyPIDataStore:
       package (or the same ``name==version`` dependency list) while a
       fetch is already running — the first caller performs the request and
       every later caller awaits its result;
-    * a :class:`asyncio.Semaphore` caps how many *distinct* fetches may be
+    * a `asyncio.Semaphore` caps how many *distinct* fetches may be
       outbound at once.
 
     A counting semaphore alone cannot deduplicate: it admits
@@ -220,7 +220,7 @@ class PyPIDataStore:
     errors must stay recoverable).
 
     Args:
-        http_client: A pre-configured :class:`HTTPClient` instance (owns
+        http_client: A pre-configured `HTTPClient` instance (owns
             connection pool / session).
         concurrent_limit: Maximum number of PyPI fetches that may be
             in-flight at once.  Defaults to ``10``.
@@ -283,7 +283,7 @@ class PyPIDataStore:
             name: PyPI package name (any casing / underscore style).
 
         Returns:
-            A :class:`PyPIPackageData` populated from the latest PyPI
+            A `PyPIPackageData` populated from the latest PyPI
             JSON response.  Every caller for the same normalized name
             receives the *same* object.
 
@@ -352,7 +352,7 @@ class PyPIDataStore:
 
         1. Per-version dependency cache (``_version_deps_cache``).
         2. Already-populated fields inside the cached
-           :class:`PyPIPackageData` (``latest_dependencies`` or
+           `PyPIPackageData` (``latest_dependencies`` or
            ``dependencies_cache``).
         3. A targeted ``/pypi/{name}/{version}/json`` fetch, coalesced per
            ``name==version`` key and throttled by the semaphore.
@@ -414,7 +414,7 @@ class PyPIDataStore:
         it in *inflight*; concurrent callers await that same task instead
         of starting a second fetch.
 
-        The task is awaited through :func:`asyncio.shield` so that one
+        The task is awaited through `asyncio.shield` so that one
         caller being cancelled neither cancels the shared fetch nor
         strands the other waiters.  ``asyncio.run`` cancels any leftover
         task during loop shutdown, so no work is orphaned.
@@ -527,7 +527,7 @@ class PyPIDataStore:
             name: Package name (any casing / underscore style).
 
         Returns:
-            The cached :class:`PyPIPackageData`, or ``None`` if the
+            The cached `PyPIPackageData`, or ``None`` if the
             package has not been fetched yet.
         """
         return self._package_data.get(_normalize(name))
@@ -555,7 +555,7 @@ class PyPIDataStore:
         """Check Python compatibility using only cached metadata.
 
         Returns ``True`` when the package has not been fetched yet — the
-        caller should call :meth:`get_package_data` first if a definitive
+        caller should call `get_package_data` first if a definitive
         answer is needed.
 
         Args:
@@ -564,7 +564,7 @@ class PyPIDataStore:
             python_version: Dot-separated Python version.
 
         Returns:
-            Compatibility flag (see :meth:`PyPIPackageData.is_python_compatible`).
+            Compatibility flag (see `PyPIPackageData.is_python_compatible`).
         """
         pkg = self.get_cached_package(name)
         return pkg.is_python_compatible(version, python_version) if pkg else True
@@ -634,7 +634,7 @@ class PyPIDataStore:
         name: str,
         data: Dict[str, Any],
     ) -> PyPIPackageData:
-        """Transform a raw PyPI JSON response into :class:`PyPIPackageData`.
+        """Transform a raw PyPI JSON response into `PyPIPackageData`.
 
         Filters out versions that cannot be parsed by ``packaging`` and
         those with no associated file uploads.  The resulting
@@ -753,7 +753,7 @@ class PyPIDataStore:
 def _normalize(name: str) -> str:
     """Normalize a package name to its canonical PEP 503 form.
 
-    Thin alias for :func:`depkeeper.utils.naming.normalize_package_name`,
+    Thin alias for `depkeeper.utils.naming.normalize_package_name`,
     kept so cache keys here can never drift from the rule used by the
     parser, the analyzer and the models.
 

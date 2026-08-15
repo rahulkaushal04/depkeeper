@@ -282,7 +282,7 @@ def colorize_update_type(update_type: str) -> str:
 
     Args:
         update_type: Update classification, e.g. ``"major"`` (see
-            :func:`~depkeeper.utils.version_utils.get_update_type`).
+            `get_update_type`).
 
     Returns:
         Rich markup string, or *update_type* unchanged when the label has no

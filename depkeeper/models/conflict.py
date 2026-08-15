@@ -18,7 +18,7 @@ from depkeeper.utils.naming import normalize_package_name
 def _normalize_name(name: str) -> str:
     """Normalize a package name according to PEP 503.
 
-    Thin alias for :func:`depkeeper.utils.naming.normalize_package_name`,
+    Thin alias for `depkeeper.utils.naming.normalize_package_name`,
     so conflict endpoints stay comparable to ``Package.name`` keys.
     """
     return normalize_package_name(name)

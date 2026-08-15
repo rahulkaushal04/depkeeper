@@ -59,7 +59,7 @@ class Requirement:
     ) -> str:
         """Render the canonical ``requirements.txt`` representation.
 
-        Version specifiers are omitted when :attr:`url` is set, because a
+        Version specifiers are omitted when `url` is set, because a
         direct URL/VCS/local-path reference cannot carry a version specifier
         (doing so yields an uninstallable line).
 

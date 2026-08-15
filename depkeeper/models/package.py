@@ -20,7 +20,7 @@ from depkeeper.utils.version_utils import get_update_type, parse_version_lenient
 def _normalize_name(name: str) -> str:
     """Normalize a package name according to PEP 503.
 
-    Thin alias for :func:`depkeeper.utils.naming.normalize_package_name`,
+    Thin alias for `depkeeper.utils.naming.normalize_package_name`,
     so ``Package.name`` is always comparable to the keys used by the
     parser, data store and dependency analyzer.
 
@@ -70,9 +70,9 @@ class Package:
     def _parse_version(self, version: Optional[str]) -> Optional[Version]:
         """Parse and cache a version string.
 
-        Uses :func:`~depkeeper.utils.version_utils.parse_version_lenient`,
+        Uses `parse_version_lenient`,
         which also resolves a PEP 440 wildcard band (``"2.*"``) to its
-        release-prefix floor, so :meth:`has_update`/:attr:`requires_downgrade`
+        release-prefix floor, so `has_update`/`requires_downgrade`
         stay meaningful for a wildcard exact pin instead of treating it as
         unparseable.
 
@@ -80,7 +80,7 @@ class Package:
             version: Version string to parse.
 
         Returns:
-            Parsed :class:`~packaging.version.Version`, or ``None`` when the
+            Parsed `Version`, or ``None`` when the
             input is ``None`` or not PEP 440 compliant.
         """
         if version is None:
@@ -138,7 +138,7 @@ class Package:
         Args:
             conflicts: Detected conflicts affecting this package.
             resolved_version: Version that resolves the conflicts. When given,
-                it replaces :attr:`recommended_version`.
+                it replaces `recommended_version`.
         """
         self.conflicts = conflicts
         if resolved_version:
