@@ -364,10 +364,13 @@ Summary:
 1. All five verification commands pass on a clean `main`.
 2. Bump the version in **both** `depkeeper/__version__.py` and `pyproject.toml`.
 3. Move the `Unreleased` section of `CHANGELOG.md` into a dated release section.
-4. Tag `vX.Y.Z`, push with `--follow-tags`.
-5. `python -m build`, `twine check dist/*`, verify the wheel in a clean virtualenv.
-6. `twine upload` (rehearse on TestPyPI first), then `mkdocs gh-deploy --force`.
-7. Create the GitHub release from the tag using the changelog section.
+4. `python -m build`, `twine check dist/*`, verify the wheel in a clean virtualenv — catch a
+   packaging problem locally, before it reaches CI.
+5. Tag `vX.Y.Z` and push the tag. This is the trigger: `.github/workflows/publish.yml` verifies
+   the tag matches the bumped version, builds, publishes to PyPI via Trusted Publishing, and
+   deploys the versioned docs with the `latest` alias pointed at the new release. Nothing is
+   published by running commands locally.
+6. Create the GitHub release from the tag using the changelog section.
 
 > [!IMPORTANT]
 > A change that makes the same requirements file produce a different update plan is **at minimum

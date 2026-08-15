@@ -152,17 +152,21 @@ build and verification still run, so the failure is isolated and nothing partial
 Watch the run under **Actions** and confirm the `pypi.org/project/depkeeper/` page shows the new
 version before moving on.
 
-### 8. Publish the documentation
+### 8. Documentation deploys automatically — no manual step
 
-`.github/workflows/docs.yml` deploys automatically on every push to `main` that touches
-`docs/**` or `mkdocs.yml` — no manual step is required for the unversioned site. If you also want
-a versioned snapshot (the site's `mike` version provider supports this, but the deploy workflow
-does not invoke `mike` itself):
+Two independent workflows keep the docs site in sync, both using `mike` as the version provider:
 
-```bash
-mike deploy --push --update-aliases 0.2 latest
-mike set-default --push latest
-```
+- **`.github/workflows/docs.yml`** deploys every push to `main` that touches `docs/**` or
+  `mkdocs.yml` under the `dev` version, so docs-only fixes go live immediately without waiting
+  for a release. `dev` is never the default — it will not appear as `latest`.
+- **`.github/workflows/publish.yml`**, in its `docs` job (which runs only after the PyPI publish
+  succeeds), deploys the same commit under the release's own version number (e.g. `0.2.0`),
+  updates the `latest` alias to point to it, and sets `latest` as the site's default. This is what
+  keeps the docs shown at the bare site URL matching what is actually installable from PyPI —
+  `main` can be ahead of the latest release; the `latest` docs never are.
+
+Confirm the version selector on the deployed site shows the new version and that `latest` points
+to it.
 
 ### 9. Announce
 
