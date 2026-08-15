@@ -27,6 +27,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import httpx
 import pytest
 
+from depkeeper.constants import MAX_RETRY_AFTER_SECONDS
 from depkeeper.exceptions import NetworkError, PyPIError
 from depkeeper.utils.http import HTTPClient
 
@@ -475,6 +476,79 @@ class TestRateLimitResponses:
 
         assert exc_info.value.status_code == 429
         assert len(seen) == client._max_429_retries + 1
+
+    # -------------------------------------------------------------------
+    # A server-supplied Retry-After must never be trusted blindly: it is
+    # clamped to a sane maximum, and an RFC 7231 HTTP-date value (legal
+    # alongside delay-seconds) must not crash the client.
+    # -------------------------------------------------------------------
+
+    async def test_an_extreme_retry_after_is_clamped_not_honoured_verbatim(
+        self, instant_sleep: List[float]
+    ) -> None:
+        client = _client(
+            [_response(429, headers={"Retry-After": "31536000"}), _response(200)],
+            max_retries=1,
+        )
+
+        async with client:
+            response = await client.get(PYPI_URL)
+
+        assert response.status_code == 200
+        assert instant_sleep == [float(MAX_RETRY_AFTER_SECONDS)]
+
+    async def test_an_http_date_retry_after_does_not_crash_the_client(
+        self, instant_sleep: List[float]
+    ) -> None:
+        client = _client(
+            [
+                _response(
+                    429,
+                    headers={"Retry-After": "Wed, 21 Oct 2099 07:28:00 GMT"},
+                ),
+                _response(200),
+            ],
+            max_retries=1,
+        )
+
+        async with client:
+            response = await client.get(PYPI_URL)
+
+        assert response.status_code == 200
+        # Far enough in the future that the computed delay is clamped.
+        assert instant_sleep == [float(MAX_RETRY_AFTER_SECONDS)]
+
+    async def test_an_unparseable_retry_after_falls_back_to_one_second(
+        self, instant_sleep: List[float]
+    ) -> None:
+        client = _client(
+            [_response(429, headers={"Retry-After": "not-a-delay"}), _response(200)],
+            max_retries=1,
+        )
+
+        async with client:
+            await client.get(PYPI_URL)
+
+        assert instant_sleep == [1.0]
+
+    async def test_a_past_http_date_retry_after_never_sleeps_negative(
+        self, instant_sleep: List[float]
+    ) -> None:
+        client = _client(
+            [
+                _response(
+                    429,
+                    headers={"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"},
+                ),
+                _response(200),
+            ],
+            max_retries=1,
+        )
+
+        async with client:
+            await client.get(PYPI_URL)
+
+        assert instant_sleep == [0.0]
 
 
 class TestOutboundRateLimiting:

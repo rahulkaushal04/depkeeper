@@ -73,6 +73,7 @@ from depkeeper.utils.naming import normalize_package_name
 from depkeeper.utils.version_utils import (
     get_update_type,
     is_lower_bound,
+    parse_version_lenient,
     retained_specs,
     rewrite_version_specs,
     specs_allow_version,
@@ -113,6 +114,7 @@ __all__ = [
     # Version utilities
     "get_update_type",
     "is_lower_bound",
+    "parse_version_lenient",
     "retained_specs",
     "rewrite_version_specs",
     "specs_allow_version",

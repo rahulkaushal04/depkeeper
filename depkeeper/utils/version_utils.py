@@ -120,6 +120,54 @@ def _normalize_release(version: Version) -> Tuple[int, int, int]:
     return major, minor, patch
 
 
+def parse_version_lenient(version: Optional[str]) -> Optional[Version]:
+    """Parse *version*, tolerating a PEP 440 wildcard band as its floor.
+
+    A concrete version (``2.3.3``) parses exactly as
+    :func:`~packaging.version.parse` would. A wildcard band (``2.*``) is not
+    itself a valid :class:`Version` — a wildcard is only meaningful inside a
+    :class:`~packaging.specifiers.SpecifierSet` — so it is resolved from its
+    release prefix instead, giving ``2.*`` the same comparable value as
+    ``2``. This lets callers that need a comparable version (major-boundary
+    checks, "is an update available") treat a wildcard exact pin
+    (``pkg==2.*``) sensibly instead of as unparseable.
+
+    Args:
+        version: Version string, wildcard band, or ``None``.
+
+    Returns:
+        The parsed :class:`Version`, or ``None`` when *version* is ``None``
+        or cannot be resolved to a version by either path.
+
+    Examples:
+        >>> parse_version_lenient("2.3.3") == Version("2.3.3")
+        True
+        >>> parse_version_lenient("2.*") == Version("2")
+        True
+        >>> parse_version_lenient("not-a-version") is None
+        True
+    """
+    if version is None:
+        return None
+
+    try:
+        return Version(version)
+    except InvalidVersion:
+        pass
+
+    if "*" not in version:
+        return None
+
+    prefix = version.rstrip("*").rstrip(".")
+    if not prefix:
+        return None
+
+    try:
+        return Version(prefix)
+    except InvalidVersion:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Specifier-set helpers
 # ---------------------------------------------------------------------------
@@ -225,10 +273,15 @@ def specs_allow_version(specs: Iterable[Spec], version: str) -> bool:
     except InvalidSpecifier:
         return True
 
+    # Parsed explicitly rather than passed as a string: packaging 26.0
+    # changed contains() to return False for a bad version instead of
+    # raising, which would silently veto it instead of permitting it.
     try:
-        return specifier_set.contains(version, prereleases=True)
+        parsed_version = Version(version)
     except InvalidVersion:
         return True
+
+    return specifier_set.contains(parsed_version, prereleases=True)
 
 
 def rewrite_version_specs(specs: Sequence[Spec], new_version: str) -> List[Spec]:

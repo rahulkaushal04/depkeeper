@@ -33,6 +33,10 @@ DEFAULT_TIMEOUT: Final[int] = 30
 #: Maximum number of retries for failed HTTP requests.
 DEFAULT_MAX_RETRIES: Final[int] = 3
 
+#: Upper bound (in seconds) on how long a ``429`` response's ``Retry-After``
+#: value may delay the client, regardless of what the server sends.
+MAX_RETRY_AFTER_SECONDS: Final[int] = 120
+
 # ---------------------------------------------------------------------------
 # Requirement file patterns and directives
 # ---------------------------------------------------------------------------

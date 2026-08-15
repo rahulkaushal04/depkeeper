@@ -10,11 +10,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from packaging.version import InvalidVersion, Version, parse
+from packaging.version import Version
 
 from depkeeper.models.conflict import Conflict
 from depkeeper.utils.naming import normalize_package_name
-from depkeeper.utils.version_utils import get_update_type
+from depkeeper.utils.version_utils import get_update_type, parse_version_lenient
 
 
 def _normalize_name(name: str) -> str:
@@ -70,6 +70,12 @@ class Package:
     def _parse_version(self, version: Optional[str]) -> Optional[Version]:
         """Parse and cache a version string.
 
+        Uses :func:`~depkeeper.utils.version_utils.parse_version_lenient`,
+        which also resolves a PEP 440 wildcard band (``"2.*"``) to its
+        release-prefix floor, so :meth:`has_update`/:attr:`requires_downgrade`
+        stay meaningful for a wildcard exact pin instead of treating it as
+        unparseable.
+
         Args:
             version: Version string to parse.
 
@@ -81,13 +87,7 @@ class Package:
             return None
 
         if version not in self._parsed_versions:
-            try:
-                parsed = parse(version)
-                self._parsed_versions[version] = (
-                    parsed if isinstance(parsed, Version) else None
-                )
-            except InvalidVersion:
-                self._parsed_versions[version] = None
+            self._parsed_versions[version] = parse_version_lenient(version)
 
         return self._parsed_versions[version]
 

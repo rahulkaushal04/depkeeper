@@ -84,6 +84,77 @@ class TestConstraintAwareRecommendation:
 
 
 @pytest.mark.unit
+class TestWildcardPinStillGetsRecommendations:
+    """``pkg==2.*`` must not silently disable update checking."""
+
+    def test_wildcard_pin_still_receives_a_recommendation(
+        self, checker: VersionChecker
+    ) -> None:
+        pkg = checker._build_package_from_data(
+            _pkg_data("flask", VERSIONS), "2.*", None
+        )
+
+        assert pkg.recommended_version == "2.3.3"
+        assert pkg.current_version == "2.*"
+
+    def test_wildcard_pin_respects_declared_constraints(
+        self, checker: VersionChecker
+    ) -> None:
+        pkg = checker._build_package_from_data(
+            _pkg_data("flask", VERSIONS), "2.*", [("<", "2.3")]
+        )
+
+        assert pkg.recommended_version == "2.2.5"
+
+    def test_wildcard_pin_never_crosses_a_major_boundary(
+        self, checker: VersionChecker
+    ) -> None:
+        pkg = checker._build_package_from_data(
+            _pkg_data("flask", VERSIONS), "3.*", None
+        )
+
+        assert pkg.recommended_version == "3.0.0"
+
+    def test_multi_segment_wildcard_pin_anchors_on_the_right_major(
+        self, checker: VersionChecker
+    ) -> None:
+        pkg = checker._build_package_from_data(
+            _pkg_data("flask", VERSIONS), "2.2.*", None
+        )
+
+        assert pkg.recommended_version == "2.3.3"
+
+    def test_recommendation_is_visible_as_an_outdated_update(
+        self, checker: VersionChecker
+    ) -> None:
+        pkg = checker._build_package_from_data(
+            _pkg_data("flask", VERSIONS), "2.*", None
+        )
+
+        assert pkg.has_update() is True
+        assert pkg.requires_downgrade is False
+        status, installed, latest, recommended = pkg.get_status_summary()
+        assert status == "outdated"
+        assert installed == "2.*"
+        assert recommended == "2.3.3"
+
+    def test_update_command_selects_it_for_writing(
+        self, checker: VersionChecker
+    ) -> None:
+        from depkeeper.commands.update import _find_updates
+        from depkeeper.models.requirement import Requirement
+
+        req = Requirement(name="flask", specs=[("==", "2.*")], line_number=1)
+        pkg = checker._build_package_from_data(
+            _pkg_data("flask", VERSIONS), "2.*", None
+        )
+
+        updates = _find_updates([pkg], [req])
+
+        assert updates == [(req, pkg, "2.3.3")]
+
+
+@pytest.mark.unit
 class TestConstraintForwarding:
     """The retained constraints of a requirement reach the checker."""
 

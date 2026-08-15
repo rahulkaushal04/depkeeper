@@ -490,8 +490,11 @@ def _find_updates(
     Args:
         packages: List of checked packages with version metadata from
             :class:`VersionChecker` and optionally adjusted by
-            :class:`DependencyAnalyzer`.
-        requirements: Original parsed requirements from the file.
+            :class:`DependencyAnalyzer`. Paired positionally with
+            *requirements* (same length, same order), so duplicate
+            declarations of the same package are each handled independently.
+        requirements: Original parsed requirements from the file, one per
+            entry in *packages*.
         pin: Whether the writer will replace all specifiers with an exact
             ``==`` pin. When ``True``, no declared constraint survives, so
             the constraint compatibility check is skipped.
@@ -506,14 +509,24 @@ def _find_updates(
     """
     updates: List[Tuple[Requirement, Package, str]] = []
 
-    req_map: Dict[str, Requirement] = {
-        normalize_package_name(r.name): r for r in requirements
-    }
+    if len(packages) != len(requirements):
+        logger.warning(
+            "packages (%d) and requirements (%d) length mismatch; "
+            "some requirements may not be checked for updates",
+            len(packages),
+            len(requirements),
+        )
 
-    for pkg in packages:
-        req = req_map.get(normalize_package_name(pkg.name))
-        if not req:
-            # Defensive: every package originates from a requirement.
+    for req, pkg in zip(requirements, packages):
+        # A mismatch means the lists weren't paired as documented above —
+        # skip rather than pairing a requirement with an unrelated package.
+        if normalize_package_name(req.name) != normalize_package_name(pkg.name):
+            logger.warning(
+                "Requirement/package name mismatch at this position "
+                "(%s vs %s); skipping",
+                req.name,
+                pkg.name,
+            )
             continue
 
         # Skip direct references (VCS/URL/local-path/editable installs). These

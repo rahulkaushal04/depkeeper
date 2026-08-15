@@ -811,8 +811,11 @@ class RequirementsParser:
                 if "#egg=" in requirement_line:
                     url_part, egg_part = requirement_line.split("#egg=", 1)
                     # An egg fragment may be followed by other fragment keys
-                    # (&subdirectory=...) or by trailing options.
-                    egg_name = egg_part.split("&")[0].split()[0]
+                    # (&subdirectory=...) or by trailing options. An empty
+                    # fragment carries no name — treated like "#egg=" being
+                    # absent, so the caller's inference fallback applies.
+                    egg_tokens = egg_part.split("&")[0].split()
+                    egg_name = egg_tokens[0] if egg_tokens else None
                     return {
                         "scheme": scheme,
                         "path": url_part[len(scheme) :],
@@ -871,7 +874,11 @@ class RequirementsParser:
 
         if "#egg=" in requirement_line:
             path_part, egg_part = requirement_line.split("#egg=", 1)
-            egg_name = egg_part.split("&")[0].split()[0]
+            # See the matching comment in `_parse_direct_url`: an empty
+            # fragment yields no name rather than crashing, falling back to
+            # the caller's own path-based inference.
+            egg_tokens = egg_part.split("&")[0].split()
+            egg_name = egg_tokens[0] if egg_tokens else None
             return {"path": path_part, "egg": egg_name}
 
         return {"path": requirement_line, "egg": None}
@@ -911,7 +918,10 @@ class RequirementsParser:
             Inferred package name, or ``None`` if the URL has no meaningful
             path segments.
         """
-        url_path = url.split("://", 1)[1] if "://" in url else url
+        # A URL fragment or query string is never part of the package name —
+        # strip it before inspecting path segments.
+        url_path = url.split("#", 1)[0].split("?", 1)[0]
+        url_path = url_path.split("://", 1)[1] if "://" in url_path else url_path
         url_path = url_path.rstrip("/")
 
         if url_path.endswith(".git"):

@@ -42,12 +42,13 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, Dict, List, Optional, Sequence, Tuple
-from packaging.version import InvalidVersion, parse
+from packaging.version import InvalidVersion
 
 from depkeeper.exceptions import NetworkError
 from depkeeper.models.package import Package
 from depkeeper.utils.logger import get_logger
 from depkeeper.utils.version_utils import (
+    parse_version_lenient,
     retained_specs,
     specs_allow_version,
     specs_to_string,
@@ -346,10 +347,7 @@ class VersionChecker:
 
         if current_version:
             try:
-                current_parsed = parse(current_version)
-                current_major = (
-                    current_parsed.release[0] if current_parsed.release else None
-                )
+                current_major = self._major_from_version(current_version)
 
                 if current_major is not None:
                     compatible_in_major = pkg_data.get_python_compatible_versions(
@@ -438,6 +436,30 @@ class VersionChecker:
             recommended_version=recommended_version,
             metadata=metadata,
         )
+
+    @staticmethod
+    def _major_from_version(version: str) -> Optional[int]:
+        """Return the major release component of *version*.
+
+        Delegates to :func:`~depkeeper.utils.version_utils.parse_version_lenient`,
+        which also accepts a PEP 440 wildcard band (``2.*``) so a wildcard
+        exact pin still anchors the major-boundary search below instead of
+        being rejected as unparseable.
+
+        Args:
+            version: Version string, or a wildcard band such as ``"2.*"``.
+
+        Returns:
+            The major release number.
+
+        Raises:
+            InvalidVersion: *version* cannot be resolved to a major number.
+        """
+        parsed = parse_version_lenient(version)
+        if parsed is None:
+            raise InvalidVersion(f"Invalid version: '{version}'")
+
+        return parsed.release[0] if parsed.release else None
 
     @staticmethod
     def _filter_by_constraints(

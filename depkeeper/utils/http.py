@@ -12,6 +12,8 @@ import time
 import httpx
 import random
 import asyncio
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Optional, Dict, Iterable, Callable, cast
 
 from depkeeper.utils.logger import get_logger
@@ -20,10 +22,47 @@ from depkeeper.exceptions import NetworkError, PyPIError
 from depkeeper.constants import (
     DEFAULT_TIMEOUT,
     DEFAULT_MAX_RETRIES,
+    MAX_RETRY_AFTER_SECONDS,
     USER_AGENT_TEMPLATE,
 )
 
 logger = get_logger("http")
+
+
+def _parse_retry_after(header_value: Optional[str]) -> float:
+    """Parse a ``Retry-After`` header value into a clamped delay in seconds.
+
+    Per RFC 7231 section 7.1.3, the value is either ``delay-seconds`` or an
+    HTTP-date. Falls back to 1 second when missing or unparseable. The
+    result is always clamped to ``[0, MAX_RETRY_AFTER_SECONDS]`` so a
+    malformed or extreme value can never stall the client indefinitely.
+
+    Args:
+        header_value: The raw ``Retry-After`` header value, or ``None``.
+
+    Returns:
+        Delay in seconds, in ``[0, MAX_RETRY_AFTER_SECONDS]``.
+    """
+    if header_value is None:
+        return 1.0
+
+    header_value = header_value.strip()
+
+    try:
+        delay = float(int(header_value))
+    except ValueError:
+        try:
+            target = parsedate_to_datetime(header_value)
+        except (TypeError, ValueError):
+            return 1.0
+
+        if target.tzinfo is None:
+            # Obsolete RFC 850 dates are assumed GMT, per RFC 7231 section 7.1.1.1.
+            target = target.replace(tzinfo=timezone.utc)
+
+        delay = (target - datetime.now(timezone.utc)).total_seconds()
+
+    return max(0.0, min(delay, float(MAX_RETRY_AFTER_SECONDS)))
 
 
 class HTTPClient:
@@ -127,9 +166,10 @@ class HTTPClient:
 
         - Timeouts, network errors and 5xx responses are retried up to
           ``max_retries`` times with exponential backoff plus jitter.
-        - ``429`` responses honor the ``Retry-After`` header and are capped
-          separately by ``_max_429_retries``. Because the loop ``continue``s,
-          a 429 retry also consumes one of the outer ``max_retries`` attempts.
+        - ``429`` responses honor the ``Retry-After`` header (see
+          :func:`_parse_retry_after`) and are capped separately by
+          ``_max_429_retries``. Because the loop ``continue``s, a 429 retry
+          also consumes one of the outer ``max_retries`` attempts.
         - ``404`` raises :class:`PyPIError` immediately; other 4xx responses
           raise :class:`NetworkError`. Client errors are not retried because
           repeating them cannot change the outcome.
@@ -170,9 +210,11 @@ class HTTPClient:
                             url=clean_url,
                             status_code=429,
                         )
-                    retry_after = int(response.headers.get("Retry-After", "1"))
+                    retry_after = _parse_retry_after(
+                        response.headers.get("Retry-After")
+                    )
                     logger.warning(
-                        "Rate limited (429), retrying after %ds (%d/%d)",
+                        "Rate limited (429), retrying after %.1fs (%d/%d)",
                         retry_after,
                         retry_429_count,
                         self._max_429_retries,

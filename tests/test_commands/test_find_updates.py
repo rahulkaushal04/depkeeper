@@ -200,3 +200,43 @@ def test_unrelated_package_still_does_not_match() -> None:
     pkg = _pkg("django", current="4.0.0", recommended="4.2.0")
 
     assert _find_updates([pkg], [req]) == []
+
+
+# ---------------------------------------------------------------------------
+# Duplicate requirement lines must each match their own package.
+# ---------------------------------------------------------------------------
+
+
+def test_duplicate_requirement_lines_each_produce_their_own_update() -> None:
+    """Two lines pinning the same package must both be selected for update."""
+    req_line1 = Requirement(name="click", specs=[("==", "8.0.0")], line_number=1)
+    req_line3 = Requirement(name="click", specs=[("==", "8.0.0")], line_number=3)
+
+    pkg_line1 = _pkg("click", current="8.0.0", recommended="8.4.2")
+    pkg_line3 = _pkg("click", current="8.0.0", recommended="8.4.2")
+
+    updates = _find_updates([pkg_line1, pkg_line3], [req_line1, req_line3])
+
+    assert updates == [
+        (req_line1, pkg_line1, "8.4.2"),
+        (req_line3, pkg_line3, "8.4.2"),
+    ]
+    assert updates[0][0].line_number == 1
+    assert updates[1][0].line_number == 3
+
+
+def test_duplicate_requirements_with_different_constraints_use_their_own() -> None:
+    """Each duplicate must be checked against its own declared constraints."""
+    req_bounded = Requirement(
+        name="requests", specs=[(">=", "2.20"), ("<", "2.32")], line_number=1
+    )
+    req_unbounded = Requirement(name="requests", specs=[("==", "2.25.0")], line_number=3)
+
+    pkg_bounded = _pkg("requests", current="2.20", recommended="2.34.2")
+    pkg_unbounded = _pkg("requests", current="2.25.0", recommended="2.34.2")
+
+    updates = _find_updates(
+        [pkg_bounded, pkg_unbounded], [req_bounded, req_unbounded]
+    )
+
+    assert updates == [(req_unbounded, pkg_unbounded, "2.34.2")]

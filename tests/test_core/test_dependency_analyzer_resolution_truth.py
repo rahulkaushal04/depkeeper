@@ -352,3 +352,73 @@ class TestInvariantHoldsOnEveryPath:
 
         assert result.resolved_versions["stable"].resolved == "1.0.0"
         _assert_single_source_of_truth(packages, result)
+
+
+# ---------------------------------------------------------------------------
+# A non-PEP-440 current/proposed version must never fabricate a conflict.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestNonPep440VersionNeverFabricatesAConflict:
+    """A ``==`` pin the parser accepted but ``packaging`` cannot parse.
+
+    ``core/parser.py`` does not validate the text after ``==``, so a
+    requirements file can legitimately contain a pin like
+    ``mylib==1.0.0.RELEASE``. That string flows into the resolver's update
+    set unchanged and must not be treated as violating another package's
+    dependency on it.
+    """
+
+    @staticmethod
+    def _scenario() -> Tuple[FakePyPIStore, List[Package]]:
+        store = FakePyPIStore(
+            available={
+                "pkg-a": _pkg_data("pkg-a", ["1.0.0", "2.0.0"]),
+                "pkg-b": _pkg_data("pkg-b", ["1.0.0"]),
+            },
+            dependencies={
+                "pkg-a==1.0.0": ["pkg-b>=1.0"],
+                "pkg-a==2.0.0": ["pkg-b>=1.0"],
+            },
+        )
+        packages = [
+            Package(
+                name="pkg-a",
+                current_version="1.0.0",
+                recommended_version="2.0.0",
+            ),
+            Package(
+                name="pkg-b",
+                current_version="1.0.0.RELEASE",
+                recommended_version="1.0.0.RELEASE",
+            ),
+        ]
+        return store, packages
+
+    async def test_legitimate_upgrade_is_not_discarded(self) -> None:
+        store, packages = self._scenario()
+
+        result = await DependencyAnalyzer(
+            data_store=store
+        ).resolve_and_annotate_conflicts(packages)
+
+        assert result.packages_with_conflicts == 0
+        assert result.resolved_versions["pkg-a"].resolved == "2.0.0"
+        assert result.resolved_versions["pkg-a"].status == ResolutionStatus.KEPT_RECOMMENDED
+        _assert_single_source_of_truth(packages, result)
+
+    async def test_find_cross_conflicts_treats_it_as_satisfied(self) -> None:
+        store, packages = self._scenario()
+        analyzer = DependencyAnalyzer(data_store=store)
+        update_set = {"pkg-a": "2.0.0", "pkg-b": "1.0.0.RELEASE"}
+
+        conflicts = await analyzer._find_cross_conflicts(packages, update_set)
+
+        assert conflicts == []
+
+    def test_satisfies_treats_unparseable_version_as_satisfied(self) -> None:
+        assert _satisfies("1.0.0.RELEASE", ">=1.0") is True
+        assert _satisfies_all("1.0.0.RELEASE", [
+            make_conflict("pkg-a", ">=1.0", "pkg-b", conflicting_version="1.0.0.RELEASE")
+        ]) is True

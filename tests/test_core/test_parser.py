@@ -319,6 +319,30 @@ class TestDirectReferences:
         with pytest.raises(ParseError, match="#egg="):
             parser.parse_line("file://", 1)
 
+    @pytest.mark.parametrize(
+        ("line", "expected_name"),
+        [
+            ("https://example.com/pkg.tar.gz#egg=", "pkg-tar-gz"),
+            ("git+https://github.com/org/repo.git#egg=", "repo"),
+        ],
+        ids=["archive", "git"],
+    )
+    def test_empty_egg_fragment_falls_back_to_inference_instead_of_crashing(
+        self, parser: RequirementsParser, line: str, expected_name: str
+    ) -> None:
+        """A bare ``#egg=`` must fall back to URL inference, not crash."""
+        req = parser.parse_line(line, 1)
+
+        assert req is not None
+        assert req.name == expected_name
+        assert "egg" not in req.name
+
+    def test_empty_egg_fragment_with_uninferable_url_still_raises_parse_error(
+        self, parser: RequirementsParser
+    ) -> None:
+        with pytest.raises(ParseError, match="#egg="):
+            parser.parse_line("file://#egg=", 1)
+
     def test_inference_from_an_archive_url_is_unreliable(
         self, parser: RequirementsParser, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -388,6 +412,20 @@ class TestDirectReferences:
         req = parser.parse_file(req_file)[0]
 
         assert req.name == "internal-sdk"
+
+    def test_local_path_empty_egg_fragment_falls_back_to_directory_name(
+        self, tmp_path: Path, parser: RequirementsParser
+    ) -> None:
+        checkout = tmp_path / "vendor" / "acme-sdk-python"
+        checkout.mkdir(parents=True)
+        req_file = tmp_path / "requirements.txt"
+        req_file.write_text(
+            "-e ./vendor/acme-sdk-python#egg=\n", encoding="utf-8"
+        )
+
+        req = parser.parse_file(req_file)[0]
+
+        assert req.name == "acme-sdk-python"
 
 
 # ---------------------------------------------------------------------------

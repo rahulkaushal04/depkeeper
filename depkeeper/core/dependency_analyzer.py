@@ -257,9 +257,37 @@ def _satisfies(version: Optional[str], required_spec: str) -> bool:
     if version is None:
         return True
     try:
-        return version in SpecifierSet(required_spec)
-    except (InvalidSpecifier, InvalidVersion):
+        specifier = SpecifierSet(required_spec)
+    except InvalidSpecifier:
         return True
+    return _specifier_allows(version, specifier)
+
+
+def _specifier_allows(version: Optional[str], specifier: SpecifierSet) -> bool:
+    """Return ``True`` when *version* satisfies an already-parsed *specifier*.
+
+    Same permissive-on-unparseable-version handling as :func:`_satisfies`,
+    for callers that already hold a :class:`SpecifierSet` rather than a
+    specifier string. *version* is parsed explicitly first rather than
+    relying on ``in specifier`` to raise on a bad version: as of
+    ``packaging`` 26.0, that no longer raises ``InvalidVersion`` for an
+    unparseable version — it returns ``False``, which would silently veto
+    the version instead of treating it as satisfied.
+
+    Args:
+        version: Candidate version string, or ``None``.
+        specifier: Already-parsed specifier set.
+
+    Returns:
+        Whether the candidate is allowed by the specifier.
+    """
+    if version is None:
+        return True
+    try:
+        parsed_version = parse(version)
+    except InvalidVersion:
+        return True
+    return parsed_version in specifier
 
 
 def _satisfies_all(version: Optional[str], conflicts: List[Conflict]) -> bool:
@@ -753,7 +781,7 @@ class DependencyAnalyzer:
                 if (
                     target_version
                     and req.specifier
-                    and target_version not in req.specifier
+                    and not _specifier_allows(target_version, req.specifier)
                 ):
                     cross_conflicts.append(
                         Conflict(
@@ -977,7 +1005,9 @@ class DependencyAnalyzer:
                 return version_str
 
             # Proposed target version satisfies the specifier directly
-            if target_proposed_version and target_proposed_version in target_spec:
+            if target_proposed_version and _specifier_allows(
+                target_proposed_version, target_spec
+            ):
                 logger.debug(
                     "%s==%s requires %s%s; satisfied by %s==%s",
                     source_name,
