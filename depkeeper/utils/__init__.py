@@ -1,12 +1,12 @@
-"""
-Utility helpers for depkeeper.
+"""Utility helpers for depkeeper.
 
-This package provides reusable utilities used across depkeeper, including:
+Reusable utilities shared across depkeeper:
 
 - Console output helpers (Rich-based)
 - Logging configuration and retrieval
 - Filesystem safety helpers
 - Async HTTP client utilities
+- Package-name canonicalization (PEP 503)
 - Version comparison helpers
 
 Only symbols listed in ``__all__`` are considered part of the public API.
@@ -61,10 +61,24 @@ from depkeeper.utils.console import (
 from depkeeper.utils.http import HTTPClient
 
 # ---------------------------------------------------------------------------
+# Naming utilities
+# ---------------------------------------------------------------------------
+
+from depkeeper.utils.naming import normalize_package_name
+
+# ---------------------------------------------------------------------------
 # Version utilities
 # ---------------------------------------------------------------------------
 
-from depkeeper.utils.version_utils import get_update_type
+from depkeeper.utils.version_utils import (
+    get_update_type,
+    is_lower_bound,
+    parse_version_lenient,
+    retained_specs,
+    rewrite_version_specs,
+    specs_allow_version,
+    specs_to_string,
+)
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -95,6 +109,14 @@ __all__ = [
     "create_timestamped_backup",
     # HTTP
     "HTTPClient",
+    # Naming
+    "normalize_package_name",
     # Version utilities
     "get_update_type",
+    "is_lower_bound",
+    "parse_version_lenient",
+    "retained_specs",
+    "rewrite_version_specs",
+    "specs_allow_version",
+    "specs_to_string",
 ]

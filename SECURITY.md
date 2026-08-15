@@ -1,259 +1,145 @@
-# depkeeper Security Policy
+# Security Policy
 
-We take the security of **depkeeper** seriously. This document outlines how we handle
-vulnerability reports, which versions are supported, and how users can stay secure.
+## Supported versions
 
----
+| Version | Supported |
+|---|---|
+| `0.1.x` | Yes |
+| `< 0.1` | No |
 
-## 🔐 Supported Versions
-
-We provide security patches only for the latest `0.1.x` series.
-
-| Version   | Supported |
-| --------- | --------- |
-| **0.1.x** | ✔️ Yes    |
-| **< 0.1** | ❌ No     |
-
-As depkeeper is in early development, we strongly recommend upgrading to the **latest release** at all times.
+depkeeper is in early development. Security patches are provided only for the latest `0.1.x`
+release; upgrade rather than expect a backport.
 
 ---
 
-## 🚨 Reporting a Vulnerability
+## Reporting a vulnerability
 
-**Do NOT create public GitHub issues for security vulnerabilities.**
+> [!WARNING]
+> **Do not open a public GitHub issue for a security vulnerability.**
 
-To responsibly disclose a vulnerability, please use one of the following private channels:
+Use a private channel:
 
-- The repository’s **Security** tab → **Report a vulnerability**
+- The repository's **Security** tab → **Report a vulnerability**
+  (<https://github.com/rahulkaushal04/depkeeper/security/advisories/new>)
 - A **private GitHub Discussion** with the maintainers
 
-We appreciate coordinated disclosure and will work with you to verify, fix, and publicly disclose issues responsibly.
+### What to include
 
-### Include in Your Report
+1. **Description** — what the issue is.
+2. **Impact** — what an attacker can achieve.
+3. **Affected versions** — which versions you tested.
+4. **Reproduction steps** — enough for us to verify it.
+5. **Proof of concept** — if available.
+6. **Suggested fix** — if you have one.
 
-1. **Description** - Clear explanation of the issue
-2. **Impact** - What an attacker could achieve
-3. **Affected Versions** - Specific versions tested
-4. **Reproduction Steps** - Required to verify the issue
-5. **Proof of Concept (PoC)** - If available
-6. **Potential Fix** - If you have thoughts or patches
-
-Example format:
-
-```
-
-Subject: [SECURITY] Vulnerability in requirements parser
+```text
+Subject: [SECURITY] Path traversal via -r include directive
 
 Description:
-A crafted requirements.txt triggers arbitrary code execution …
+A requirements file containing `-r ../../../etc/example.txt` causes `depkeeper update`
+to write outside the invocation directory.
 
 Impact:
-Remote code execution during dependency checks …
+Arbitrary file modification with the privileges of the invoking user.
 
 Affected Versions:
-0.1.0 - 0.1.5
+0.1.0
 
 Reproduction:
-
-1. Create file X
-2. Run `depkeeper check`
-3. Observe behavior
-
-Proof of Concept:
-[link or attachment]
+1. Create requirements.txt containing the directive above
+2. Run `depkeeper update -y`
+3. Observe the write outside the project directory
 
 Suggested Fix:
-Sanitize inputs in parser and enforce safe evaluation rules.
-
+Confine include resolution with utils.filesystem.validate_path.
 ```
 
----
+### What to expect
 
-## ⏱️ What to Expect
+| Stage | Target |
+|---|---|
+| Initial acknowledgement | 48 hours |
+| Validation decision | 5 business days |
+| Status updates | every 5–7 days |
+| Resolution for critical issues | within 30 days |
 
-### Response Timeline
+Our process: acknowledge → investigate and validate → develop and test a fix → coordinate
+disclosure with you → publish a GitHub Security Advisory → credit you, if you wish.
 
-- **48 hours** → Initial acknowledgment
-- **5 business days** → Validation decision
-- **Every 5-7 days** → Status updates
-- **Within 30 days** → Target resolution for critical vulnerabilities
-
-### Our Process
-
-1. Acknowledge receipt
-2. Investigate & validate
-3. Develop and test a fix
-4. Coordinate disclosure with reporter
-5. Publish a GitHub Security Advisory
-6. Credit researcher (if desired)
+When a vulnerability is fixed we publish an advisory at
+<https://github.com/rahulkaushal04/depkeeper/security/advisories>, ship a patched release, record
+a `Security` entry in [CHANGELOG.md](CHANGELOG.md), and announce it in the GitHub release notes.
 
 ---
 
-## 📣 Security Advisory Process
+## Scope
 
-When a vulnerability is fixed, we will:
+### In scope
 
-- Publish a **GitHub Security Advisory**
-- Release a **patched version**
-- Update `CHANGELOG.md` with a `[SECURITY]` entry
-- Announce the fix through GitHub Releases
+- Parser, checker, resolver and writer logic, including malicious or malformed requirements files
+- Unsafe file operations: path traversal, symlink handling, permission or ownership changes
+- Any code execution triggered by analysed input
+- Transport security: TLS verification, downgrade, SSRF, request handling
+- Integrity controls, in particular the `--hash` handling described below
+- Denial of service reachable with a realistically sized input file
 
-Advisories are published at:
-https://github.com/rahulkaushal04/depkeeper/security/advisories
+### Out of scope
 
----
-
-## 🛡️ Scope of Security Reports
-
-### In Scope
-
-- Parser, resolver, updater logic
-- Requirements file handling (malicious input)
-- CLI command injection / unsafe shell execution
-- Unsafe file operations or path traversal
-- SSRF, MITM, insecure HTTP behavior
-- Authentication issues with private indices
-- Dependency chain vulnerabilities affecting depkeeper
-
-### Out of Scope
-
-- Vulnerabilities in **third-party dependencies**
-- DoS requiring extreme resources
-- Social engineering
-- Physical access attacks
-- Developer-only tooling issues
-- Unsupported versions
+- Vulnerabilities in third-party dependencies (report those upstream; tell us if depkeeper's usage
+  makes them exploitable)
+- Denial of service requiring extreme resources or an input beyond the 10 MB file limit
+- Social engineering and physical access attacks
+- Issues affecting unsupported versions
+- Features depkeeper does not implement — for example private-index authentication, which does not
+  exist (see [Limitations](https://rahulkaushal04.github.io/depkeeper/reference/limitations/))
 
 ---
 
-## 🎖️ Researcher Recognition
+## Security model
 
-While depkeeper currently has **no paid bug bounty program**, we do:
+Context for reviewers assessing depkeeper for use in a controlled environment. Mechanisms are
+documented at <https://rahulkaushal04.github.io/depkeeper/guides/operations/#security-posture>.
 
-- Credit reporters in advisories
-- Mention them in the changelog
-- Add them to contributor acknowledgments
-- Provide signed recommendation letters (if requested)
+| Property | Behaviour |
+|---|---|
+| Code execution | depkeeper **never** imports, installs, builds or executes the packages it analyses. It reads JSON metadata only. |
+| Network destinations | `https://pypi.org` only, with certificate verification always enabled. There is no flag to disable verification. |
+| Outbound data | Package **names**, as URL path segments. Versions, comments and file contents never leave the machine. |
+| Credentials | None are read, stored or transmitted. depkeeper has no authentication support. |
+| Persisted state | None outside the working directory. No cache directory, no writes to `$HOME`. |
+| File writes | Only the requirements files reached from the file you named, plus optional backups beside them. |
+| Write integrity | Atomic replace with `fsync`, file-mode preservation, and rollback of a partially committed multi-file batch. |
+| Input limits | 10 MB per file. |
+| Parsing safety | No `eval`, no shell invocation, no dynamic import of analysed content. Version and specifier handling is delegated to `packaging`. |
+| Hash integrity | Updates that would strip `--hash` entries are **refused** unless `--allow-hash-removal` is passed explicitly. |
+| Path controls | `utils.filesystem.validate_path` exists to confine a resolved path to a base directory, but it is **not** applied to `-r`/`-c` include resolution or to `update`'s write targets — see the residual risk below. |
 
-A bounty program may be introduced in the future.
+### Known residual risks
 
----
-
-## 🔒 Security Best Practices for depkeeper Users
-
-### Safe Usage
-
-- Always use the **latest version**
-- Only run depkeeper on **trusted requirements files**
-- Review suggested updates before applying
-- Use **virtual environments**
-- Avoid running as root unless necessary
-
-### Example: Secure Configuration
-
-```toml
-# depkeeper.toml
-[depkeeper]
-verify_ssl = true
-force_https = true
-concurrent_requests = 10
-
-[depkeeper.security]
-check_security = true
-fail_on_critical = true
-require_hashes = false  # Recommended: true for maximum safety
-```
-
-### Private PyPI Indices
-
-Use environment variables or credential managers:
-
-```bash
-export DEPKEEPER_PYPI_TOKEN=your_token_here
-depkeeper update
-```
-
-Avoid hardcoding tokens or passwords.
+| Risk | Detail | Mitigation |
+|---|---|---|
+| **Write scope via `-r` includes** | Include paths resolve relative to the including file and may contain `../`, so a hostile requirements file can direct `update` writes outside the invocation directory. | Run `--dry-run` first. Run in a container with only the project directory mounted. Never run `update` unattended on untrusted input. |
+| **Partially hashed files** | `--allow-hash-removal` strips digests only from changed lines, producing a file that `pip --require-hashes` rejects. | Regenerate hashes immediately: `pip-compile --generate-hashes`. |
+| **Metadata trust** | Recommendations derive from PyPI metadata; compromised metadata influences which version is proposed. | depkeeper never installs — `pip` and your test suite remain the gate. |
+| **No file locking** | depkeeper reads once and writes once; a concurrent edit between those points is lost. | Do not run depkeeper concurrently with an editor on the same file. |
 
 ---
 
-## 🧰 Current Security Features
+## Guidance for users
 
-- ✔️ HTTPS-only communication
-- ✔️ SSL certificate verification
-- ✔️ Input validation & sanitization
-- ✔️ Safe path handling
-- ✔️ Atomic file writes & backups
-- ✔️ Dry-run mode
-- ✔️ Dependency hash verification support
-
-### Planned
-
-- 🔄 Vulnerability scanning
-- 🔄 Lockfile w/ integrity
-- 🔄 Package signature verification
-- 🔄 SBOM generation
-- 🔄 Suspicious update detection (supply-chain safety)
+- Run the latest release, and pin the version in automation.
+- Treat `depkeeper update` as a code change: review the diff, then `pip install -r` and run tests.
+- Prefer `--dry-run` on any file you did not write.
+- Run inside a virtual environment; do not run as root.
+- Restrict write access in automation to the project directory.
+- Run a vulnerability scanner (`pip-audit`, `safety`) alongside depkeeper — depkeeper reports
+  version drift, not advisories.
 
 ---
 
-## 🔍 Known Security Considerations
+## Recognition
 
-### Requirements File Parsing
+depkeeper has no paid bug bounty programme. We credit reporters in the advisory and the changelog,
+and are glad to provide a written acknowledgement of the contribution on request.
 
-Mitigated by:
-
-- The `packaging` library
-- Avoidance of unsafe parsing operations
-- Strict validation rules
-
-### Network Requests
-
-Mitigated by:
-
-- HTTPS enforcement
-- TLS verification
-- Configurable indices
-- Request throttling
-
-### File System Access
-
-Mitigated by:
-
-- Path normalization
-- Restricted write locations
-- Automatic backup creation
-
----
-
-## 📝 Vulnerability Disclosure Timeline
-
-Typical flow:
-
-| Day  | Action                           |
-| ---- | -------------------------------- |
-| 0    | Vulnerability privately reported |
-| 1-5  | Triage & validation              |
-| 5-30 | Fix development & testing        |
-| ~30  | Public disclosure & advisory     |
-
-Earlier disclosure may occur if:
-
-- Active exploitation is observed
-- Vulnerability is public elsewhere
-- Issue is trivial to reproduce
-
----
-
-## 📬 Contact & Reporting
-
-- **Security concerns** → Use the repository’s **Security tab**
-- **Private communication** → Start a private **GitHub Discussion**
-- **Repository** → [https://github.com/rahulkaushal04/depkeeper](https://github.com/rahulkaushal04/depkeeper)
-
----
-
-## 🙏 Acknowledgments
-
-Thanks to all researchers who help keep depkeeper secure.
-(Currently no reported vulnerabilities.)
+No vulnerabilities have been reported to date.

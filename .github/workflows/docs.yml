@@ -25,16 +25,16 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: "pip"
 
       - name: Install dependencies
-        run: |
-          pip install mkdocs
-          pip install mkdocs-material
-          pip install mkdocstrings[python]
-          pip install mkdocs-minify-plugin
-          pip install -e .
+        run: pip install -e ".[docs]"
 
-      - name: Deploy to GitHub Pages
-        run: mkdocs gh-deploy --clean
+      - name: Configure git identity for mike
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Deploy dev docs
+        run: mike deploy --push dev

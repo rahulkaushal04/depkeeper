@@ -1,207 +1,197 @@
 ---
 title: Configuration Options
-description: Complete configuration reference for depkeeper
+description: Every configuration key, environment variable, discovery and validation rule
 ---
 
 # Configuration Options
 
-Complete reference for all depkeeper configuration options. depkeeper supports CLI arguments, environment variables, and configuration files with a clear precedence hierarchy. Configuration file values serve as defaults that CLI arguments override.
+Task-oriented guidance is in [Configuration](../guides/configuration.md). This page is the
+specification.
 
 ---
 
-## Configuration Precedence
+## Keys
 
-When the same option is set in multiple places, the highest-priority source wins:
+### `check_conflicts`
 
-1. **CLI arguments** -- Highest priority
-2. **Environment variables** -- `DEPKEEPER_*`
-3. **Configuration files** -- `depkeeper.toml` or `pyproject.toml`
-4. **Built-in defaults** -- Lowest priority
+| Property | Value |
+|---|---|
+| Type | boolean |
+| Default | `true` |
+| CLI override | `--check-conflicts` / `--no-check-conflicts` |
+| Applies to | `check`, `update` |
 
----
-
-## CLI Options
-
-### Global Options
-
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `--config`, `-c` | Path | Auto-detect | Configuration file path |
-| `--verbose`, `-v` | Flag | 0 | Verbosity level (repeat for more) |
-| `--color` | Boolean | `true` | Enable colored output |
-| `--no-color` | Boolean | `false` | Disable colored output |
-
-### check Command Options
-
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `--outdated-only` | Flag | `false` | Show only outdated packages |
-| `--format`, `-f` | Choice | `table` | Output format: `table`, `simple`, `json` |
-| `--strict-version-matching` | Flag | `false` | Only consider exact pins (`==`) |
-| `--check-conflicts` | Flag | `true` | Enable conflict resolution |
-| `--no-check-conflicts` | Flag | `false` | Disable conflict resolution |
-
-### update Command Options
-
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `--dry-run` | Flag | `false` | Preview without applying |
-| `--yes`, `-y` | Flag | `false` | Skip confirmation |
-| `--backup` | Flag | `false` | Create backup file |
-| `--packages`, `-p` | String | All | Packages to update (repeatable) |
-| `--strict-version-matching` | Flag | `false` | Only consider exact pins |
-| `--check-conflicts` | Flag | `true` | Enable conflict resolution |
-
-For full details on each command, see [CLI Commands](cli-commands.md).
-
----
-
-## Environment Variables
-
-All environment variables use the `DEPKEEPER_` prefix:
-
-| Variable | Type | Default | Description |
-|---|---|---|---|
-| `DEPKEEPER_CONFIG` | Path | - | Configuration file path |
-| `DEPKEEPER_COLOR` | Boolean | `true` | Enable/disable colors |
-
-### Boolean Values
-
-Boolean environment variables accept:
-
-- **True**: `true`, `1`, `yes`, `on`
-- **False**: `false`, `0`, `no`, `off`
-
-### Standard Variables
-
-depkeeper also respects the `NO_COLOR` environment variable as defined by the [no-color standard](https://no-color.org/). When set, colored output is disabled regardless of `DEPKEEPER_COLOR`.
-
-### Examples
-
-```bash
-# Disable colors
-export DEPKEEPER_COLOR=false
-```
-
----
-
-## Configuration Files
-
-### File Locations
-
-depkeeper searches for configuration in this order:
-
-1. Path from `--config` or `DEPKEEPER_CONFIG`
-2. `depkeeper.toml` in the current directory
-3. `pyproject.toml` under `[tool.depkeeper]`
-
-### depkeeper.toml
-
-```toml
-# depkeeper.toml
-
-[depkeeper]
-check_conflicts = true
-strict_version_matching = false
-```
-
-### pyproject.toml
-
-```toml
-# pyproject.toml
-
-[tool.depkeeper]
-check_conflicts = true
-strict_version_matching = false
-```
-
----
-
-## Configuration File Reference
-
-These options can be set in the ``[depkeeper]`` table of ``depkeeper.toml`` or the ``[tool.depkeeper]`` table of ``pyproject.toml``.
-
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `check_conflicts` | Boolean | `true` | Enable dependency conflict resolution |
-| `strict_version_matching` | Boolean | `false` | Only use exact version pins (`==`) |
-
----
-
-## Precedence Example
-
-Given the following configuration:
-
-**depkeeper.toml:**
+Enables cross-package conflict resolution. When disabled, recommendations are computed per package
+in isolation and may be mutually inconsistent; the Resolution Summary is not produced.
 
 ```toml
 [depkeeper]
 check_conflicts = true
 ```
 
-**Environment:**
+### `strict_version_matching`
 
-```bash
-export DEPKEEPER_COLOR=false
+| Property | Value |
+|---|---|
+| Type | boolean |
+| Default | `false` |
+| CLI override | `--strict-version-matching` (no negative form) |
+| Applies to | `check`, `update` |
+
+When `true`, only a requirement whose **sole** specifier is `==` yields a current version. Ranges
+such as `>=2.0` are treated as "no current version", which removes the major-version anchor and
+changes the reported status to `install`.
+
+```toml
+[depkeeper]
+strict_version_matching = false
 ```
 
-**Command:**
+### Unknown keys
 
-```bash
-depkeeper check --no-check-conflicts
+Any other key is a hard error:
+
+```text
+[ERROR] Unknown configuration keys: check_conflict (config_path=/path/depkeeper.toml)
 ```
 
-**Effective configuration:**
+Exit code `1`. Keys are validated against the exact set `{check_conflicts,
+strict_version_matching}`. Nested tables are not supported.
 
-| Option | Value | Source |
+### Type validation
+
+```text
+[ERROR] check_conflicts must be a boolean, got str (config_path=..., option=check_conflicts)
+```
+
+TOML booleans only: `true` / `false`, unquoted.
+
+---
+
+## File formats
+
+=== "depkeeper.toml"
+
+    ```toml
+    [depkeeper]
+    check_conflicts = true
+    strict_version_matching = false
+    ```
+
+=== "pyproject.toml"
+
+    ```toml
+    [tool.depkeeper]
+    check_conflicts = true
+    strict_version_matching = false
+    ```
+
+---
+
+## Discovery
+
+| Order | Source | Condition |
 |---|---|---|
-| `check_conflicts` | `false` | CLI wins |
-| `color` | `false` | From environment |
+| 1 | `--config` / `-c`, or `DEPKEEPER_CONFIG` | Must exist and be a file, otherwise `ConfigError`. |
+| 2 | `./depkeeper.toml` | Must exist in the **current working directory**. |
+| 3 | `./pyproject.toml` | Adopted **only if** it contains a `[tool.depkeeper]` table. |
+| 4 | Built-in defaults | Always. |
+
+Notes:
+
+- Discovery is not recursive; parent directories are not searched.
+- A `pyproject.toml` whose parse fails during the `[tool.depkeeper]` probe is treated as "no
+  depkeeper section" and skipped silently, so a malformed unrelated `pyproject.toml` cannot break
+  a depkeeper run.
+- A discovered file with an empty or absent depkeeper section is valid and yields the defaults,
+  with `source_path` recorded.
+
+### Encoding
+
+Configuration files are read as bytes and decoded with `utf-8-sig`, so a leading byte order mark
+is removed before parsing (TOML parsers reject a BOM as an invalid statement).
+
+| Failure | Message |
+|---|---|
+| Not valid UTF-8 | `Configuration file <name> is not valid UTF-8: <detail>` |
+| Invalid TOML | `Invalid TOML in <name>: <detail>` |
+| Unreadable | `Cannot read configuration file <path>: <detail>` |
+
+TOML parsing is always performed by `tomli`, a hard runtime dependency, so Python 3.8–3.10 and
+3.11+ behave identically.
 
 ---
 
-## Example Configurations
+## Precedence
 
-### Development Environment
-
-```toml
-# depkeeper.toml
-
-[depkeeper]
-check_conflicts = true
+```text
+built-in defaults  <  configuration file  <  command-line flag
 ```
 
-### Production / Conservative
+Both `--strict-version-matching` and `--check-conflicts` default to an internal "unset" value, so
+omitting them means "use the configuration value".
 
-```toml
-# depkeeper.toml
-
-[depkeeper]
-check_conflicts = true
-strict_version_matching = true
-```
+| Config | CLI | Effective |
+|---|---|---|
+| *(none)* | *(none)* | default |
+| `check_conflicts = false` | *(none)* | `false` |
+| `check_conflicts = false` | `--check-conflicts` | `true` |
+| `check_conflicts = true` | `--no-check-conflicts` | `false` |
+| `strict_version_matching = true` | *(none)* | `true` |
+| `strict_version_matching = true` | *(no negative form exists)* | `true` |
 
 ---
 
-## Validation
+## Environment variables
 
-depkeeper validates configuration on startup. Invalid values result in clear error messages:
+| Variable | Consumed by | Effect |
+|---|---|---|
+| `DEPKEEPER_CONFIG` | Click, as the default for `--config` | Path to a configuration file. |
+| `DEPKEEPER_COLOR` | Click, as the default for `--color/--no-color` | Standard boolean spellings: `1`/`0`, `true`/`false`, `yes`/`no`. |
+| `NO_COLOR` | `rich`, `click`, `depkeeper.utils.logger` | Any non-empty value disables colour. depkeeper **sets** it when `--no-color` is resolved and **clears** it when `--color` is resolved, so downstream libraries follow the flag. |
+| `CI` | `depkeeper.utils.logger` | Any non-empty value disables ANSI colour in log records. |
+| `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` | `httpx` | Proxy configuration. |
+| `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` | `httpx` / `certifi` | Custom CA bundle for TLS interception. |
+
+Colour is probed **per stream**, so a piped stdout does not disable colour on an interactive
+stderr.
+
+---
+
+## Values that are not configurable
+
+The following are module constants in 0.1.x and cannot be changed from a file, an environment
+variable or a flag:
+
+| Constant | Value | Module |
+|---|---|---|
+| Request timeout | 30 s | `depkeeper.constants.DEFAULT_TIMEOUT` |
+| Retries per request | 3 | `depkeeper.constants.DEFAULT_MAX_RETRIES` |
+| `429` retry budget | 5 | `HTTPClient._max_429_retries` |
+| Maximum file size | 10 MB | `depkeeper.constants.MAX_FILE_SIZE` |
+| HTTP concurrency | 10 | `HTTPClient.max_concurrency` |
+| Data-store concurrency | 10 | `PyPIDataStore.concurrent_limit` |
+| Resolution passes | 100 | `_MAX_RESOLUTION_ITERATIONS` |
+| Source candidates per conflict | 50 | `_MAX_SOURCE_CANDIDATES` |
+| Package index | `https://pypi.org/pypi/{package}/json` | `depkeeper.constants.PYPI_JSON_API` |
+| Read / write encodings | `utf-8-sig` / `utf-8` | `depkeeper.constants` |
+
+Programmatic users can override the HTTP and data-store limits by constructing those objects
+directly — see [Python API](python-api.md).
+
+---
+
+## Inspecting the effective configuration
 
 ```bash
-$ depkeeper check
-Error: Invalid configuration: check_conflicts must be a boolean, got str
+depkeeper -vv check 2>&1 | head -n 5
 ```
 
-Use verbose mode to debug configuration loading:
-
-```bash
-depkeeper -vv check 2>&1 | grep config
+```text
+DEBUG: depkeeper v0.1.1
+DEBUG: Config path: /path/to/depkeeper.toml
+DEBUG: Loaded configuration: {'check_conflicts': True, 'strict_version_matching': False}
+DEBUG: Verbosity: 2 | Color: True
 ```
 
----
-
-## See Also
-
-- [Configuration Guide](../guides/configuration.md) -- Practical configuration guide
-- [CLI Commands](cli-commands.md) -- Command options reference
-- [CI/CD Integration](../guides/ci-cd-integration.md) -- Pipeline configuration
+`Config path: None` means no file was discovered.

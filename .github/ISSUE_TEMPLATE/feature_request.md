@@ -6,84 +6,50 @@ labels: ["enhancement"]
 assignees: ""
 ---
 
-# 🚀 Feature Request
+## Summary
 
-## 🌟 Summary
+<!-- A short, clear description of the feature. -->
 
-<!-- A short, clear description of the feature you want to add. -->
+## Problem
 
-## 🎯 Problem / Motivation
+<!-- What's currently difficult, missing or inefficient? Concrete example beats abstract description. -->
 
-<!--
-Explain the problem this feature solves.
-Why does it matter?
-What is currently difficult, missing, or inefficient?
--->
+## Proposed solution
 
-## 🧩 Proposed Solution
+<!-- How should depkeeper behave after this is implemented? -->
 
-<!--
-Describe the ideal solution or behavior.
-How should depkeeper work after this feature is implemented?
--->
-
-### CLI Example (Optional)
+### CLI example
 
 ```bash
-# Example usage
-depkeeper <new-command> --flag
+depkeeper <command> --flag
 ```
 
-### Python API Example (Optional)
+### Python API example (optional)
+
+<!-- Only if this touches the programmatic surface (depkeeper.core, depkeeper.models). -->
 
 ```python
-from depkeeper import Client
-
-# Example usage
+from depkeeper.core import RequirementsParser
 ```
 
-## 🔄 Alternative Approaches Considered
+## Alternatives considered
 
-<!--
-Have you considered different solutions?
-Why is the proposed solution better?
--->
+<!-- Other approaches you considered, and why this one is better. Skip if there weren't any. -->
 
-## 📚 Additional Context
+## Scope check
 
-<!--
-Any references, diagrams, mockups, config examples,
-or explanations useful for understanding the request.
--->
+Per [CONTRIBUTING.md](../../CONTRIBUTING.md#ways-to-contribute), anything that changes what
+depkeeper *writes* needs a design discussion before code — this issue is that discussion. Does
+this change what gets recommended or written for an existing requirements file? If so, say what
+changes and why it's still within a
+[non-negotiable invariant](https://rahulkaushal04.github.io/depkeeper/concepts/#non-negotiable-invariants).
 
-## 🔍 Similar Features in Other Tools (Optional)
+## Contribution interest
 
-<!--
-If another tool implements something similar,
-list them and explain what you like/dislike.
--->
+- [ ] I can submit a PR for this
+- [ ] I can help test it
+- [ ] I'm requesting this for someone else to implement
 
-- **Tool Name** - description or link
-- **Tool Name** - description or link
+## Related issues
 
-## 🛠️ Implementation Considerations (Optional)
-
-<!--
-Technical notes, possible challenges, edge cases, API design concerns,
-performance considerations, etc.
--->
-
-## 🤝 Contribution Interest
-
-<!-- Let us know how you'd like to help. -->
-
-- [ ] I can submit a PR
-- [ ] I can help with testing
-- [ ] I can help with documentation
-- [ ] I'm not able to contribute code, but I can provide feedback
-
-## 🔗 Related Issues
-
-<!--
-Link to related feature requests, bugs, or discussions.
--->
+<!-- Link related feature requests, bugs or prior discussion. -->

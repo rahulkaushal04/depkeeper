@@ -1,7 +1,8 @@
 """Check command implementation for depkeeper.
 
-Analyzes requirements files to identify available updates, dependency
-conflicts, and Python version compatibility issues.
+Analyzes requirements files to report available updates, dependency
+conflicts, and Python version compatibility. This command is read-only; it
+never modifies the requirements file.
 """
 
 from __future__ import annotations
@@ -35,6 +36,27 @@ from depkeeper.utils import (
 )
 
 logger = get_logger("commands.check")
+
+#: Output format whose payload is meant to be read by a human at a terminal.
+#: Every other format writes a machine-consumable payload to stdout, so all
+#: human-facing status output must be diverted to stderr.
+HUMAN_READABLE_FORMAT = "table"
+
+
+def _status_stream_is_stderr(format: str) -> bool:
+    """Return True when status output must not share stdout with the payload.
+
+    ``--format json`` and ``--format simple`` write a machine-consumable
+    document to stdout. Warnings, success messages and the resolution summary
+    are diagnostics, so they go to stderr to keep stdout parseable.
+
+    Args:
+        format: The requested output format.
+
+    Returns:
+        ``True`` for machine-readable formats, ``False`` for ``table``.
+    """
+    return format.lower() != HUMAN_READABLE_FORMAT
 
 
 @click.command()
@@ -93,6 +115,13 @@ def check(
     Options not explicitly provided on the command line fall back to values
     from the configuration file (depkeeper.toml or pyproject.toml), then
     to built-in defaults.
+
+    \b
+    Output streams:
+      table            report on stdout, status messages on stdout
+      simple / json    payload on stdout only; every status message,
+                       warning, error and resolution summary goes to
+                       stderr, so `depkeeper -v check -f json | jq` works
     \f
 
     Args:
@@ -156,10 +185,10 @@ async def _check_async(
     Core logic:
 
     1. Parse the requirements file.
-    2. Create a shared :class:`PyPIDataStore` (guarantees each package is
+    2. Create a shared `PyPIDataStore` (guarantees each package is
        fetched once).
-    3. Run :class:`VersionChecker` to compute initial recommendations.
-    4. Optionally run :class:`DependencyAnalyzer` to resolve conflicts.
+    3. Run `VersionChecker` to compute initial recommendations.
+    4. Optionally run `DependencyAnalyzer` to resolve conflicts.
     5. Filter packages if ``--outdated-only`` is set.
     6. Display results in the requested format.
 
@@ -184,6 +213,10 @@ async def _check_async(
     # Only show progress/status for human-readable formats
     show_progress: bool = format == "table" or ctx.verbose > 0
 
+    # For json/simple, stdout belongs to the payload; status goes to stderr.
+    status_to_stderr: bool = _status_stream_is_stderr(format)
+    emits_json: bool = format.lower() == "json"
+
     logger.info("Checking %s...", file)
 
     # ── Step 1: Parse requirements ────────────────────────────────────
@@ -195,7 +228,11 @@ async def _check_async(
 
     if not requirements:
         if show_progress:
-            print_warning("No packages found in requirements file")
+            print_warning(
+                "No packages found in requirements file", stderr=status_to_stderr
+            )
+        if emits_json:
+            _display_json([])
         return False
 
     logger.info("Found %d package(s)", len(requirements))
@@ -222,8 +259,9 @@ async def _check_async(
             resolution_result = await analyzer.resolve_and_annotate_conflicts(packages)
 
             if show_progress and resolution_result:
-                # Display resolution summary (convergence status, version changes)
-                _display_resolution_summary(resolution_result)
+                _display_resolution_summary(
+                    resolution_result, stderr=status_to_stderr
+                )
 
     # ── Step 4: Filter and display ────────────────────────────────────
     if outdated_only:
@@ -236,12 +274,15 @@ async def _check_async(
                 if outdated_only
                 else "No packages to display"
             )
-            (print_success if outdated_only else print_warning)(msg)
+            (print_success if outdated_only else print_warning)(
+                msg, stderr=status_to_stderr
+            )
+        if emits_json:
+            _display_json([])
         return False
 
     packages_needing_action = sum(1 for p in packages if p.has_update())
 
-    # Dispatch to the appropriate renderer
     if format == "table":
         _display_table(packages)
     elif format == "simple":
@@ -253,20 +294,26 @@ async def _check_async(
     if show_progress:
         if packages_needing_action > 0:
             print_warning(
-                f"\n{packages_needing_action} package(s) have updates available"
+                f"\n{packages_needing_action} package(s) have updates available",
+                stderr=status_to_stderr,
             )
             if resolution_result and resolution_result.packages_with_conflicts > 0:
                 print_warning(
                     f"{resolution_result.packages_with_conflicts} package(s) have "
-                    "unresolved conflicts — see 'Conflicts' column"
+                    "unresolved conflicts — see 'Conflicts' column",
+                    stderr=status_to_stderr,
                 )
         else:
-            print_success("\nAll packages are up to date!")
+            print_success(
+                "\nAll packages are up to date!", stderr=status_to_stderr
+            )
 
     return packages_needing_action > 0
 
 
-def _display_resolution_summary(result: ResolutionResult) -> None:
+def _display_resolution_summary(
+    result: ResolutionResult, *, stderr: bool = False
+) -> None:
     """Print a human-readable summary of the conflict resolution process.
 
     Displays:
@@ -278,7 +325,9 @@ def _display_resolution_summary(result: ResolutionResult) -> None:
     - Details of each version change (original → resolved)
 
     Args:
-        result: The :class:`ResolutionResult` from the dependency analyzer.
+        result: The `ResolutionResult` from the dependency analyzer.
+        stderr: Render to stderr instead of stdout. Required for the
+            ``json``/``simple`` formats, whose payload owns stdout.
 
     Example output::
 
@@ -293,7 +342,7 @@ def _display_resolution_summary(result: ResolutionResult) -> None:
           • flask: 3.0.0 → 2.3.3 (downgraded)
           • werkzeug: 3.0.1 → 2.3.7 (constrained)
     """
-    console = get_raw_console()
+    console = get_raw_console(stderr=stderr)
     console.print("\n[bold]Resolution Summary:[/bold]")
     console.print("=" * 50)
     console.print(f"Total packages: {result.total_packages}")
@@ -317,7 +366,7 @@ def _display_resolution_summary(result: ResolutionResult) -> None:
                 f"{pkg_resolution.resolved} ({pkg_resolution.status.value})"
             )
 
-    console.print("")  # blank line separator
+    console.print("")
 
 
 # ---------------------------------------------------------------------------
@@ -326,38 +375,22 @@ def _display_resolution_summary(result: ResolutionResult) -> None:
 
 
 def _display_table(packages: List[Package]) -> None:
-    """Render packages as a Rich-formatted table.
-
-    Creates a visually appealing table with color-coded status indicators,
-    version columns, update types, conflict details, and Python
-    compatibility information.
+    """Render packages as a Rich table on stdout.
 
     Status indicators:
 
-    - ``✓ OK`` (green): Package is up-to-date.
-    - ``⬆ OUTDATED`` (yellow): Updates are available.
-    - ``⚠ CONFLICT`` (red): Dependency conflicts exist; no safe upgrade.
-    - ``⚠ INCOMP`` (red): Recommended version is lower than current
-      (would require a downgrade).
-    - ``✗ ERROR`` (red): PyPI query failed or package not found.
+    - ``[OK]`` (green): up to date.
+    - ``[OUTDATED]`` (yellow): a safe upgrade is available.
+    - ``[CONFLICT]`` (red): conflicts block every candidate version.
+    - ``[INCOMP]`` (red): the declared version is unusable and the
+      recommendation is lower than it.
+    - ``[ERROR]`` (red): PyPI metadata could not be retrieved.
+
+    Bracketed labels, rather than a symbol, so the table renders identically
+    in any font and matches ``--format simple``'s status labels.
 
     Args:
-        packages: List of :class:`Package` objects to display.
-
-    Example::
-
-                                            Dependency Status
-
-          Status       Package    Current   Latest   Recommended   Update Type   Conflicts   Python Support
-
-          ✓ OK         django      3.2.0     5.0.2        -             -           -        Current: >=3.8
-                                                                                             Latest: >=3.10
-
-          ⬆ OUTDATED   requests    2.28.0    2.32.0     2.32.0        minor         -        Current: >=3.7
-                                                                                             Latest: >=3.8
-
-          ⬆ OUTDATED   flask       2.0.0     3.0.1      2.3.3         patch         -        Current: >=3.7
-                                                                                             Latest: >=3.8
+        packages: List of `Package` objects to display.
     """
     data = [_create_table_row(pkg) for pkg in packages]
 
@@ -381,37 +414,24 @@ def _display_table(packages: List[Package]) -> None:
 
 
 def _create_table_row(pkg: Package) -> Dict[str, str]:
-    """Build a Rich-formatted table row dictionary for a single package.
+    """Build a Rich-formatted table row for a single package.
 
-    Determines the appropriate status indicator, version displays, and
-    conflict information based on the package's state.  All logic for
-    status determination is delegated to :meth:`Package.get_display_data`.
+    Status determination is delegated to `Package.get_display_data`, so
+    this function only maps a known state to markup.
 
     Args:
-        pkg: The :class:`Package` to render.
+        pkg: The `Package` to render.
 
     Returns:
         A dictionary mapping column names to Rich markup strings.
-
-    Example::
-
-        {
-            "Status": "[yellow]⬆ OUTDATED[/yellow]",
-            "Package": "flask",
-            "Current": "2.0.0",
-            "Latest": "3.0.0",
-            "Recommended": "[bright_cyan]2.3.3[/bright_cyan]",
-            "Update Type": "[bold yellow]minor[/bold yellow]",
-            "Conflicts": "[dim]-[/dim]",
-            "Python Support": ">=3.8",
-        }
     """
     python_support = pkg.render_python_compatibility()
 
-    # ── Error case (PyPI query failed) ────────────────────────────────
+    # A missing latest_version means the PyPI lookup failed (unavailable
+    # stub), which is a different state from "no update available".
     if not pkg.latest_version:
         return {
-            "Status": "[red]✗ ERROR[/red]",
+            "Status": "[red][ERROR][/red]",
             "Package": pkg.name,
             "Current": pkg.current_version or "[dim]-[/dim]",
             "Latest": "[red]error[/red]",
@@ -421,10 +441,10 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
             "Python Support": "[dim]-[/dim]",
         }
 
-    # ── Fetch pre-computed display metadata ───────────────────────────
     display = pkg.get_display_data()
 
-    # Recommended version: only show if it differs from current
+    # Repeating the current version in the Recommended column is noise, so it
+    # is shown only when it actually differs.
     recommended_display = "[dim]-[/dim]"
     if pkg.recommended_version:
         if pkg.current_version and pkg.recommended_version != pkg.current_version:
@@ -432,7 +452,6 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
                 f"[bright_cyan]{pkg.recommended_version}[/bright_cyan]"
             )
 
-    # Conflicts: format as multi-line list of requirements
     conflicts_display = "[dim]-[/dim]"
     if display["has_conflicts"]:
         conflict_lines = [
@@ -441,10 +460,11 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
         ]
         conflicts_display = "\n".join(conflict_lines)
 
-    # ── Downgrade/incompatible case ───────────────────────────────────
+    # A required downgrade outranks a conflict: it means the declared version
+    # itself is unusable, which the user must see first.
     if display["requires_downgrade"]:
         return {
-            "Status": "[red]⚠ INCOMP[/red]",
+            "Status": "[red][INCOMP][/red]",
             "Package": pkg.name,
             "Current": pkg.current_version or "[dim]-[/dim]",
             "Latest": pkg.latest_version,
@@ -457,9 +477,9 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
     # ── Conflict case ──────────────────────────────────────────────────
     if display["has_conflicts"]:
         if not pkg.has_update():
-            # True conflict: no safe upgrade exists
+            # Conflicts blocked every candidate version.
             return {
-                "Status": "[red]⚠ CONFLICT[/red]",
+                "Status": "[red][CONFLICT][/red]",
                 "Package": pkg.name,
                 "Current": pkg.current_version or "[dim]-[/dim]",
                 "Latest": pkg.latest_version,
@@ -469,10 +489,10 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
                 "Python Support": python_support,
             }
         else:
-            # Conflicts exist but a safe upgrade is available
+            # Conflicts exist, but resolution still found a safe target.
             colored_type = colorize_update_type(display["update_type"] or "update")
             return {
-                "Status": "[yellow]⬆ OUTDATED[/yellow]",
+                "Status": "[yellow][OUTDATED][/yellow]",
                 "Package": pkg.name,
                 "Current": pkg.current_version or "[dim]-[/dim]",
                 "Latest": pkg.latest_version,
@@ -486,7 +506,7 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
     if display["update_available"]:
         colored_type = colorize_update_type(display["update_type"] or "update")
         return {
-            "Status": "[yellow]⬆ OUTDATED[/yellow]",
+            "Status": "[yellow][OUTDATED][/yellow]",
             "Package": pkg.name,
             "Current": pkg.current_version or "[dim]-[/dim]",
             "Latest": pkg.latest_version,
@@ -498,7 +518,7 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
 
     # ── Up-to-date case ────────────────────────────────────────────────
     return {
-        "Status": "[green]✓ OK[/green]",
+        "Status": "[green][OK][/green]",
         "Package": pkg.name,
         "Current": pkg.current_version or "[dim]-[/dim]",
         "Latest": pkg.latest_version or "[dim]-[/dim]",
@@ -510,46 +530,48 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
 
 
 def _display_simple(packages: List[Package]) -> None:
-    """Render packages in simple, line-based text format.
+    """Render packages as one status line each, with indented detail lines.
 
-    Outputs one line per package showing status, name, current version,
-    and latest version.  Conflict and Python compatibility details are
-    shown on indented lines below each package.
-
-    Suitable for piping to other tools or for minimal terminal output.
+    Rich markup is disabled for every line: a status label such as
+    ``[OUTDATED]`` is otherwise parsed as a style tag and swallowed.
 
     Args:
-        packages: List of :class:`Package` objects to display.
+        packages: List of `Package` objects to display.
 
     Example::
 
-        requests             2.28.0     → 2.32.0     (recommended: 2.32.0)
+        [OUTDATED]   requests             2.28.0     → 2.32.0
                Python: installed: >=3.7, latest: >=3.8
-        flask                2.0.0      → 3.0.1      (recommended: 2.3.3)
+        [OUTDATED]   flask                2.0.0      → 3.0.1     (recommended: 2.3.3)
                Python: installed: >=3.7, latest: >=3.8, recommended: >=3.7
-        celery               5.3.0      → 5.3.6
-               Python: installed: >=3.8, latest: >=3.8
     """
     console = get_raw_console()
 
     for pkg in packages:
-        # Main line: [STATUS] package_name    current → latest
         status, installed, latest, recommended = pkg.get_status_summary()
+        status_label = f"[{status.upper()}]"
 
         if recommended and recommended != latest:
-            # Show recommended version when it differs (conflict resolution)
+            # A recommendation below latest means conflict resolution or a
+            # major boundary capped the upgrade.
             console.print(
-                f"[{status}] {pkg.name:20} {installed:10} → {latest:10} "
-                f"(recommended: {recommended})"
+                f"{status_label:12} {pkg.name:20} {installed:10} → {latest:10} "
+                f"(recommended: {recommended})",
+                markup=False,
             )
         else:
-            console.print(f"[{status}] {pkg.name:20} {installed:10} → {latest:10}")
+            console.print(
+                f"{status_label:12} {pkg.name:20} {installed:10} → {latest:10}",
+                markup=False,
+            )
 
         # Indented conflict details
         if pkg.has_conflicts():
             for conflict in pkg.conflicts:
                 console.print(
-                    f"       [red]⚠ Conflict:[/red] {conflict.to_display_string()}"
+                    f"       ⚠ Conflict: {conflict.to_display_string()}",
+                    style="red",
+                    markup=False,
                 )
 
         # Indented Python version requirements
@@ -566,18 +588,18 @@ def _display_simple(packages: List[Package]) -> None:
                 if recommended_req:
                     req_parts.append(f"recommended: {recommended_req}")
             if req_parts:
-                console.print(f"       Python: {', '.join(req_parts)}")
+                console.print(f"       Python: {', '.join(req_parts)}", markup=False)
 
 
 def _display_json(packages: List[Package]) -> None:
-    """Render packages as formatted JSON for machine consumption.
+    """Render packages as a JSON array on stdout.
 
-    Outputs a JSON array where each element contains complete package
-    information: versions, conflicts, metadata, and Python compatibility.
-    Suitable for piping to ``jq`` or parsing in scripts.
+    Always emits a document (``[]`` when there is nothing to report) so
+    consumers such as ``jq`` never receive empty input. Uses the builtin
+    `print` rather than Rich so no markup or wrapping is applied.
 
     Args:
-        packages: List of :class:`Package` objects to serialize.
+        packages: List of `Package` objects to serialize.
 
     Example::
 
@@ -596,8 +618,7 @@ def _display_json(packages: List[Package]) -> None:
               "latest": ">=3.8",
               "recommended": ">=3.8"
             }
-          },
-          ...
+          }
         ]
     """
     data = [pkg.to_json() for pkg in packages]

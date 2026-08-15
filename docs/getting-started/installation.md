@@ -1,227 +1,156 @@
 ---
 title: Installation
-description: Install depkeeper for Python dependency management
+description: Install depkeeper with pip or pipx, verify the install, and understand its runtime dependencies
 ---
 
 # Installation
 
-depkeeper can be installed using several methods. Choose the one that best fits your workflow.
+## Prerequisites
+
+| Item | Requirement | Notes |
+|---|---|---|
+| Python | ≥ 3.8 | Declared as `requires-python = ">=3.8"`. |
+| OS | Linux, macOS, Windows | Path handling, atomic writes and byte-order-mark handling are tested on all three. |
+| Network | HTTPS to `pypi.org` | Required at runtime, not only at install time. |
+
+!!! warning "The interpreter matters"
+
+    depkeeper filters candidate versions using the `requires_python` metadata of each release,
+    compared against **the interpreter depkeeper itself is running on** — not the interpreter of
+    your project's virtual environment.
+
+    If you install depkeeper globally on Python 3.8 but your service targets Python 3.12,
+    depkeeper will refuse versions that dropped 3.8 support even though your project could use
+    them. Install it *into the environment whose requirements file you are managing*, or use a
+    `pipx` install whose Python matches. See
+    [Version recommendation](../concepts/version-recommendation.md#python-compatibility-filtering).
 
 ---
 
-## Requirements
+## Install
 
-- **Python**: 3.8 or higher
-- **Operating System**: Windows, macOS, or Linux
+=== "pip (project environment — recommended)"
 
----
+    ```bash
+    python -m pip install depkeeper
+    ```
 
-## Installation Methods
+    Installing into the project's own virtual environment guarantees the interpreter used for
+    compatibility filtering matches the project's target interpreter.
 
-### pip (Recommended)
+=== "pipx (isolated global tool)"
 
-The simplest way to install depkeeper is via pip:
+    ```bash
+    pipx install depkeeper
 
-```bash
-pip install depkeeper
-```
+    # Pin the interpreter to match your projects
+    pipx install --python python3.12 depkeeper
+    ```
 
-To install with specific version:
+    Use `pipx` when you manage many projects that all target the same Python version.
 
-```bash
-pip install depkeeper==0.1.0
-```
+=== "From source"
 
-### pipx (Isolated Environment)
+    ```bash
+    git clone https://github.com/rahulkaushal04/depkeeper.git
+    cd depkeeper
+    python -m pip install -e .
+    ```
 
-For CLI tools, [pipx](https://pypa.github.io/pipx/) installs packages in isolated environments:
+    For a full contributor setup (dev extras, pre-commit, test tooling), follow
+    [Development setup](../contributing/development-setup.md).
 
-```bash
-# Install pipx if you haven't
-pip install pipx
-pipx ensurepath
+=== "CI (ephemeral)"
 
-# Install depkeeper
-pipx install depkeeper
-```
+    ```bash
+    python -m pip install --no-cache-dir depkeeper==0.1.1
+    ```
 
-!!! tip "Why pipx?"
-    pipx is ideal for CLI tools like depkeeper because it:
-
-    - Isolates dependencies from your global environment
-    - Automatically creates and manages virtual environments
-    - Makes the `depkeeper` command available globally
-
-### From Source
-
-For development or to get the latest features:
-
-```bash
-# Clone the repository
-git clone https://github.com/rahulkaushal04/depkeeper.git
-cd depkeeper
-
-# Install in development mode
-pip install -e .
-
-# Or with development dependencies
-pip install -e ".[dev]"
-```
-
-### Using Poetry
-
-If your project uses Poetry:
-
-```bash
-poetry add depkeeper
-```
-
-### Using uv
-
-For the fast [uv](https://github.com/astral-sh/uv) package manager:
-
-```bash
-uv pip install depkeeper
-```
+    Pin the version in CI. depkeeper is still `0.x`, so an unpinned install can change
+    recommendation behaviour between pipeline runs.
 
 ---
 
-## Verify Installation
+## Runtime dependencies
 
-After installation, verify that depkeeper is working:
+These are installed automatically. They are listed here because they determine depkeeper's
+behaviour in ways that matter operationally.
+
+| Package | Minimum | Why it is required |
+|---|---|---|
+| `click` | 8.1.8 | CLI parsing, `--help`, usage errors (exit code 2), confirmation prompt. |
+| `packaging` | 23.2 | Every version comparison, specifier evaluation and PEP 503 name normalisation. depkeeper delegates all of these so it agrees with pip. |
+| `httpx[http2]` | 0.24.1 | Async HTTP with HTTP/2 to the PyPI JSON API. |
+| `rich` | 13.9.4 | Table and status rendering, colour detection. |
+| `tomli` | 2.4.0 | TOML parsing for `depkeeper.toml` / `pyproject.toml`. A hard dependency on **all** Python versions, so 3.8–3.10 and 3.11+ parse configuration identically. |
+
+Optional extras: `depkeeper[dev]`, `depkeeper[test]`, `depkeeper[docs]`. See
+[Development setup](../contributing/development-setup.md).
+
+---
+
+## Verify the installation
 
 ```bash
-# Check version
 depkeeper --version
-# depkeeper 0.1.0
+# depkeeper 0.1.1
 
-# View available commands
 depkeeper --help
+python -m depkeeper --version   # equivalent module entry point
 ```
 
-Expected output:
+Both entry points are supported:
 
+- `depkeeper` — console script declared as `depkeeper.cli:main`.
+- `python -m depkeeper` — module entry point that imports and delegates to the same function.
+  Use this when the script directory is not on `PATH`.
+
+A functional smoke test that requires no project files:
+
+```bash
+printf 'requests==2.28.0\n' > /tmp/req.txt
+depkeeper check /tmp/req.txt --format json
 ```
-Usage: depkeeper [OPTIONS] COMMAND [ARGS]...
 
-  depkeeper -- modern dependency management for requirements.txt files.
-
-  Available commands:
-    depkeeper check              Check for available updates
-    depkeeper update             Update packages to newer versions
-
-  Examples:
-    depkeeper check
-    depkeeper update
-    depkeeper -v check
-
-  Use ``depkeeper COMMAND --help`` for command-specific options.
-
-Options:
-  -c, --config PATH       Path to configuration file.
-  -v, --verbose           Increase verbosity (can be repeated: -v, -vv).
-  --color / --no-color    Enable or disable colored output.
-  --version               Show the version and exit.
-  -h, --help              Show this message and exit.
-
-Commands:
-  check   Check for available updates in requirements file.
-  update  Update packages to newer versions.
-```
+A JSON array on stdout confirms parsing, network access and rendering all work.
 
 ---
 
 ## Upgrading
 
-To upgrade to the latest version:
+```bash
+python -m pip install --upgrade depkeeper
+pipx upgrade depkeeper
+```
 
-=== "pip"
-
-    ```bash
-    pip install --upgrade depkeeper
-    ```
-
-=== "pipx"
-
-    ```bash
-    pipx upgrade depkeeper
-    ```
+Before upgrading in an automated pipeline, read the [changelog](../community/changelog.md).
+Recommendation logic changes are behavioural changes: the same requirements file can produce a
+different update plan after an upgrade. Pipelines that gate on `depkeeper check --format json`
+output should pin the version and upgrade deliberately.
 
 ---
 
 ## Uninstalling
 
-To remove depkeeper:
+```bash
+python -m pip uninstall depkeeper
+pipx uninstall depkeeper
+```
 
-=== "pip"
-
-    ```bash
-    pip uninstall depkeeper
-    ```
-
-=== "pipx"
-
-    ```bash
-    pipx uninstall depkeeper
-    ```
+depkeeper stores no state outside the working directory. It writes nothing to `$HOME`, creates no
+cache directory, and its in-memory PyPI cache lives only for the duration of a single command.
+The only artefacts it can leave behind are the backup files created by `update --backup`
+(see [Updating dependencies](../guides/updating-dependencies.md#backups)).
 
 ---
 
-## Troubleshooting
+## Troubleshooting the install
 
-### Command Not Found
+| Symptom | Cause | Fix |
+|---|---|---|
+| `depkeeper: command not found` | Script directory not on `PATH`. | Use `python -m depkeeper`, or add the interpreter's `Scripts`/`bin` directory to `PATH`. |
+| `ERROR: Package 'depkeeper' requires a different Python` | Interpreter older than 3.8. | Install on 3.8+. |
+| SSL errors on first run | Corporate TLS interception. | See [Operations → TLS and proxies](../guides/operations.md#tls-and-proxies). |
+| Recommendations look too conservative | depkeeper is running on an older interpreter than your project targets. | Reinstall into the project environment, or `pipx install --python`. |
 
-If `depkeeper` is not found after installation:
-
-1. **Check pip installation location**:
-   ```bash
-   pip show depkeeper
-   ```
-
-2. **Ensure pip's bin directory is in PATH**:
-
-    === "Linux/macOS"
-
-        ```bash
-        export PATH="$HOME/.local/bin:$PATH"
-        ```
-
-    === "Windows"
-
-        Add `%USERPROFILE%\AppData\Local\Programs\Python\Python3X\Scripts` to your PATH.
-
-3. **Try running as a module**:
-
-   ```bash
-   python -m depkeeper --version
-   ```
-
-### Permission Errors
-
-If you encounter permission errors:
-
-```bash
-# Use --user flag
-pip install --user depkeeper
-
-# Or use a virtual environment (recommended)
-python -m venv venv
-source venv/bin/activate  # Linux/macOS
-venv\Scripts\activate     # Windows
-pip install depkeeper
-```
-
-### SSL Certificate Errors
-
-If you're behind a corporate proxy:
-
-```bash
-pip install --trusted-host pypi.org --trusted-host pypi.python.org depkeeper
-```
-
----
-
-## Next Steps
-
-- [:material-play-circle: Quick Start](quickstart.md) -- Your first depkeeper commands
-- [:material-book-open-variant: Basic Usage](basic-usage.md) -- Learn the fundamentals
+Further symptoms are indexed in [Troubleshooting](../guides/troubleshooting.md).

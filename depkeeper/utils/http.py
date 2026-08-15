@@ -1,8 +1,9 @@
-"""
-HTTP client utilities for depkeeper.
+"""HTTP client utilities for depkeeper.
 
-This module provides an asynchronous HTTP client with retry logic,
-rate limiting, concurrency control, and PyPI-specific error handling.
+Provides an asynchronous HTTP client with retry logic, rate limiting,
+concurrency control, and PyPI-specific error handling. Every network call
+depkeeper makes goes through `HTTPClient`, so retry and throttling
+policy is defined in exactly one place.
 """
 
 from __future__ import annotations
@@ -11,6 +12,8 @@ import time
 import httpx
 import random
 import asyncio
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Optional, Dict, Iterable, Callable, cast
 
 from depkeeper.utils.logger import get_logger
@@ -19,10 +22,47 @@ from depkeeper.exceptions import NetworkError, PyPIError
 from depkeeper.constants import (
     DEFAULT_TIMEOUT,
     DEFAULT_MAX_RETRIES,
+    MAX_RETRY_AFTER_SECONDS,
     USER_AGENT_TEMPLATE,
 )
 
 logger = get_logger("http")
+
+
+def _parse_retry_after(header_value: Optional[str]) -> float:
+    """Parse a ``Retry-After`` header value into a clamped delay in seconds.
+
+    Per RFC 7231 section 7.1.3, the value is either ``delay-seconds`` or an
+    HTTP-date. Falls back to 1 second when missing or unparseable. The
+    result is always clamped to ``[0, MAX_RETRY_AFTER_SECONDS]`` so a
+    malformed or extreme value can never stall the client indefinitely.
+
+    Args:
+        header_value: The raw ``Retry-After`` header value, or ``None``.
+
+    Returns:
+        Delay in seconds, in ``[0, MAX_RETRY_AFTER_SECONDS]``.
+    """
+    if header_value is None:
+        return 1.0
+
+    header_value = header_value.strip()
+
+    try:
+        delay = float(int(header_value))
+    except ValueError:
+        try:
+            target = parsedate_to_datetime(header_value)
+        except (TypeError, ValueError):
+            return 1.0
+
+        if target.tzinfo is None:
+            # Obsolete RFC 850 dates are assumed GMT, per RFC 7231 section 7.1.1.1.
+            target = target.replace(tzinfo=timezone.utc)
+
+        delay = (target - datetime.now(timezone.utc)).total_seconds()
+
+    return max(0.0, min(delay, float(MAX_RETRY_AFTER_SECONDS)))
 
 
 class HTTPClient:
@@ -72,7 +112,12 @@ class HTTPClient:
         await self.close()
 
     async def _ensure_client(self) -> None:
-        """Initialize the underlying httpx client if needed."""
+        """Create the underlying ``httpx`` client on first use.
+
+        Construction is deferred so an `HTTPClient` can be built
+        outside a running event loop and still bind its connection pool to
+        the loop that actually issues requests.
+        """
         if self._client is None:
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self.timeout),
@@ -89,7 +134,12 @@ class HTTPClient:
             self._client = None
 
     async def _rate_limit(self) -> None:
-        """Enforce a minimum delay between outgoing requests."""
+        """Enforce a minimum delay between outgoing requests.
+
+        The next slot is reserved (``_last_request_time`` is moved forward
+        before sleeping) while the lock is held, so concurrent callers queue
+        into distinct slots instead of all waking at the same instant.
+        """
         if self.rate_limit_delay <= 0:
             return
 
@@ -110,7 +160,34 @@ class HTTPClient:
         url: str,
         **kwargs: Any,
     ) -> httpx.Response:
-        """Execute an HTTP request with retry and backoff logic."""
+        """Execute an HTTP request, retrying transient failures.
+
+        Retry policy:
+
+        - Timeouts, network errors and 5xx responses are retried up to
+          ``max_retries`` times with exponential backoff plus jitter.
+        - ``429`` responses honor the ``Retry-After`` header (see
+          `_parse_retry_after`) and are capped separately by
+          ``_max_429_retries``. Because the loop ``continue``s, a 429 retry
+          also consumes one of the outer ``max_retries`` attempts.
+        - ``404`` raises `PyPIError` immediately; other 4xx responses
+          raise `NetworkError`. Client errors are not retried because
+          repeating them cannot change the outcome.
+
+        Args:
+            method: HTTP method, e.g. ``"GET"``.
+            url: Target URL. Surrounding whitespace and quotes are stripped,
+                since requirement files often carry quoted URLs.
+            **kwargs: Forwarded to ``httpx.AsyncClient.request``.
+
+        Returns:
+            The successful `httpx.Response`.
+
+        Raises:
+            PyPIError: The resource returned ``404``.
+            NetworkError: A non-retryable client error, exhausted 429 budget,
+                or every attempt failed.
+        """
         await self._ensure_client()
         assert self._client is not None
 
@@ -133,9 +210,11 @@ class HTTPClient:
                             url=clean_url,
                             status_code=429,
                         )
-                    retry_after = int(response.headers.get("Retry-After", "1"))
+                    retry_after = _parse_retry_after(
+                        response.headers.get("Retry-After")
+                    )
                     logger.warning(
-                        "Rate limited (429), retrying after %ds (%d/%d)",
+                        "Rate limited (429), retrying after %.1fs (%d/%d)",
                         retry_after,
                         retry_429_count,
                         self._max_429_retries,
@@ -201,15 +280,49 @@ class HTTPClient:
         ) from last_exc
 
     async def get(self, url: str, **kwargs: Any) -> httpx.Response:
-        """Perform a GET request with retry logic."""
+        """Perform a GET request.
+
+        Args:
+            url: Target URL.
+            **kwargs: Forwarded to ``httpx.AsyncClient.request``.
+
+        Returns:
+            The successful response.
+
+        Raises:
+            NetworkError: The request failed; see `_request_with_retry`.
+        """
         return await self._request_with_retry("GET", url, **kwargs)
 
     async def post(self, url: str, **kwargs: Any) -> httpx.Response:
-        """Perform a POST request with retry logic."""
+        """Perform a POST request.
+
+        Args:
+            url: Target URL.
+            **kwargs: Forwarded to ``httpx.AsyncClient.request``.
+
+        Returns:
+            The successful response.
+
+        Raises:
+            NetworkError: The request failed; see `_request_with_retry`.
+        """
         return await self._request_with_retry("POST", url, **kwargs)
 
     async def get_json(self, url: str, **kwargs: Any) -> Dict[str, Any]:
-        """Fetch a URL and parse the response as JSON."""
+        """Fetch a URL and decode the response as a JSON object.
+
+        Args:
+            url: Target URL.
+            **kwargs: Forwarded to ``httpx.AsyncClient.request``.
+
+        Returns:
+            The decoded JSON object.
+
+        Raises:
+            NetworkError: The request failed, the body is not valid JSON, or
+                the payload is a JSON value other than an object.
+        """
         response = await self.get(url, **kwargs)
 
         try:
@@ -238,12 +351,16 @@ class HTTPClient:
     ) -> Dict[str, Dict[str, Any]]:
         """Fetch multiple JSON endpoints concurrently.
 
+        Individual failures are logged and reported as an empty dict rather
+        than raised, so one bad URL cannot abort a batch.
+
         Args:
             urls: Iterable of URLs to fetch.
-            progress_callback: Optional callback invoked as (completed, total).
+            progress_callback: Optional callback invoked as
+                ``(completed, total)`` after each response settles.
 
         Returns:
-            Mapping of URL to parsed JSON data. Failed requests yield empty dicts.
+            Mapping of URL to parsed JSON data. Failed requests map to ``{}``.
         """
         url_list = list(urls)
         total = len(url_list)

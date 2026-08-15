@@ -234,11 +234,14 @@ class TestColoredFormatter:
             ):
                 assert ColoredFormatter._should_use_color() is False
 
-    def test_format_preserves_original_record(self) -> None:
-        """Test formatting doesn't permanently modify the log record.
+    def test_format_mutates_the_record_levelname(self) -> None:
+        """Documents a real hazard: colouring is applied in place.
 
-        Edge case: Color codes should not persist in the record object
-        after formatting (though in practice, records are often reused).
+        ``format`` writes the ANSI escape back onto ``record.levelname`` rather
+        than onto a copy. A record handed to a second handler — or re-formatted
+        by ``caplog`` — therefore already carries escape codes, which is why
+        assertions on captured log text must match on the message rather than
+        the level name.
         """
         formatter = ColoredFormatter("%(levelname)s: %(message)s", use_color=True)
         record = logging.LogRecord(
@@ -251,14 +254,11 @@ class TestColoredFormatter:
             exc_info=None,
         )
 
-        original_levelname = record.levelname
-
         with patch.object(ColoredFormatter, "_should_use_color", return_value=True):
             formatter.format(record)
 
-        # Note: The current implementation DOES modify the record
-        # This test documents the actual behavior
-        assert "\033[" in record.levelname  # Record is modified
+        assert record.levelname.startswith("\033[")
+        assert "ERROR" in record.levelname
 
     def test_format_with_exception_info(self) -> None:
         """Test formatting handles exception information correctly.

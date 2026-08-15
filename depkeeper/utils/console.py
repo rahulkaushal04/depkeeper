@@ -8,6 +8,14 @@ Guidelines:
 - print_* functions: user-facing status messages
 - print_table / confirm: structured or interactive CLI output
 - Logging should never go through this module
+
+Stream separation
+-----------------
+Every helper accepts a ``stderr`` keyword that selects the target stream.
+Commands that emit machine-readable payloads (``--format json`` /
+``--format simple``) must keep **stdout** reserved for the payload and send
+all human-facing status output to **stderr**, otherwise the payload is
+corrupted for downstream consumers such as ``jq``.
 """
 
 from __future__ import annotations
@@ -15,7 +23,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
-from typing import Any, Callable, Dict, List, Optional
+from typing import IO, Any, Callable, Dict, List, Optional
 
 from rich.table import Table
 from rich.theme import Theme
@@ -40,44 +48,64 @@ DEPKEEPER_THEME = Theme(
 # Console lifecycle management
 # ---------------------------------------------------------------------------
 
-_console: Optional[Console] = None
+# Keyed by ``stderr`` flag: False -> stdout console, True -> stderr console.
+_consoles: Dict[bool, Console] = {}
 _console_lock = threading.Lock()
 
 
-def _should_use_color() -> bool:
-    """Return True if colored output should be enabled."""
+def _target_stream(stderr: bool) -> IO[str]:
+    """Return the stream a console with the given ``stderr`` flag writes to."""
+    return sys.stderr if stderr else sys.stdout
+
+
+def _should_use_color(*, stderr: bool = False) -> bool:
+    """Return True if colored output should be enabled for the given stream.
+
+    Args:
+        stderr: Check ``sys.stderr`` instead of ``sys.stdout``. Each stream is
+            evaluated independently because one may be a TTY while the other
+            is redirected (e.g. ``depkeeper check --format json | jq``).
+    """
     if os.environ.get("NO_COLOR"):
         return False
     try:
-        return sys.stdout.isatty()
+        return _target_stream(stderr).isatty()
     except (AttributeError, OSError):
         return False
 
 
-def _get_console() -> Console:
-    """Return a singleton Rich Console instance."""
-    global _console
+def _get_console(*, stderr: bool = False) -> Console:
+    """Return the singleton Rich Console for the requested stream.
 
-    if _console is None:
+    Args:
+        stderr: Return the stderr-bound console instead of the stdout one.
+    """
+    console = _consoles.get(stderr)
+
+    if console is None:
         with _console_lock:
-            if _console is None:
-                use_color = _should_use_color()
-                _console = Console(
+            console = _consoles.get(stderr)
+            if console is None:
+                use_color = _should_use_color(stderr=stderr)
+                console = Console(
                     theme=DEPKEEPER_THEME,
+                    stderr=stderr,
                     no_color=not use_color,
                     highlight=use_color,
                 )
-    return _console
+                _consoles[stderr] = console
+    return console
 
 
 def reconfigure_console() -> None:
-    """Reset the global console instance.
+    """Discard the memoized stdout and stderr consoles.
 
-    Useful if environment variables (e.g. NO_COLOR) change at runtime.
+    Color support is probed once per stream when a console is first built, so
+    call this after changing ``NO_COLOR`` or redirecting a stream at runtime
+    (tests rely on it for isolation).
     """
-    global _console
     with _console_lock:
-        _console = None
+        _consoles.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -85,19 +113,45 @@ def reconfigure_console() -> None:
 # ---------------------------------------------------------------------------
 
 
-def print_success(message: str, *, prefix: str = "[OK]") -> None:
-    """Print a success message."""
-    _get_console().print(f"{prefix} {message}", style="success")
+def print_success(
+    message: str, *, prefix: str = "[OK]", stderr: bool = False
+) -> None:
+    """Print a success message.
+
+    Args:
+        message: Message body.
+        prefix: Label rendered before the message.
+        stderr: Write to stderr instead of stdout. Use this whenever stdout
+            carries machine-readable output.
+    """
+    _get_console(stderr=stderr).print(f"{prefix} {message}", style="success")
 
 
-def print_error(message: str, *, prefix: str = "[ERROR]") -> None:
-    """Print an error message."""
-    _get_console().print(f"{prefix} {message}", style="error")
+def print_error(message: str, *, prefix: str = "[ERROR]", stderr: bool = True) -> None:
+    """Print an error message.
+
+    Errors default to stderr so they never corrupt machine-readable stdout.
+
+    Args:
+        message: Message body.
+        prefix: Label rendered before the message.
+        stderr: Write to stderr (default) or stdout.
+    """
+    _get_console(stderr=stderr).print(f"{prefix} {message}", style="error")
 
 
-def print_warning(message: str, *, prefix: str = "[WARNING]") -> None:
-    """Print a warning message."""
-    _get_console().print(f"{prefix} {message}", style="warning")
+def print_warning(
+    message: str, *, prefix: str = "[WARNING]", stderr: bool = False
+) -> None:
+    """Print a warning message.
+
+    Args:
+        message: Message body.
+        prefix: Label rendered before the message.
+        stderr: Write to stderr instead of stdout. Use this whenever stdout
+            carries machine-readable output.
+    """
+    _get_console(stderr=stderr).print(f"{prefix} {message}", style="warning")
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +168,7 @@ def print_table(
     column_styles: Optional[Dict[str, Dict[str, Any]]] = None,
     row_styler: Optional[Callable[[Dict[str, Any]], Optional[str]]] = None,
     show_row_lines: bool = False,
+    stderr: bool = False,
 ) -> None:
     """Render structured data as a Rich table.
 
@@ -125,6 +180,7 @@ def print_table(
         column_styles: Per-column style configuration.
         row_styler: Optional callback returning a row style.
         show_row_lines: Whether to draw horizontal lines between rows.
+        stderr: Render to stderr instead of stdout.
     """
     if not data:
         return
@@ -157,7 +213,7 @@ def print_table(
         style = row_styler(row) if row_styler else None
         table.add_row(*values, style=style)
 
-    _get_console().print(table)
+    _get_console(stderr=stderr).print(table)
 
 
 # ---------------------------------------------------------------------------
@@ -166,27 +222,29 @@ def print_table(
 
 
 def confirm(message: str, *, default: bool = False) -> bool:
-    """Prompt the user for a yes/no confirmation.
+    """Prompt the user for a yes/no confirmation on stdout.
 
-    The prompt accepts common yes/no inputs. Behavior is as follows:
+    Input handling:
 
-    - "y", "yes"   → return True
-    - "n", "no"    → return False
-    - empty input  → return `default`
-    - any other input (invalid) → return `default`
-    - Ctrl+C / EOF → return False
+    - ``y`` / ``yes`` -> ``True``
+    - ``n`` / ``no`` -> ``False``
+    - empty or unrecognized input -> *default*
+    - ``Ctrl+C`` / EOF -> ``False``
+
+    Unrecognized input falls back to *default* rather than re-prompting, so a
+    non-interactive caller can never be trapped in a loop.
 
     Args:
         message: Prompt message shown to the user.
-        default: Default choice used when the user presses Enter or
-            provides an unrecognized response.
+        default: Choice used when the user presses Enter or types something
+            unrecognized.
 
     Returns:
-        True if confirmed, False otherwise.
+        ``True`` if confirmed, ``False`` otherwise.
     """
     console = _get_console()
     suffix = " [Y/n]: " if default else " [y/N]: "
-    console.print(f"{message}{suffix}", end="", style="info")
+    console.print(f"{message}{suffix}", end="", style="info", markup=False)
 
     try:
         response = input().strip().lower()
@@ -202,7 +260,6 @@ def confirm(message: str, *, default: bool = False) -> bool:
     if response in ("n", "no"):
         return False
 
-    # Invalid input → fall back to default
     return default
 
 
@@ -211,19 +268,25 @@ def confirm(message: str, *, default: bool = False) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def get_raw_console() -> Console:
-    """Return the underlying Rich Console instance."""
-    return _get_console()
+def get_raw_console(*, stderr: bool = False) -> Console:
+    """Return the underlying Rich Console instance.
+
+    Args:
+        stderr: Return the stderr-bound console instead of the stdout one.
+    """
+    return _get_console(stderr=stderr)
 
 
 def colorize_update_type(update_type: str) -> str:
-    """Return a Rich-markup colored update type label.
+    """Wrap an update-type label in Rich markup colored by severity.
 
     Args:
-        update_type: Update classification string.
+        update_type: Update classification, e.g. ``"major"`` (see
+            `get_update_type`).
 
     Returns:
-        Rich markup string.
+        Rich markup string, or *update_type* unchanged when the label has no
+        assigned color.
     """
     color_map = {
         "major": "red",

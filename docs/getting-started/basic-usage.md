@@ -1,363 +1,212 @@
 ---
 title: Basic Usage
-description: Learn the fundamentals of using depkeeper for dependency management
+description: Reading depkeeper output — statuses, columns, update types and the three output formats
 ---
 
 # Basic Usage
 
-This guide covers the fundamental concepts and workflows for using depkeeper effectively.
+This page explains how to read what depkeeper reports. It is the reference for interpreting a
+run; the mechanics of each command live in [Checking for updates](../guides/checking-updates.md)
+and [Updating dependencies](../guides/updating-dependencies.md).
 
 ---
 
-## Understanding Requirements Files
+## The two commands
 
-depkeeper works with standard `requirements.txt` files that pip understands. It supports:
+| Command | Reads | Writes | Network | Default file |
+|---|---|---|---|---|
+| `depkeeper check` | requirements file(s) | nothing | PyPI JSON API | `requirements.txt` |
+| `depkeeper update` | requirements file(s) | requirements file(s), optional backups | PyPI JSON API | `requirements.txt` |
 
-```text
-# Basic version pinning
-requests==2.31.0
-flask>=2.0.0,<3.0.0
-
-# With extras
-celery[redis]==5.3.0
-
-# Environment markers
-pywin32==306; sys_platform == 'win32'
-
-# Include other files
--r base.txt
--c constraints.txt
-
-# VCS URLs
-git+https://github.com/user/repo.git@v1.0.0#egg=mypackage
-
-# Editable installs
--e ./local-package
-```
-
----
-
-## The `check` Command
-
-The `check` command analyzes your requirements file and reports available updates.
-
-### Basic Check
-
-```bash
-depkeeper check
-```
-
-By default, this reads `requirements.txt` in the current directory.
-
-### Check a Specific File
+Both accept an optional `FILE` argument. The file must exist and must not be a directory;
+otherwise Click rejects it with exit code `2` before depkeeper runs.
 
 ```bash
 depkeeper check requirements-dev.txt
-depkeeper check path/to/requirements.txt
-```
-
-### Output Formats
-
-=== "Table (default)"
-
-    ```bash
-    depkeeper check --format table
-    ```
-
-    ```
-                                        Dependency Status
-
-      Status       Package    Current   Latest   Recommended   Update Type   Conflicts   Python Support
-
-      ✓ OK         django      3.2.0     5.0.2        -             -           -        Current: >=3.8
-                                                                                         Latest: >=3.10
-
-      ⬆ OUTDATED   requests    2.28.0    2.32.0     2.32.0        minor         -        Current: >=3.7
-                                                                                         Latest: >=3.8
-
-      ⬆ OUTDATED   flask       2.0.0     3.0.1      2.3.3         patch         -        Current: >=3.7
-                                                                                         Latest: >=3.8
-
-    [WARNING] 2 package(s) have updates available
-    ```
-
-=== "Simple"
-
-    ```bash
-    depkeeper check --format simple
-    ```
-
-    ```
-     requests             2.28.0     → 2.32.0     (recommended: 2.32.0)
-           Python: installed: >=3.7, latest: >=3.8
-     flask                2.0.0      → 3.0.1      (recommended: 2.3.3)
-           Python: installed: >=3.7, latest: >=3.8, recommended: >=3.7
-     celery               5.3.0      → 5.3.6
-           Python: installed: >=3.8, latest: >=3.8
-    ```
-
-    Each line shows the package name, installed version, latest version, and a recommended version when it differs from the latest. The indented Python line shows the required Python version for each relevant release.
-
-=== "JSON"
-
-    ```bash
-    depkeeper check --format json
-    ```
-
-    ```json
-    [
-      {
-        "name": "requests",
-        "status": "latest",
-        "versions": {
-          "current": "2.32.5",
-          "latest": "2.32.5",
-          "recommended": "2.32.5"
-        },
-        "python_requirements": {
-          "current": ">=3.9",
-          "latest": ">=3.9",
-          "recommended": ">=3.9"
-        }
-      },
-      {
-        "name": "polars",
-        "status": "outdated",
-        "versions": {
-          "current": "1.37.1",
-          "latest": "1.38.1",
-          "recommended": "1.38.1"
-        },
-        "update_type": "minor",
-        "python_requirements": {
-          "current": ">=3.10",
-          "latest": ">=3.10",
-          "recommended": ">=3.10"
-        }
-      },
-      {
-        "name": "setuptools",
-        "status": "latest",
-        "versions": {
-          "current": "80.10.2",
-          "latest": "82.0.0",
-          "recommended": "80.10.2"
-        },
-        "python_requirements": {
-          "current": ">=3.9",
-          "latest": ">=3.9",
-          "recommended": ">=3.9"
-        }
-      }
-    ]
-    ```
-
-    Each object includes the package `name`, its `status` (`latest` or `outdated`), a `versions` block with `current`, `latest`, and `recommended` versions, and a `python_requirements` block showing the required Python version for each release. Outdated packages also include an `update_type` field (`patch`, `minor`, or `major`).
-
-### Filter to Outdated Only
-
-Show only packages that need updates:
-
-```bash
-depkeeper check --outdated-only
+depkeeper update requirements/prod.txt
 ```
 
 ---
 
-## The `update` Command
+## Version vocabulary
 
-The `update` command applies safe version updates to your requirements file.
+Four version slots appear throughout the output. Confusing them is the single most common source
+of misread reports.
 
-### Basic Update
-
-```bash
-depkeeper update
-```
-
-This:
-
-1. Checks all packages for updates
-2. Shows a preview of changes
-3. Asks for confirmation
-4. Updates `requirements.txt`
-
-### Preview Mode (Dry Run)
-
-See what would change without modifying files:
-
-```bash
-depkeeper update --dry-run
-```
-
-### Skip Confirmation
-
-Auto-approve updates (useful for CI/CD):
-
-```bash
-depkeeper update --yes
-# or
-depkeeper update -y
-```
-
-### Create Backup
-
-Create a timestamped backup before updating:
-
-```bash
-depkeeper update --backup
-```
-
-This creates `requirements.txt.backup.20260208-143022` (with current timestamp).
-
-### Update Specific Packages
-
-Update only selected packages:
-
-```bash
-# Single package
-depkeeper update -p requests
-
-# Multiple packages
-depkeeper update -p requests -p flask -p click
-```
-
----
-
-## Version Boundary Safety
-
-A key feature of depkeeper is **major version boundary protection**.
-
-### What This Means
-
-depkeeper **never** recommends crossing a major version boundary automatically:
-
-| Current | Latest | Recommended | Reason |
-|---|---|---|---|
-| `2.28.0` | `2.32.0` | `2.32.0` | Same major (2.x) ✓ |
-| `2.0.0` | `3.0.1` | `2.3.3` | Stays on 2.x, avoids 3.x breaking changes |
-| `1.2.3` | `2.0.0` | `1.9.9` | Stays on 1.x |
-
-### Why This Matters
-
-Major version updates often include:
-
-- Breaking API changes
-- Removed functionality
-- Changed behavior
-- Incompatible dependencies
-
-By staying within the same major version, depkeeper keeps your environment stable while still getting bug fixes and security patches.
-
-!!! tip "Intentional Major Upgrades"
-
-    When you're ready to upgrade to a new major version, update your `requirements.txt` manually and test thoroughly.
-
----
-
-## Conflict Detection
-
-depkeeper automatically detects dependency conflicts.
-
-### How It Works
-
-When checking or updating, depkeeper:
-
-1. Fetches dependency metadata from PyPI
-2. Builds a dependency graph
-3. Identifies version conflicts
-4. Adjusts recommendations to resolve conflicts
-
-### Example
-
-```
-                                         Dependency Status
-
-  Status       Package           Current   Latest   Recommended   Update Type   Conflicts                        Python Support
-
-  ⬆ OUTDATED   pytest-asyncio     0.3.0     1.3.0     0.23.8        minor         -                             Latest: >=3.10
-                                                                                                                Recommended: >=3.8
-
-  ⬆ OUTDATED   pytest             7.0.2     9.0.2     7.4.4         minor    pytest-asyncio needs >= 7.0.0,<9      Latest: >=3.10
-                                                                                                                Recommended: >=3.7
-
-[WARNING] 2 package(s) have updates available
-```
-
-In this example, `pytest` is constrained by `pytest-asyncio` which requires `pytest>=8.2,<9`. depkeeper detects this conflict and adjusts the recommended version of `pytest` to stay within safe boundaries.
-
-### Disabling Conflict Checking
-
-For faster checks without resolution:
-
-```bash
-depkeeper check --no-check-conflicts
-depkeeper update --no-check-conflicts
-```
-
-!!! warning
-    Disabling conflict checking may result in broken environments.
-
----
-
-## Working with Multiple Files
-
-### Multiple Requirements Files
-
-Check or update different files:
-
-```bash
-depkeeper check requirements.txt
-depkeeper check requirements-dev.txt
-depkeeper check requirements-test.txt
-```
-
-### Included Files
-
-If your requirements file uses `-r` includes:
-
-```text
-# requirements-dev.txt
--r requirements.txt
-pytest>=7.0.0
-black>=23.0.0
-```
-
-depkeeper follows include directives and processes all referenced files.
-
-### Constraint Files
-
-Constraint files (`-c`) are also supported:
-
-```text
-# requirements.txt
--c constraints.txt
-requests
-flask
-```
-
----
-
-## Exit Codes
-
-depkeeper uses meaningful exit codes:
-
-| Code | Meaning |
+| Term | Meaning |
 |---|---|
-| `0` | Success |
-| `1` | Error (parse failure, network issue, etc.) |
-| `2` | Usage error (invalid arguments) |
-| `130` | Interrupted by user (Ctrl+C) |
+| **Current** | The version depkeeper inferred from your file. For `pkg==1.2.3` it is `1.2.3`. For `pkg>=1.2` it is `1.2` (see [inference](#current-version-inference)). For `pkg` with no specifier it is unknown. |
+| **Latest** | `info.version` from PyPI. **Informational only.** depkeeper never applies it merely because it is newest. |
+| **Recommended** | The version depkeeper would write. It is the output of the recommendation algorithm *and* of conflict resolution. This is the authoritative value. |
+| **Update type** | The classification of `current → recommended`: `major`, `minor`, `patch`, `new`, `same`, `downgrade`, `update`, `unknown`. |
 
-Useful for CI/CD scripts:
+The invariant after a run with conflict checking enabled is that the recommended version shown in
+the report is exactly the version `update` writes. See
+[Conflict resolution → Result invariant](../concepts/conflict-resolution.md#result-invariant).
 
-```bash
-depkeeper check --format json || echo "Check failed"
-```
+### Current-version inference
+
+depkeeper reads a *range* as a statement about where you are today:
+
+| Requirement | Inferred current | Rule |
+|---|---|---|
+| `requests==2.28.0` | `2.28.0` | A sole `==` specifier is an exact pin. |
+| `flask>=2.0,<2.3` | `2.0` | First `>=`, `>` or `~=` specifier wins. |
+| `click~=8.0` | `8.0` | Same rule; `~=` counts as a floor. |
+| `django<5.0` | *(none)* | No floor operator, so nothing is inferred. |
+| `certifi` | *(none)* | No specifiers at all. |
+
+This matters because the inferred current version establishes the **major boundary**.
+`django>=3.2,<5.0` anchors to major `3`, so depkeeper caps it at the newest `3.x` even though
+`4.x` satisfies the declared range.
+
+Pass `--strict-version-matching` to disable inference: only a sole `==` counts as a current
+version. Everything else is then treated as "not installed", which changes both the status and
+the boundary. See [Strict version matching](../guides/checking-updates.md#strict-version-matching).
 
 ---
 
-## Next Steps
+## Statuses
 
-- [Checking Updates](../guides/checking-updates.md) -- Deep dive into the check command
-- [Updating Dependencies](../guides/updating-dependencies.md) -- Advanced update workflows
-- [Dependency Resolution](../guides/dependency-resolution.md) -- Understand conflict detection
+### Table format statuses
+
+| Badge | Meaning | Written by `update`? |
+|---|---|---|
+| `[OK]` | No update available *or* no current version to compare against. | Only in the second case (a pin is added). |
+| `[OUTDATED]` | A safe upgrade exists. | Yes. |
+| `[CONFLICT]` | Conflicts blocked every candidate; no upgrade is possible. | No. |
+| `[INCOMP]` | A **downgrade** is required: the declared version is unusable (Python-incompatible, or forced down by another package). | Yes — this rewrites the floor *downwards*. |
+| `[ERROR]` | PyPI metadata could not be retrieved. | No. |
+
+`[INCOMP]` deliberately outranks `[CONFLICT]`: a required downgrade means the version you
+declared cannot be used at all, which you must see first.
+
+### JSON / simple statuses
+
+The machine formats use a different, finer-grained ladder:
+
+| Status | Condition |
+|---|---|
+| `no-update` | No recommended version — metadata unavailable. Accompanied by an `error` field. |
+| `install` | No current version, but a recommendation exists (a pin will be added). |
+| `downgrade` | Recommended is lower than current. |
+| `outdated` | Recommended is higher than current. |
+| `latest` | Recommended equals current. |
+
+!!! warning "The two ladders disagree for unversioned requirements"
+
+    `certifi` with no specifier renders as `[OK]` in the table but as `install` in JSON and
+    simple output. The table's up-to-date branch is also its fallback branch. Treat the machine
+    formats as authoritative. Tracked in [Known limitations](../reference/limitations.md#unversioned-requirements-report-as-ok).
+
+---
+
+## The table format
+
+`--format table` (the default) renders a Rich table with eight columns:
+
+| Column | Content |
+|---|---|
+| `Status` | The badge from the table above. |
+| `Package` | PEP 503 canonical name (lower-cased, `_` and `.` folded to `-`). |
+| `Current` | Inferred current version, or `-`. |
+| `Latest` | PyPI `info.version`, or `error`. |
+| `Recommended` | Shown **only when it differs from current**; otherwise `-`. |
+| `Update Type` | `major` / `minor` / `patch` / `downgrade` / `blocked` / `-`. |
+| `Conflicts` | One line per conflict: `⚠ <source> needs <specifier>`. |
+| `Python Support` | `requires_python` for the current, latest and recommended releases. |
+
+A blank `Recommended` cell means "same as current" — it is suppressed to reduce noise, not
+because no recommendation exists.
+
+The table format also prints the **Resolution Summary** (totals, convergence, per-package version
+changes) before the table whenever conflict checking is enabled.
+
+---
+
+## The simple format
+
+`--format simple` emits one status line per package plus indented detail lines. Rich markup is
+disabled for these lines, because a label such as `[OUTDATED]` would otherwise be interpreted as
+a style tag and swallowed.
+
+```text
+[OUTDATED]   requests             2.28.0     → 2.34.2
+       Python: installed: >=3.7, <4, latest: >=3.10, recommended: >=3.10
+[OUTDATED]   flask                2.0        → 3.1.3      (recommended: 2.2.5)
+       Python: latest: >=3.9, recommended: >=3.7
+[INSTALL]    certifi              none       → 2026.7.22
+       Python: latest: >=3.7
+```
+
+The arrow points at **latest**, not at the recommendation. When the two differ — because a major
+boundary, a declared cap or a conflict capped the upgrade — the recommendation is appended in
+parentheses. Conflicts appear as additional indented `⚠ Conflict:` lines.
+
+---
+
+## The JSON format
+
+`--format json` prints a JSON array to stdout and nothing else. An empty result set still emits
+`[]`, so a consumer such as `jq` never receives empty input.
+
+```json
+[
+  {
+    "name": "flask",
+    "status": "outdated",
+    "versions": {
+      "current": "2.0",
+      "latest": "3.1.3",
+      "recommended": "2.2.5"
+    },
+    "update_type": "minor",
+    "python_requirements": {
+      "latest": ">=3.9",
+      "recommended": ">=3.7"
+    }
+  }
+]
+```
+
+Only `name` and `status` are guaranteed present. Every other key is omitted when empty. The full
+schema, including the `conflicts` and `error` members, is in
+[JSON output](../reference/json-output.md).
+
+---
+
+## Output streams
+
+This distinction matters for any scripted use:
+
+| Format | stdout | stderr |
+|---|---|---|
+| `table` | report **and** status messages | log records |
+| `simple` | package lines only | status messages, warnings, errors, log records |
+| `json` | the JSON document only | status messages, warnings, errors, log records |
+
+Consequently this is safe, even with verbose logging:
+
+```bash
+depkeeper -vv check --format json | jq .
+```
+
+and this discards the diagnostics:
+
+```bash
+depkeeper check --format json 2>/dev/null | jq .
+```
+
+Errors always go to stderr regardless of format.
+
+---
+
+## Common first-run surprises
+
+| Observation | Explanation |
+|---|---|
+| "It won't upgrade past 1.x." | Major boundary. This is the core safety rule, not a bug. [Details](../concepts/version-recommendation.md#the-major-version-boundary). |
+| "Latest is 3.1.3 but it recommends 2.2.5." | Your own `<2.3` cap, or a conflict, or the major boundary. Check the `Conflicts` column and your declared range. |
+| "`update` changed a package `check` showed as OK." | Unversioned requirements report `OK` but receive a pin. See above. |
+| "It proposed a *downgrade*." | Either the declared version is Python-incompatible on your interpreter, or another package in the file requires an older release. [Details](../concepts/conflict-resolution.md#downgrades). |
+| "Nothing happened, exit code 0." | `check` always exits `0` on success. Gate on the JSON payload, not the exit code. [Exit codes](../reference/exit-codes.md). |

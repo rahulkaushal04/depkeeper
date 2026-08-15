@@ -1,8 +1,7 @@
-"""
-Centralized constants for depkeeper.
+"""Centralized constants for depkeeper.
 
-This module defines immutable configuration values used across depkeeper,
-including network settings, file patterns, CLI directives, and logging
+Defines the immutable configuration values used across depkeeper, including
+network settings, file patterns, pip directives, encodings, and logging
 formats. All values are intended to be treated as read-only.
 """
 
@@ -33,6 +32,10 @@ DEFAULT_TIMEOUT: Final[int] = 30
 
 #: Maximum number of retries for failed HTTP requests.
 DEFAULT_MAX_RETRIES: Final[int] = 3
+
+#: Upper bound (in seconds) on how long a ``429`` response's ``Retry-After``
+#: value may delay the client, regardless of what the server sends.
+MAX_RETRY_AFTER_SECONDS: Final[int] = 120
 
 # ---------------------------------------------------------------------------
 # Requirement file patterns and directives
@@ -73,12 +76,52 @@ EDITABLE_DIRECTIVE_LONG: Final[str] = "--editable"
 #: Hash-checking directive.
 HASH_DIRECTIVE: Final[str] = "--hash"
 
+#: Pip global options allowed in requirements files (long and short forms).
+#: These apply to pip invocation and are not package requirements.
+PIP_GLOBAL_OPTIONS_WITH_VALUES: Final[Sequence[str]] = (
+    "--index-url",
+    "--extra-index-url",
+    "--find-links",
+    "--trusted-host",
+    "--no-binary",
+    "--only-binary",
+    "--use-feature",
+    "-i",
+    "-f",
+)
+
+#: Pip global option flags that do not take values.
+PIP_GLOBAL_OPTIONS_NO_VALUES: Final[Sequence[str]] = (
+    "--pre",
+    "--prefer-binary",
+)
+
 # ---------------------------------------------------------------------------
 # Security constraints
 # ---------------------------------------------------------------------------
 
 #: Maximum allowed file size (in bytes) when reading requirement files.
 MAX_FILE_SIZE: Final[int] = 10 * 1024 * 1024  # 10 MB
+
+# ---------------------------------------------------------------------------
+# File encoding
+# ---------------------------------------------------------------------------
+
+#: Encoding used when reading text files. ``utf-8-sig`` decodes plain UTF-8
+#: identically to ``utf-8`` but additionally removes a leading byte order mark,
+#: which Windows editors (Notepad, PowerShell ``Set-Content``) prepend.
+DEFAULT_READ_ENCODING: Final[str] = "utf-8-sig"
+
+#: Encoding used when writing text files. Never emits a byte order mark.
+DEFAULT_WRITE_ENCODING: Final[str] = "utf-8"
+
+#: Encoding used to rewrite a file that originally carried a UTF-8 BOM, so the
+#: byte order mark is preserved rather than silently dropped.
+BOM_WRITE_ENCODING: Final[str] = "utf-8-sig"
+
+#: The Unicode byte order mark character, as produced by decoding a UTF-8 BOM
+#: with a non-BOM-aware codec.
+BOM_CHARACTER: Final[str] = "\ufeff"
 
 # ---------------------------------------------------------------------------
 # Logging configuration

@@ -1,9 +1,8 @@
-"""
-Package data model for depkeeper.
+"""Package data model for depkeeper.
 
-This module defines the core representation of a Python package, including
-version state, update recommendations, conflict tracking, and Python
-compatibility evaluation.
+Defines the core representation of a Python package, including version state,
+update recommendations, conflict tracking, and Python compatibility
+evaluation.
 """
 
 from __future__ import annotations
@@ -11,15 +10,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from packaging.version import InvalidVersion, Version, parse
+from packaging.version import Version
 
 from depkeeper.models.conflict import Conflict
-from depkeeper.utils.version_utils import get_update_type
+from depkeeper.utils.naming import normalize_package_name
+from depkeeper.utils.version_utils import get_update_type, parse_version_lenient
 
 
 def _normalize_name(name: str) -> str:
-    """
-    Normalize a package name according to PEP 503.
+    """Normalize a package name according to PEP 503.
+
+    Thin alias for `depkeeper.utils.naming.normalize_package_name`,
+    so ``Package.name`` is always comparable to the keys used by the
+    parser, data store and dependency analyzer.
 
     Args:
         name: Original package name.
@@ -27,13 +30,12 @@ def _normalize_name(name: str) -> str:
     Returns:
         Normalized package name.
     """
-    return name.lower().replace("_", "-")
+    return normalize_package_name(name)
 
 
 @dataclass
 class Package:
-    """
-    Represents a Python package with version and compatibility state.
+    """A Python package with version and compatibility state.
 
     Attributes:
         name: Normalized package name.
@@ -58,7 +60,7 @@ class Package:
     )
 
     def __post_init__(self) -> None:
-        """Normalize package name after initialization."""
+        """Normalize the name so lookups match the parser and data store keys."""
         self.name = _normalize_name(self.name)
 
     # ------------------------------------------------------------------
@@ -66,26 +68,26 @@ class Package:
     # ------------------------------------------------------------------
 
     def _parse_version(self, version: Optional[str]) -> Optional[Version]:
-        """
-        Parse and cache a version string.
+        """Parse and cache a version string.
+
+        Uses `parse_version_lenient`,
+        which also resolves a PEP 440 wildcard band (``"2.*"``) to its
+        release-prefix floor, so `has_update`/`requires_downgrade`
+        stay meaningful for a wildcard exact pin instead of treating it as
+        unparseable.
 
         Args:
             version: Version string to parse.
 
         Returns:
-            Parsed Version object, or None if invalid.
+            Parsed `Version`, or ``None`` when the
+            input is ``None`` or not PEP 440 compliant.
         """
         if version is None:
             return None
 
         if version not in self._parsed_versions:
-            try:
-                parsed = parse(version)
-                self._parsed_versions[version] = (
-                    parsed if isinstance(parsed, Version) else None
-                )
-            except InvalidVersion:
-                self._parsed_versions[version] = None
+            self._parsed_versions[version] = parse_version_lenient(version)
 
         return self._parsed_versions[version]
 
@@ -110,11 +112,10 @@ class Package:
 
     @property
     def requires_downgrade(self) -> bool:
-        """
-        Determine whether the recommended version is lower than current.
+        """Whether the recommended version is lower than the current one.
 
-        Returns:
-            True if a downgrade is required.
+        True when conflict resolution or Python incompatibility forced the
+        recommendation below the version declared in the requirements file.
         """
         return (
             self.current is not None
@@ -123,12 +124,7 @@ class Package:
         )
 
     def has_conflicts(self) -> bool:
-        """
-        Check whether dependency conflicts exist.
-
-        Returns:
-            True if conflicts are present.
-        """
+        """Return ``True`` when dependency conflicts were recorded."""
         return bool(self.conflicts)
 
     def set_conflicts(
@@ -137,33 +133,23 @@ class Package:
         *,
         resolved_version: Optional[str] = None,
     ) -> None:
-        """
-        Set dependency conflicts and optionally update recommended version.
+        """Record dependency conflicts and optionally override the recommendation.
 
         Args:
-            conflicts: List of detected conflicts.
-            resolved_version: Version resolving the conflicts, if known.
+            conflicts: Detected conflicts affecting this package.
+            resolved_version: Version that resolves the conflicts. When given,
+                it replaces `recommended_version`.
         """
         self.conflicts = conflicts
         if resolved_version:
             self.recommended_version = resolved_version
 
     def get_conflict_summary(self) -> List[str]:
-        """
-        Return short, user-friendly conflict summaries.
-
-        Returns:
-            List of summary strings.
-        """
+        """Return one short conflict summary per recorded conflict."""
         return [conflict.to_short_string() for conflict in self.conflicts]
 
     def get_conflict_details(self) -> List[str]:
-        """
-        Return detailed conflict descriptions.
-
-        Returns:
-            List of detailed conflict strings.
-        """
+        """Return one detailed description per recorded conflict."""
         return [conflict.to_display_string() for conflict in self.conflicts]
 
     # ------------------------------------------------------------------
@@ -171,12 +157,7 @@ class Package:
     # ------------------------------------------------------------------
 
     def has_update(self) -> bool:
-        """
-        Determine whether an update is available.
-
-        Returns:
-            True if recommended version is newer than current.
-        """
+        """Return ``True`` when the recommended version is newer than current."""
         return (
             self.current is not None
             and self.recommended is not None
@@ -184,14 +165,15 @@ class Package:
         )
 
     def get_version_python_req(self, version_key: str) -> Optional[str]:
-        """
-        Retrieve Python version requirements for a specific version entry.
+        """Return the ``requires_python`` specifier for one version slot.
 
         Args:
-            version_key: One of 'current', 'latest', or 'recommended'.
+            version_key: One of ``"current"``, ``"latest"`` or
+                ``"recommended"``.
 
         Returns:
-            Python requirement specifier if available.
+            The specifier string, or ``None`` when the upload omitted it or
+            the slot has no metadata.
         """
         meta = self.metadata.get(f"{version_key}_metadata")
         if isinstance(meta, dict):
@@ -204,11 +186,16 @@ class Package:
     # ------------------------------------------------------------------
 
     def get_status_summary(self) -> Tuple[str, str, str, Optional[str]]:
-        """
-        Compute a high-level status summary.
+        """Compute the high-level status used by line-based output.
+
+        The status ladder is ordered by severity: a missing recommendation
+        means PyPI data was unavailable, and a required downgrade outranks a
+        plain "outdated" because it signals an incompatible pin.
 
         Returns:
-            Tuple of (status, installed, latest, recommended).
+            Tuple of ``(status, installed, latest, recommended)``, where
+            *status* is one of ``no-update``, ``install``, ``downgrade``,
+            ``outdated`` or ``latest``.
         """
         installed = self.current_version or "none"
         latest = self.latest_version or "error"
@@ -228,12 +215,17 @@ class Package:
         return status, installed, latest, recommended
 
     def to_json(self) -> Dict[str, Any]:
-        """
-        Serialize package state to a JSON-compatible dictionary.
+        """Serialize package state to a JSON-compatible dictionary.
+
+        Optional sections (``versions``, ``update_type``,
+        ``python_requirements``, ``conflicts``) are omitted when empty, so
+        consumers must treat every key except ``name`` and ``status`` as
+        optional.
 
         Returns:
             JSON-safe package representation.
         """
+        # Mirrors the status ladder in get_status_summary(); keep both in sync.
         if not self.recommended_version:
             status = "no-update"
         elif not self.current_version:
@@ -289,11 +281,11 @@ class Package:
     # ------------------------------------------------------------------
 
     def render_python_compatibility(self) -> str:
-        """
-        Render Python compatibility information for display.
+        """Render Python compatibility as a multi-line cell for the table view.
 
         Returns:
-            Formatted compatibility string.
+            Newline-separated requirement lines, or a dimmed placeholder when
+            no ``requires_python`` metadata is known.
         """
         parts: List[str] = []
 
@@ -313,8 +305,10 @@ class Package:
         return "\n".join(parts) if parts else "[dim]-[/dim]"
 
     def get_display_data(self) -> Dict[str, Any]:
-        """
-        Compute all values required for UI rendering.
+        """Compute the derived values required for UI rendering.
+
+        Centralizing this keeps the renderers free of status logic, so table
+        and simple output can never disagree about a package's state.
 
         Returns:
             Dictionary of derived display properties.

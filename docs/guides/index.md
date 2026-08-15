@@ -1,136 +1,99 @@
 ---
 title: User Guide
-description: In-depth guides for depkeeper features and workflows
+description: Task-oriented guides for operating depkeeper
 ---
 
 # User Guide
 
-Comprehensive guides covering all depkeeper features and common workflows.
-
----
-
-## Guides
+Task-oriented documentation. For the model behind these tasks, see
+[Core Concepts](../concepts/index.md); for exhaustive flag lists, see
+[Reference](../reference/index.md).
 
 <div class="grid cards" markdown>
 
--   :material-magnify:{ .lg .middle } **[Checking for Updates](checking-updates.md)**
+- :material-magnify:{ .lg .middle } **[Checking for updates](checking-updates.md)**
 
     ---
 
-    Master the `check` command with all its options and output formats.
+    The read-only report: filters, formats, streams and how to consume them.
 
-    [:octicons-arrow-right-24: Learn more](checking-updates.md)
-
--   :material-update:{ .lg .middle } **[Updating Dependencies](updating-dependencies.md)**
+- :material-update:{ .lg .middle } **[Updating dependencies](updating-dependencies.md)**
 
     ---
 
-    Safely update packages with backups, dry runs, and selective updates.
+    Applying changes safely: previews, selection, pin mode, hashes, backups.
 
-    [:octicons-arrow-right-24: Learn more](updating-dependencies.md)
-
--   :material-vector-triangle:{ .lg .middle } **[Dependency Resolution](dependency-resolution.md)**
+- :material-cog:{ .lg .middle } **[Configuration](configuration.md)**
 
     ---
 
-    Understand how depkeeper detects and resolves conflicts.
+    Config files, environment variables and the precedence rules between them.
 
-    [:octicons-arrow-right-24: Learn more](dependency-resolution.md)
-
--   :material-pipe:{ .lg .middle } **[CI/CD Integration](ci-cd-integration.md)**
+- :material-pipe:{ .lg .middle } **[CI/CD integration](ci-cd-integration.md)**
 
     ---
 
-    Automate dependency checks in GitHub Actions, GitLab CI, and more.
+    Gating builds, opening update pull requests, and scheduled drift reports.
 
-    [:octicons-arrow-right-24: Learn more](ci-cd-integration.md)
-
--   :material-cog:{ .lg .middle } **[Configuration](configuration.md)**
+- :material-server:{ .lg .middle } **[Operations](operations.md)**
 
     ---
 
-    Customize depkeeper behavior via CLI options and environment variables.
+    Networking, caching, performance, security posture and diagnostics.
 
-    [:octicons-arrow-right-24: Learn more](configuration.md)
-
--   :material-star:{ .lg .middle } **[Best Practices](best-practices.md)**
+- :material-star:{ .lg .middle } **[Best practices](best-practices.md)**
 
     ---
 
-    Recommended practices for dependency management and update workflows.
+    How to structure requirements files so depkeeper produces good answers.
 
-    [:octicons-arrow-right-24: Learn more](best-practices.md)
-
--   :material-wrench:{ .lg .middle } **[Troubleshooting](troubleshooting.md)**
+- :material-wrench:{ .lg .middle } **[Troubleshooting](troubleshooting.md)**
 
     ---
 
-    Common issues and their solutions when using depkeeper.
-
-    [:octicons-arrow-right-24: Learn more](troubleshooting.md)
+    Symptom-indexed diagnosis and recovery.
 
 </div>
 
 ---
 
-## Common Workflows
+## Workflow cheat sheet
 
-### Daily Development
+=== "Daily development"
 
-```bash
-# Morning: Check what's outdated
-depkeeper check --outdated-only
-
-# When ready: Update safely
-depkeeper update --backup -y
-```
-
-### Before Release
-
-```bash
-# Full check with conflict resolution
-depkeeper check
-
-# Preview updates
-depkeeper update --dry-run
-
-# Apply after review
-depkeeper update -y
-```
-
-### CI/CD Pipeline
-
-```bash
-# Exit non-zero if outdated (for CI notifications)
-depkeeper check --format json --outdated-only
-
-# Automated update with backup
-depkeeper update --backup -y
-```
-
----
-
-## Best Practices
-
-!!! tip "Version Pinning"
-
-    Always pin your direct dependencies to specific versions for reproducible builds:
-    ```text
-    requests==2.31.0
-    flask==2.3.3
-    ```
-
-!!! tip "Regular Updates"
-
-    Check for updates weekly or integrate into your CI/CD pipeline for automated notifications.
-
-!!! tip "Test After Updates"
-
-    Always run your test suite after updating dependencies:
     ```bash
-    depkeeper update -y && pytest
+    depkeeper check --outdated-only     # what moved?
+    depkeeper update --dry-run          # what would change?
+    depkeeper update --backup           # apply, keeping a copy
+    pip install -r requirements.txt && pytest
     ```
 
-!!! warning "Major Versions"
+=== "Reviewing a single package"
 
-    depkeeper won't cross major version boundaries automatically. When you're ready for a major upgrade, update manually and test thoroughly.
+    ```bash
+    depkeeper check --format json | jq '.[] | select(.name == "django")'
+    depkeeper update -p django --dry-run
+    ```
+
+=== "CI drift report"
+
+    ```bash
+    depkeeper check --format json --no-check-conflicts > report.json
+    jq '[.[] | select(.status == "outdated")] | length' report.json
+    ```
+
+=== "Release preparation"
+
+    ```bash
+    depkeeper update --pin --backup     # freeze to exact versions
+    pip install -r requirements.txt
+    pytest
+    git diff requirements.txt
+    ```
+
+=== "Multi-file project"
+
+    ```bash
+    depkeeper update requirements/base.txt --dry-run   # follows -r includes
+    depkeeper check requirements/dev.txt
+    ```

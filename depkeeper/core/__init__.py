@@ -1,13 +1,12 @@
-"""
-Core functionality exports for depkeeper.
+"""Core subsystem exports for depkeeper.
 
-This module provides convenient access to the core subsystems of depkeeper.
-Importing from here keeps user-facing imports clean and stable:
+Provides convenient access to the core subsystems. Importing from here keeps
+user-facing imports stable even if internal modules are reorganized::
 
     from depkeeper.core import RequirementsParser
 
-As additional core components are added (Resolver, Updater, Validator, etc.),
-they should be re-exported here to maintain a consistent public API.
+New core components should be re-exported here to maintain one consistent
+public API.
 """
 
 from __future__ import annotations

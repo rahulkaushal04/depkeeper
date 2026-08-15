@@ -1,86 +1,59 @@
-# 🔥 Pull Request
+# Pull Request
 
-Thank you for contributing to **depkeeper**!
-Please fill out the details below to help us review your PR quickly and effectively.
+Thank you for contributing to depkeeper. Please fill in enough detail for a reviewer to understand
+the change without reading the whole diff first.
 
----
+## Summary
 
-## 📌 Summary
+<!-- What does this PR do, in one or two sentences? -->
 
-<!-- A short description of what this PR does -->
+## Motivation
 
----
+<!-- What problem does this solve? Link the issue if one exists: Closes #123 -->
 
-## 🧩 What Does This PR Change?
+## Changes
 
-<!-- Explain what was added, removed, fixed, or updated -->
+<!-- Bullet list of what was added, removed, fixed or changed. -->
 
 -
--
-- ***
 
-## 🎯 Motivation
+## How to test this
 
-<!-- Why is this change needed? What problem does it solve? -->
-
----
-
-## 🧪 How to Test This
-
-<!-- Provide exact steps, commands, or test cases reviewers should run -->
-
-### CLI Testing (if applicable)
+<!-- Exact commands or steps a reviewer should run. -->
 
 ```bash
 depkeeper <command> ...
 ```
 
-````
-
-### Python API Testing (if applicable)
+<!-- If this touches the Python API (depkeeper.core, depkeeper.models), show the real import: -->
 
 ```python
-from depkeeper import Client
+from depkeeper.core import RequirementsParser
 ```
 
----
+## Checklist
 
-## ✔️ Checklist
+Definition of done, per [CONTRIBUTING.md](../CONTRIBUTING.md#pull-request-expectations):
 
-### Code Quality
+- [ ] `python -m pytest tests -q --no-cov` passes
+- [ ] `python -m mypy depkeeper --python-version 3.13` reports no new errors
+- [ ] `python -m compileall -q depkeeper` succeeds
+- [ ] `pre-commit run --all-files` passes
+- [ ] `python -m mkdocs build --strict` passes (if `docs/` or public docstrings changed)
+- [ ] New behaviour has tests; fixed bugs have a regression test that fails without the fix
+- [ ] Documentation updated — see the table in [CONTRIBUTING.md](../CONTRIBUTING.md#documentation-expectations)
+- [ ] `CHANGELOG.md` updated under **Unreleased** for any user-visible change
+- [ ] No [invariant](../CONTRIBUTING.md#invariants-you-must-not-break) is weakened, or this PR
+      argues explicitly why it should be
 
-- [ ] My code follows depkeeper’s style guidelines
-- [ ] I ran `mypy` and resolved type issues
+## Behavioural impact
 
-### Testing
+<!--
+Does this PR change what depkeeper recommends or writes for any existing requirements file?
+If yes, this is at minimum a minor release (see CONTRIBUTING.md) — describe what changes and why.
+If no, say so explicitly.
+-->
 
-- [ ] I added or updated unit tests
-- [ ] All tests pass (`pytest`)
-- [ ] I added/updated test fixtures if needed
+## Related issues
 
-### Documentation
-
-- [ ] I updated documentation (if this PR changes APIs, behaviors, or commands)
-- [ ] I updated examples (CLI / Python)
-- [ ] I added/updated changelog entry (under _Unreleased_)
-
-### Backwards Compatibility
-
-- [ ] This change is backward compatible
-- [ ] OR this PR includes a clear description of breaking changes
-
----
-
-## 🔍 Related Issues
-
-<!-- List any issues this PR fixes or is related to -->
-
-- Closes #
-- Related to #
-
----
-
-## 📚 Additional Notes
-
-<!-- Any other info useful for reviewers: screenshots, benchmarks, diagrams, edge cases, known limitations -->
-````
+<!-- Closes #, relates to # -->

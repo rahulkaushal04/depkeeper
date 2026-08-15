@@ -2,14 +2,14 @@
 
 Provides a unified, async-safe cache for PyPI package metadata so that
 ``VersionChecker`` and ``DependencyAnalyzer`` share a single HTTP fetch
-per package.  All public helpers on :class:`PyPIDataStore` are either
+per package.  All public helpers on `PyPIDataStore` are either
 ``async`` (may trigger a network round-trip) or synchronous accessors
 that return only what has already been cached.
 
 Typical usage::
 
     from depkeeper.utils.http import HTTPClient
-    from depkeeper.data_store import PyPIDataStore
+    from depkeeper.core.data_store import PyPIDataStore
 
     async with HTTPClient() as client:
         store = PyPIDataStore(client)
@@ -23,7 +23,7 @@ from __future__ import annotations
 import sys
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple, TypeVar
 
 from packaging.version import InvalidVersion, Version, parse
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
@@ -31,12 +31,16 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from depkeeper.exceptions import PyPIError
 from depkeeper.utils.http import HTTPClient
 from depkeeper.utils.logger import get_logger
+from depkeeper.utils.naming import normalize_package_name
 from depkeeper.constants import PYPI_JSON_API
 
 logger = get_logger("data_store")
 
 # Public API
 __all__ = ["PyPIDataStore", "PyPIPackageData"]
+
+# Result type of a coalesced in-flight fetch (see PyPIDataStore._coalesce)
+_T = TypeVar("_T")
 
 
 # ---------------------------------------------------------------------------
@@ -48,13 +52,13 @@ __all__ = ["PyPIDataStore", "PyPIPackageData"]
 class PyPIPackageData:
     """Immutable-by-convention snapshot of one PyPI package.
 
-    Populated once by :pymeth:`PyPIDataStore._parse_package_data` and then
+    Populated once by `PyPIDataStore._parse_package_data` and then
     shared across every caller that requests the same package.  All
     mutable collections use ``field(default_factory=…)`` so that each
     instance owns its own lists / dicts.
 
     Attributes:
-        name: Normalised package name (lower-case, hyphens).
+        name: Normalized package name (lower-case, hyphens).
         latest_version: Version string reported by PyPI ``info.version``.
         latest_requires_python: ``requires_python`` marker for *latest*.
         latest_dependencies: Base (non-extra) deps of *latest*.
@@ -96,21 +100,15 @@ class PyPIPackageData:
 
         Returns:
             Version strings in descending order (inherits the sort order
-            of :pyattr:`parsed_versions`).
-
-        Example::
-
-            >>> data.parsed_versions  # imagine already populated
-            [("3.1.0", Version("3.1.0")), ("2.7.18", Version("2.7.18")), ...]
-            >>> data.get_versions_in_major(2)
-            ['2.7.18', ...]
+            of `parsed_versions`).
         """
         result: List[str] = []
 
         for version_str, parsed in self.parsed_versions:
             if parsed.is_prerelease:
                 continue
-            # release is a tuple like (major, minor, micro); guard against empty
+            # `release` may be empty for exotic versions such as an epoch-only
+            # tag, so index 0 is not guaranteed to exist.
             if parsed.release and parsed.release[0] == major:
                 result.append(version_str)
 
@@ -125,7 +123,7 @@ class PyPIPackageData:
 
         Returns ``True`` when the package omits ``requires_python`` or when
         parsing the specifier fails — matching pip's own permissive
-        behaviour.
+        behavior.
 
         Args:
             version: Package version string, e.g. ``"1.4.2"``.
@@ -147,14 +145,15 @@ class PyPIPackageData:
         """
         requires_python = self.python_requirements.get(version)
 
-        # No constraint recorded → treat as compatible (mirrors pip)
+        # Absent constraint means "any Python", which is how pip reads it.
         if not requires_python:
             return True
 
         try:
             return python_version in SpecifierSet(requires_python)
         except InvalidSpecifier:
-            # Malformed specifier → be permissive
+            # Malformed upstream metadata must not exclude an otherwise
+            # installable release.
             return True
 
     def get_python_compatible_versions(
@@ -175,11 +174,6 @@ class PyPIPackageData:
 
         Returns:
             Filtered, descending list of version strings.
-
-        Example::
-
-            >>> data.get_python_compatible_versions("3.9.7", major=2)
-            ['2.7.18', '2.7.16']
         """
         result: List[str] = []
 
@@ -187,7 +181,6 @@ class PyPIPackageData:
             if parsed.is_prerelease:
                 continue
 
-            # Major-version gate (skipped when major is None)
             if major is not None:
                 if not parsed.release or parsed.release[0] != major:
                     continue
@@ -199,24 +192,42 @@ class PyPIPackageData:
 
 
 # ---------------------------------------------------------------------------
-# Async data-store with double-checked locking
+# Async data-store with per-key request coalescing
 # ---------------------------------------------------------------------------
 
 
 class PyPIDataStore:
     """Async-safe, per-process cache for PyPI package metadata.
 
-    Each unique (normalised) package name triggers **at most one** HTTP
-    request to ``/pypi/{pkg}/json``.  A :class:`asyncio.Semaphore`
-    limits concurrent outbound fetches, and a double-checked lock inside
-    the semaphore prevents thundering-herd duplicates when several
-    coroutines request the same package simultaneously.
+    Each unique (normalized) package name triggers **at most one**
+    concurrent HTTP request to ``/pypi/{pkg}/json``.  Two independent
+    mechanisms cooperate:
+
+    * a **per-key in-flight map** coalesces callers that ask for the same
+      package (or the same ``name==version`` dependency list) while a
+      fetch is already running — the first caller performs the request and
+      every later caller awaits its result;
+    * a `asyncio.Semaphore` caps how many *distinct* fetches may be
+      outbound at once.
+
+    A counting semaphore alone cannot deduplicate: it admits
+    ``concurrent_limit`` coroutines simultaneously, so a re-check inside it
+    is not mutually exclusive.  Waiters coalesced by the in-flight map do
+    **not** consume a semaphore slot.
+
+    Failures are never cached.  Once a fetch fails, its in-flight entry is
+    dropped so that a later call re-attempts the request (transient network
+    errors must stay recoverable).
 
     Args:
-        http_client: A pre-configured :class:`HTTPClient` instance (owns
+        http_client: A pre-configured `HTTPClient` instance (owns
             connection pool / session).
         concurrent_limit: Maximum number of PyPI fetches that may be
             in-flight at once.  Defaults to ``10``.
+
+    Raises:
+        ValueError: *concurrent_limit* is less than ``1`` (a limit of zero
+            would deadlock every fetch).
 
     Example::
 
@@ -236,15 +247,25 @@ class PyPIDataStore:
         http_client: HTTPClient,
         concurrent_limit: int = 10,
     ) -> None:
+        if concurrent_limit < 1:
+            raise ValueError(
+                f"concurrent_limit must be >= 1, got {concurrent_limit}"
+            )
+
         self.http_client = http_client
         self._semaphore = asyncio.Semaphore(concurrent_limit)
 
-        # Primary cache: normalised name → parsed package snapshot
+        # Primary cache: normalized name → parsed package snapshot
         self._package_data: Dict[str, PyPIPackageData] = {}
 
         # Secondary cache: "name==version" → dependency list (avoids
         # repeated per-version fetches even after the main cache is warm)
         self._version_deps_cache: Dict[str, List[str]] = {}
+
+        # In-flight maps: normalized key → the task currently fetching it.
+        # Entries live only for the duration of a fetch (see _coalesce).
+        self._inflight_packages: Dict[str, "asyncio.Task[PyPIPackageData]"] = {}
+        self._inflight_version_deps: Dict[str, "asyncio.Task[List[str]]"] = {}
 
     # ------------------------------------------------------------------
     # Public async accessors
@@ -253,20 +274,23 @@ class PyPIDataStore:
     async def get_package_data(self, name: str) -> PyPIPackageData:
         """Fetch (or return cached) metadata for *name*.
 
-        Uses double-checked locking: the first check is lock-free; if the
-        package is missing a second check runs *inside* the semaphore so
-        that only one coroutine actually performs the HTTP call.
+        Cached entries are returned without awaiting anything.  Otherwise
+        the call is *coalesced*: the first caller starts the fetch and any
+        concurrent caller for the same normalized name awaits that same
+        fetch, so PyPI sees exactly one request.
 
         Args:
             name: PyPI package name (any casing / underscore style).
 
         Returns:
-            A :class:`PyPIPackageData` populated from the latest PyPI
-            JSON response.
+            A `PyPIPackageData` populated from the latest PyPI
+            JSON response.  Every caller for the same normalized name
+            receives the *same* object.
 
         Raises:
             PyPIError: The package does not exist on PyPI or the API
                 returned an unexpected status code.
+            NetworkError: The request failed (timeout, rate limit, 5xx).
 
         Example::
 
@@ -278,36 +302,42 @@ class PyPIDataStore:
         """
         normalized = _normalize(name)
 
-        # Fast path — already cached (no lock needed)
-        if normalized in self._package_data:
-            return self._package_data[normalized]
+        # Fast path — already cached (never suspends)
+        cached = self._package_data.get(normalized)
+        if cached is not None:
+            return cached
 
-        async with self._semaphore:
-            # Second check — another coroutine may have populated while we waited
-            if normalized in self._package_data:
-                return self._package_data[normalized]
-
-            data = await self._fetch_from_pypi(name)
-            pkg_data = self._parse_package_data(name, data)
-            self._package_data[normalized] = pkg_data
-            return pkg_data
+        return await self._coalesce(
+            self._inflight_packages,
+            normalized,
+            lambda: self._load_package_data(name, normalized),
+        )
 
     async def prefetch_packages(self, names: List[str]) -> None:
         """Concurrently warm the cache for a batch of packages.
 
-        Errors for individual packages are silenced so that one bad
-        package name does not prevent the rest from being cached.
+        Duplicate names (including different spellings that normalize to
+        the same key, e.g. ``Flask`` and ``flask``) are collapsed to a
+        single fetch.  Errors for individual packages are silenced so that
+        one bad package name does not prevent the rest from being cached.
 
         Args:
             names: Package names to prefetch.
 
         Example::
 
-            >>> await store.prefetch_packages(["numpy", "pandas", "scipy"])
-            # subsequent get_package_data calls for these return instantly
+            >>> await store.prefetch_packages(["numpy", "pandas", "numpy"])
+            # two fetches, not three; subsequent get_package_data calls
+            # for these return instantly
         """
+        # dict preserves insertion order → deterministic request ordering,
+        # and the first spelling of each name is the one sent to PyPI.
+        unique: Dict[str, str] = {}
+        for name in names:
+            unique.setdefault(_normalize(name), name)
+
         await asyncio.gather(
-            *(self.get_package_data(name) for name in names),
+            *(self.get_package_data(name) for name in unique.values()),
             return_exceptions=True,  # swallow per-package failures
         )
 
@@ -322,10 +352,10 @@ class PyPIDataStore:
 
         1. Per-version dependency cache (``_version_deps_cache``).
         2. Already-populated fields inside the cached
-           :class:`PyPIPackageData` (``latest_dependencies`` or
+           `PyPIPackageData` (``latest_dependencies`` or
            ``dependencies_cache``).
-        3. A targeted ``/pypi/{name}/{version}/json`` fetch, guarded by
-           the semaphore and a second cache check.
+        3. A targeted ``/pypi/{name}/{version}/json`` fetch, coalesced per
+           ``name==version`` key and throttled by the semaphore.
 
         Args:
             name: Package name.
@@ -345,8 +375,9 @@ class PyPIDataStore:
         cache_key = f"{normalized}=={version}"
 
         # ── layer 1: flat version-deps cache ──────────────────────────
-        if cache_key in self._version_deps_cache:
-            return self._version_deps_cache[cache_key]
+        cached_deps = self._version_deps_cache.get(cache_key)
+        if cached_deps is not None:
+            return cached_deps
 
         # ── layer 2: already inside PyPIPackageData ────────────────────
         pkg_data = self._package_data.get(normalized)
@@ -360,19 +391,130 @@ class PyPIDataStore:
                 self._version_deps_cache[cache_key] = deps
                 return deps
 
-        # ── layer 3: network fetch (double-checked) ────────────────────
-        async with self._semaphore:
-            if cache_key in self._version_deps_cache:
-                return self._version_deps_cache[cache_key]
+        # ── layer 3: network fetch (coalesced per name==version) ───────
+        return await self._coalesce(
+            self._inflight_version_deps,
+            cache_key,
+            lambda: self._load_version_dependencies(name, version, normalized, cache_key),
+        )
 
-            deps = await self._fetch_version_dependencies(name, version)
-            self._version_deps_cache[cache_key] = deps
+    # ------------------------------------------------------------------
+    # Fetch coalescing (private)
+    # ------------------------------------------------------------------
 
-            # Back-fill the package-level cache so future reads skip this path
-            if pkg_data:
-                pkg_data.dependencies_cache[version] = deps
+    async def _coalesce(
+        self,
+        inflight: Dict[str, "asyncio.Task[_T]"],
+        key: str,
+        loader: Callable[[], Coroutine[Any, Any, _T]],
+    ) -> _T:
+        """Run *loader* once per *key*, sharing the result with all waiters.
 
-            return deps
+        The first caller for *key* wraps *loader* in a task and registers
+        it in *inflight*; concurrent callers await that same task instead
+        of starting a second fetch.
+
+        The task is awaited through `asyncio.shield` so that one
+        caller being cancelled neither cancels the shared fetch nor
+        strands the other waiters.  ``asyncio.run`` cancels any leftover
+        task during loop shutdown, so no work is orphaned.
+
+        Args:
+            inflight: The in-flight registry for this kind of fetch.
+            key: Normalized cache key.
+            loader: Zero-argument factory returning the fetch coroutine.
+                It is only called when no fetch is already in flight, so
+                no coroutine is created (and left un-awaited) needlessly.
+
+        Returns:
+            Whatever *loader* resolves to.
+
+        Raises:
+            Exception: Whatever *loader* raises, re-raised in every waiter.
+        """
+        task = inflight.get(key)
+
+        if task is None:
+            task = asyncio.ensure_future(loader())
+            inflight[key] = task
+            # Runs even when every waiter was cancelled: drops the entry and
+            # marks any exception retrieved (no "never retrieved" warnings).
+            task.add_done_callback(lambda t: self._on_inflight_done(inflight, key, t))
+
+        return await asyncio.shield(task)
+
+    def _on_inflight_done(
+        self,
+        inflight: Dict[str, "asyncio.Task[_T]"],
+        key: str,
+        task: "asyncio.Task[_T]",
+    ) -> None:
+        """Clean up an in-flight entry once its task settles."""
+        if inflight.get(key) is task:
+            del inflight[key]
+
+        if not task.cancelled():
+            task.exception()  # retrieve to silence asyncio's warning
+
+    def _discard_inflight(self, inflight: Dict[str, "asyncio.Task[_T]"], key: str) -> None:
+        """Drop this coroutine's own in-flight entry before it settles.
+
+        Removing the entry inside the loader (rather than only in the done
+        callback, which the loop schedules a tick later) guarantees that a
+        caller arriving after a *failed* fetch starts a fresh attempt
+        instead of inheriting the failure.
+        """
+        if inflight.get(key) is asyncio.current_task():
+            del inflight[key]
+
+    async def _load_package_data(
+        self,
+        name: str,
+        normalized: str,
+    ) -> PyPIPackageData:
+        """Fetch, parse and cache one package (semaphore-throttled)."""
+        try:
+            async with self._semaphore:
+                # Another coroutine may have cached this while we queued
+                # for a semaphore slot.
+                cached = self._package_data.get(normalized)
+                if cached is not None:
+                    return cached
+
+                data = await self._fetch_from_pypi(name)
+                pkg_data = self._parse_package_data(name, data)
+                self._package_data[normalized] = pkg_data
+                return pkg_data
+        finally:
+            self._discard_inflight(self._inflight_packages, normalized)
+
+    async def _load_version_dependencies(
+        self,
+        name: str,
+        version: str,
+        normalized: str,
+        cache_key: str,
+    ) -> List[str]:
+        """Fetch and cache deps for one ``name==version`` (semaphore-throttled)."""
+        try:
+            async with self._semaphore:
+                cached = self._version_deps_cache.get(cache_key)
+                if cached is not None:
+                    return cached
+
+                deps = await self._fetch_version_dependencies(name, version)
+                self._version_deps_cache[cache_key] = deps
+
+                # Back-fill the package-level cache so future reads skip
+                # this path.  Re-read the entry: it may have been fetched
+                # while we waited for a semaphore slot.
+                pkg_data = self._package_data.get(normalized)
+                if pkg_data:
+                    pkg_data.dependencies_cache[version] = deps
+
+                return deps
+        finally:
+            self._discard_inflight(self._inflight_version_deps, cache_key)
 
     # ------------------------------------------------------------------
     # Public synchronous accessors (cache-only, no I/O)
@@ -385,15 +527,8 @@ class PyPIDataStore:
             name: Package name (any casing / underscore style).
 
         Returns:
-            The cached :class:`PyPIPackageData`, or ``None`` if the
+            The cached `PyPIPackageData`, or ``None`` if the
             package has not been fetched yet.
-
-        Example::
-
-            >>> store.get_cached_package("flask")  # after a prior fetch
-            PyPIPackageData(name='flask', latest_version='3.0.0', ...)
-            >>> store.get_cached_package("unknown")
-            None
         """
         return self._package_data.get(_normalize(name))
 
@@ -407,11 +542,6 @@ class PyPIDataStore:
 
         Returns:
             List of version strings, or ``[]``.
-
-        Example::
-
-            >>> store.get_versions("flask")
-            ['3.0.0', '2.3.3', '2.3.2', ...]
         """
         pkg = self.get_cached_package(name)
         return pkg.all_versions if pkg else []
@@ -425,7 +555,7 @@ class PyPIDataStore:
         """Check Python compatibility using only cached metadata.
 
         Returns ``True`` when the package has not been fetched yet — the
-        caller should :pymeth:`get_package_data` first if a definitive
+        caller should call `get_package_data` first if a definitive
         answer is needed.
 
         Args:
@@ -434,12 +564,7 @@ class PyPIDataStore:
             python_version: Dot-separated Python version.
 
         Returns:
-            Compatibility flag (see :pymeth:`PyPIPackageData.is_python_compatible`).
-
-        Example::
-
-            >>> store.is_python_compatible("flask", "3.0.0", "3.11.2")
-            True
+            Compatibility flag (see `PyPIPackageData.is_python_compatible`).
         """
         pkg = self.get_cached_package(name)
         return pkg.is_python_compatible(version, python_version) if pkg else True
@@ -509,7 +634,7 @@ class PyPIDataStore:
         name: str,
         data: Dict[str, Any],
     ) -> PyPIPackageData:
-        """Transform a raw PyPI JSON response into :class:`PyPIPackageData`.
+        """Transform a raw PyPI JSON response into `PyPIPackageData`.
 
         Filters out versions that cannot be parsed by ``packaging`` and
         those with no associated file uploads.  The resulting
@@ -626,20 +751,16 @@ class PyPIDataStore:
 
 
 def _normalize(name: str) -> str:
-    """Normalise a package name to lower-case with hyphens.
+    """Normalize a package name to its canonical PEP 503 form.
 
-    Matches the canonicalisation rule used by PyPI so that
-    ``"My_Package"`` and ``"my-package"`` map to the same cache key.
+    Thin alias for `depkeeper.utils.naming.normalize_package_name`,
+    kept so cache keys here can never drift from the rule used by the
+    parser, the analyzer and the models.
 
     Args:
         name: Raw package name.
 
     Returns:
-        Normalised name string.
-
-    Example::
-
-        >>> _normalize("Flask_Login")
-        'flask-login'
+        Normalized name string.
     """
-    return name.lower().replace("_", "-")
+    return normalize_package_name(name)

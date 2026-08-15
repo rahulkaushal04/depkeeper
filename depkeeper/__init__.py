@@ -1,5 +1,4 @@
-"""
-depkeeper — modern Python dependency management for requirements.txt.
+"""depkeeper — modern Python dependency management for requirements.txt.
 
 depkeeper is an intelligent dependency management tool that helps developers
 keep their ``requirements.txt`` files up to date, secure, and conflict-free.

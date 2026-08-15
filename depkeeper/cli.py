@@ -1,8 +1,7 @@
-"""
-Command-line interface for depkeeper.
+"""Command-line interface for depkeeper.
 
-This module provides the main CLI entry point and handles global options,
-configuration loading, and command registration.
+Provides the main CLI entry point and handles global options, configuration
+loading, and subcommand registration.
 """
 
 from __future__ import annotations
@@ -89,7 +88,8 @@ def cli(
     depkeeper_ctx.config = loaded_config
     ctx.obj = depkeeper_ctx
 
-    # Respect NO_COLOR for downstream libraries
+    # Rich and Click read NO_COLOR from the environment, so the flag has to be
+    # projected there for downstream libraries to honor it.
     if color:
         os.environ.pop("NO_COLOR", None)
     else:
@@ -101,9 +101,13 @@ def cli(
         logger.debug("Loaded configuration: %s", loaded_config.to_log_dict())
     logger.debug("Verbosity: %s | Color: %s", verbose, color)
 
-
 def _configure_logging(verbose: int) -> None:
-    """Configure logging level based on verbosity flags."""
+    """Map the repeatable ``-v`` count onto a logging level.
+
+    Args:
+        verbose: Number of ``-v`` flags. ``0`` -> WARNING, ``1`` -> INFO,
+            ``2`` or more -> DEBUG.
+    """
     if verbose <= 0:
         level = logging.WARNING
     elif verbose == 1:
@@ -115,7 +119,8 @@ def _configure_logging(verbose: int) -> None:
     logger.debug("Logging initialized at %s level", logging.getLevelName(level))
 
 
-# Register CLI subcommands
+# Subcommands are imported here rather than at module top so a failure to
+# import one command is reported as a fatal startup error with context.
 try:
     from depkeeper.commands.check import check
     from depkeeper.commands.update import update
@@ -156,7 +161,7 @@ def main() -> int:
         return 1
 
     except KeyboardInterrupt:
-        print_warning("\nOperation cancelled by user")
+        print_warning("\nOperation cancelled by user", stderr=True)
         return 130
 
     except Exception as exc:

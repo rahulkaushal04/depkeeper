@@ -1,107 +1,93 @@
 ---
 title: Reference
-description: Technical reference documentation for depkeeper
+description: Exhaustive specifications for the CLI, configuration, formats, errors and Python API
 ---
 
 # Reference
 
-Complete technical reference documentation for depkeeper. These pages provide detailed specifications for the CLI, Python API, configuration, file formats, and exit codes.
-
----
-
-## Reference Sections
+Specification-grade documentation. These pages state what is true, without tutorial framing.
 
 <div class="grid cards" markdown>
 
--   :material-console:{ .lg .middle } **[CLI Commands](cli-commands.md)**
+- :material-console:{ .lg .middle } **[CLI commands](cli-commands.md)**
 
     ---
 
-    Complete command-line interface reference with all options and examples.
+    Every command, argument, flag, default and precedence rule.
 
-    [:octicons-arrow-right-24: View commands](cli-commands.md)
-
--   :material-api:{ .lg .middle } **[Python API](python-api.md)**
+- :material-cog:{ .lg .middle } **[Configuration options](configuration-options.md)**
 
     ---
 
-    Programmatic interface for integrating depkeeper into your tools.
+    Config keys, environment variables, discovery and validation rules.
 
-    [:octicons-arrow-right-24: View API](python-api.md)
-
--   :material-cog:{ .lg .middle } **[Configuration Options](configuration-options.md)**
+- :material-exit-run:{ .lg .middle } **[Exit codes](exit-codes.md)**
 
     ---
 
-    All configuration options, environment variables, and defaults.
+    Exit code semantics per command and scripting patterns.
 
-    [:octicons-arrow-right-24: View options](configuration-options.md)
-
--   :material-exit-run:{ .lg .middle } **[Exit Codes](exit-codes.md)**
+- :material-file-document:{ .lg .middle } **[File formats](file-formats.md)**
 
     ---
 
-    Exit code meanings for scripting and CI/CD integration.
+    Accepted requirements-file syntax, encodings and rewrite rules.
 
-    [:octicons-arrow-right-24: View codes](exit-codes.md)
-
--   :material-file-document:{ .lg .middle } **[File Formats](file-formats.md)**
+- :material-code-json:{ .lg .middle } **[JSON output](json-output.md)**
 
     ---
 
-    Supported file format specifications and syntax reference.
+    The `--format json` schema, field by field.
 
-    [:octicons-arrow-right-24: View formats](file-formats.md)
+- :material-alert-circle:{ .lg .middle } **[Error reference](errors.md)**
+
+    ---
+
+    Exception hierarchy and a catalogue of user-visible messages.
+
+- :material-alert-octagon:{ .lg .middle } **[Known limitations](limitations.md)**
+
+    ---
+
+    Behaviours that are surprising, constrained or not yet implemented.
+
+- :material-api:{ .lg .middle } **[Python API](python-api.md)**
+
+    ---
+
+    Generated API documentation for programmatic use.
 
 </div>
 
 ---
 
-## Quick Reference
-
-### Most Common Commands
+## Quick reference
 
 ```bash
-# Check for updates
-depkeeper check
+# Global
+depkeeper [-c PATH] [-v|-vv] [--color|--no-color] [--version] [-h] COMMAND
 
-# Update all packages
-depkeeper update
+# Read-only
+depkeeper check [FILE] [--outdated-only] [-f table|simple|json]
+                       [--strict-version-matching]
+                       [--check-conflicts|--no-check-conflicts]
 
-# Preview updates without applying
-depkeeper update --dry-run
-
-# Update with backup
-depkeeper update --backup -y
-
-# JSON output for CI
-depkeeper check --format json
+# Write
+depkeeper update [FILE] [--dry-run] [-y] [--backup] [--pin]
+                        [--allow-hash-removal] [-p NAME]...
+                        [--strict-version-matching]
+                        [--check-conflicts|--no-check-conflicts]
 ```
 
-### Environment Variables
-
-| Variable | Description |
+| Constant | Value |
 |---|---|
-| `DEPKEEPER_CONFIG` | Configuration file path |
-| `DEPKEEPER_COLOR` | Enable/disable colors |
-
-### Exit Codes
-
-| Code | Meaning |
-|---|---|
-| `0` | Success |
-| `1` | Error |
-| `2` | Usage error |
-| `130` | Interrupted |
-
----
-
-## Version Information
-
-Current version: **0.1.0**
-
-```bash
-depkeeper --version
-```
-
-See the [Changelog](../community/changelog.md) for version history.
+| Default file | `requirements.txt` |
+| Default format | `table` |
+| Conflict checking | enabled |
+| Strict version matching | disabled |
+| Request timeout | 30 s |
+| Retries | 3 (4 attempts) |
+| Max file size | 10 MB |
+| Concurrent requests | 10 |
+| Resolution passes | 100 |
+| Exit codes | `0` success · `1` error · `2` usage · `130` interrupted |

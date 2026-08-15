@@ -1,10 +1,8 @@
-"""
-Custom exception hierarchy for depkeeper.
+"""Custom exception hierarchy for depkeeper.
 
-This module defines structured exception types used across depkeeper.
-All exceptions inherit from :class:`DepKeeperError` and support optional
-structured metadata via the ``details`` attribute to improve diagnostics
-and logging.
+Defines the structured exception types used across depkeeper. All exceptions
+inherit from `DepKeeperError` and carry optional structured metadata
+in the ``details`` attribute to improve diagnostics and logging.
 """
 
 from __future__ import annotations

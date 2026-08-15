@@ -38,6 +38,7 @@ from depkeeper.exceptions import ConfigError
 from depkeeper.utils.logger import get_logger
 from depkeeper.constants import (
     DEFAULT_CHECK_CONFLICTS,
+    DEFAULT_READ_ENCODING,
     DEFAULT_STRICT_VERSION_MATCHING,
 )
 
@@ -62,7 +63,7 @@ class DepKeeperConfig:
     check_conflicts: bool = DEFAULT_CHECK_CONFLICTS
     strict_version_matching: bool = DEFAULT_STRICT_VERSION_MATCHING
 
-    # Metadata (not a user-facing option)
+    # Provenance, not a user-facing option: never serialized back to TOML.
     source_path: Optional[Path] = field(default=None, repr=False)
 
     def to_log_dict(self) -> Dict[str, Any]:
@@ -112,13 +113,14 @@ def discover_config_file(explicit_path: Optional[Path] = None) -> Optional[Path]
 
     cwd = Path.cwd()
 
-    # 2. depkeeper.toml in current directory
     depkeeper_toml = cwd / "depkeeper.toml"
     if depkeeper_toml.is_file():
         logger.debug("Found depkeeper.toml: %s", depkeeper_toml)
         return depkeeper_toml
 
-    # 3. pyproject.toml with [tool.depkeeper] section
+    # pyproject.toml is only adopted when it actually configures depkeeper;
+    # otherwise a project that merely has a pyproject.toml would shadow the
+    # built-in defaults.
     pyproject_toml = cwd / "pyproject.toml"
     if pyproject_toml.is_file():
         if _pyproject_has_depkeeper_section(pyproject_toml):
@@ -158,10 +160,10 @@ def load_config(config_path: Optional[Path] = None) -> DepKeeperConfig:
 
     Args:
         config_path: Explicit path to config file. If ``None``, uses
-            auto-discovery (see :func:`discover_config_file`).
+            auto-discovery (see `discover_config_file`).
 
     Returns:
-        Validated :class:`DepKeeperConfig` with values from file or defaults.
+        Validated `DepKeeperConfig` with values from file or defaults.
 
     Raises:
         ConfigError: File cannot be parsed, has unknown keys, or invalid values.
@@ -175,11 +177,10 @@ def load_config(config_path: Optional[Path] = None) -> DepKeeperConfig:
     logger.info("Loading configuration from %s", resolved)
     raw = _read_toml(resolved)
 
-    # Extract the depkeeper-specific section
+    # The two supported files nest the settings differently.
     if resolved.name == "pyproject.toml":
         section = raw.get("tool", {}).get("depkeeper", {})
     else:
-        # depkeeper.toml — settings live under [depkeeper]
         section = raw.get("depkeeper", {})
 
     if not section:
@@ -196,7 +197,14 @@ def load_config(config_path: Optional[Path] = None) -> DepKeeperConfig:
 def _read_toml(path: Path) -> Dict[str, Any]:
     """Read and parse a TOML file.
 
-    Uses ``tomli`` if available, otherwise ``tomllib`` (Python 3.11+).
+    Parsing is delegated to ``tomli``, which is a hard runtime dependency so
+    that Python 3.8-3.10 (no ``tomllib`` in the standard library) behaves
+    identically to 3.11+.
+
+    The file is decoded with ``utf-8-sig`` so a leading byte order mark —
+    written by Windows editors — is removed. TOML parsers reject a BOM as an
+    invalid statement, so decoding here rather than handing bytes to the
+    parser keeps such files usable.
 
     Args:
         path: Path to TOML file.
@@ -205,7 +213,8 @@ def _read_toml(path: Path) -> Dict[str, Any]:
         Parsed TOML as nested dictionary.
 
     Raises:
-        ConfigError: File cannot be read, invalid TOML, or no parser available.
+        ConfigError: File cannot be read or decoded, TOML is invalid, or no
+            parser is available.
     """
     if tomllib is None:
         raise ConfigError(
@@ -215,16 +224,26 @@ def _read_toml(path: Path) -> Dict[str, Any]:
         )
 
     try:
-        with open(path, "rb") as fh:
-            return tomllib.load(fh)
-    except tomllib.TOMLDecodeError as exc:
-        raise ConfigError(
-            f"Invalid TOML in {path.name}: {exc}",
-            config_path=str(path),
-        ) from exc
+        raw_bytes = path.read_bytes()
     except OSError as exc:
         raise ConfigError(
             f"Cannot read configuration file {path}: {exc}",
+            config_path=str(path),
+        ) from exc
+
+    try:
+        content = raw_bytes.decode(DEFAULT_READ_ENCODING)
+    except UnicodeDecodeError as exc:
+        raise ConfigError(
+            f"Configuration file {path.name} is not valid UTF-8: {exc}",
+            config_path=str(path),
+        ) from exc
+
+    try:
+        return tomllib.loads(content)
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(
+            f"Invalid TOML in {path.name}: {exc}",
             config_path=str(path),
         ) from exc
 
@@ -244,20 +263,20 @@ def _parse_section(
         config_path: Path string for error messages.
 
     Returns:
-        Validated :class:`DepKeeperConfig` with values from section and defaults.
+        Validated `DepKeeperConfig` with values from section and defaults.
 
     Raises:
         ConfigError: Unknown keys or incorrect types (e.g., string for boolean).
     """
     config = DepKeeperConfig()
 
-    # Known depkeeper configuration options
     known_top = {
         "check_conflicts",
         "strict_version_matching",
     }
 
-    # Validate that no unknown keys are present
+    # Unknown keys are an error rather than a warning: silently ignoring a
+    # typo would leave the user believing a setting is in effect when it is not.
     unknown_top = set(section.keys()) - known_top
     if unknown_top:
         raise ConfigError(
@@ -265,7 +284,6 @@ def _parse_section(
             config_path=config_path,
         )
 
-    # Parse and validate each option
     if "check_conflicts" in section:
         val = section["check_conflicts"]
         if not isinstance(val, bool):

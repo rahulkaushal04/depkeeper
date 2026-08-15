@@ -1,9 +1,8 @@
-"""
-Unified data model exports for depkeeper.
+"""Unified data model exports for depkeeper.
 
-This module re-exports all core data models to provide a stable and
-convenient public API. Users can import models directly from
-``depkeeper.models`` instead of individual submodules.
+Re-exports all core data models to provide a stable, convenient public API,
+so callers can import from ``depkeeper.models`` instead of individual
+submodules.
 
 Example:
     >>> from depkeeper.models import Package, Requirement, Conflict

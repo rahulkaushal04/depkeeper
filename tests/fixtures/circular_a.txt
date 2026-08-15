@@ -1,3 +1,0 @@
-# File A includes B
--r circular_b.txt
-requests==2.28.0

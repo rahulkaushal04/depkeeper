@@ -1,1528 +1,492 @@
+"""Tests for :class:`Conflict` and :class:`ConflictSet`.
+
+A conflict is depkeeper's record of "package A, at the version we intend to
+install, forbids the version of package B we intend to install". Two properties
+matter:
+
+1. **Identity.** Conflict endpoints are matched against ``Package.name`` keys.
+   If ``zope.interface`` and ``zope-interface`` are not the same identity, a
+   real conflict is silently dropped and depkeeper writes a broken file.
+2. **Arithmetic.** ``get_max_compatible_version`` intersects *every* constraint
+   on a package. Getting it wrong by one version is the difference between a
+   working install and a runtime ``ImportError``.
+
+The scenarios below are drawn from real dependency graphs, because both
+properties only get interesting once several packages constrain the same
+target with overlapping — not identical — ranges.
+"""
+
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 import pytest
 
-from depkeeper.models.conflict import Conflict, ConflictSet, _normalize_name
+from depkeeper.models.conflict import ConflictSet
+from tests.support.factories import make_conflict, make_conflict_set
+
+#: urllib3's real published history, newest last. Three of these sit in the
+#: 1.26 series and two in 2.x, which is what makes ``<2.0`` style caps — very
+#: common in the wild — actually discriminating.
+URLLIB3_VERSIONS = ["1.25.11", "1.26.5", "1.26.18", "2.0.7", "2.2.2"]
 
 
-@pytest.fixture
-def sample_conflict() -> Conflict:
-    """Create a sample Conflict instance for testing.
-
-    Returns:
-        Conflict: A configured conflict with standard test data.
-
-    Note:
-        Uses common test values: django requires requests>=2.0.0.
-    """
-    return Conflict(
-        source_package="django",
-        target_package="requests",
-        required_spec=">=2.0.0",
-        conflicting_version="1.5.0",
-    )
+# ---------------------------------------------------------------------------
+# Conflict
+# ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def sample_conflict_with_version() -> Conflict:
-    """Create a sample Conflict with source version for testing.
-
-    Returns:
-        Conflict: A conflict instance including source_version.
-    """
-    return Conflict(
-        source_package="django",
-        target_package="requests",
-        required_spec=">=2.0.0",
-        conflicting_version="1.5.0",
-        source_version="4.0.0",
-    )
-
-
-@pytest.fixture
-def sample_conflict_set() -> ConflictSet:
-    """Create an empty ConflictSet for testing.
-
-    Returns:
-        ConflictSet: An empty conflict set for the 'requests' package.
-    """
-    return ConflictSet(package_name="requests")
-
-
-@pytest.fixture
-def populated_conflict_set() -> ConflictSet:
-    """Create a ConflictSet with pre-populated conflicts.
-
-    Returns:
-        ConflictSet: A conflict set with multiple conflicts for testing.
-    """
-    conflict_set = ConflictSet(package_name="requests")
-    conflict_set.add_conflict(Conflict("django", "requests", ">=2.0.0", "1.5.0"))
-    conflict_set.add_conflict(Conflict("flask", "requests", "<3.0.0", "3.5.0"))
-    return conflict_set
-
-
-@pytest.mark.unit
-class TestNormalizeName:
-    """Tests for _normalize_name package normalization."""
+class TestConflictIdentity:
+    """Endpoints must be comparable to the keys used everywhere else."""
 
     @pytest.mark.parametrize(
-        "input_name,expected",
+        ("declared", "canonical"),
         [
-            # Lowercase conversion
             ("Django", "django"),
-            ("REQUESTS", "requests"),
-            ("NumPy", "numpy"),
-            # Underscore to dash
-            ("python_package", "python-package"),
-            ("my_test_pkg", "my-test-pkg"),
-            # Combined normalization
-            ("My_Package", "my-package"),
-            ("Test_PKG_Name", "test-pkg-name"),
-            # Already normalized
-            ("requests", "requests"),
-            ("django-rest-framework", "django-rest-framework"),
-            # Edge cases
-            ("", ""),
-            ("my__package___name", "my--package---name"),
-            ("pkg.name", "pkg.name"),
-            ("pkg-v2", "pkg-v2"),
+            ("zope.interface", "zope-interface"),
+            ("ruamel_yaml", "ruamel-yaml"),
+            ("typing_Extensions", "typing-extensions"),
+            ("backports.zoneinfo", "backports-zoneinfo"),
         ],
-        ids=[
-            "uppercase",
-            "all-caps",
-            "mixed-case",
-            "underscores",
-            "multiple-underscores",
-            "combined-mixed",
-            "combined-caps",
-            "already-normalized",
-            "hyphenated",
-            "empty-string",
-            "multiple-consecutive-underscores",
-            "dots-preserved",
-            "existing-hyphens",
-        ],
+        ids=["case", "dot", "underscore", "mixed", "dotted-namespace"],
     )
-    def test_normalize_name_variations(self, input_name: str, expected: str) -> None:
-        """Test package name normalization with various inputs.
-
-        Parametrized test covering lowercase conversion, underscore replacement,
-        combined transformations, and edge cases. Per PEP 503, package names
-        should be case-insensitive and use hyphens.
-
-        Args:
-            input_name: Package name to normalize.
-            expected: Expected normalized result.
+    def test_endpoints_are_normalised_to_pep503(
+        self, declared: str, canonical: str
+    ) -> None:
+        """PyPI metadata, requirements files and the CLI all spell names
+        differently; the conflict must land on the canonical key regardless.
         """
-        # Act
-        result = _normalize_name(input_name)
+        conflict = make_conflict(declared, ">=1.0", declared)
 
-        # Assert
-        assert result == expected
+        assert conflict.source_package == canonical
+        assert conflict.target_package == canonical
 
-    @pytest.mark.unit
-    def test_normalization_idempotent(self) -> None:
-        """Test normalization is idempotent.
+    def test_conflicts_differing_only_in_spelling_are_equal(self) -> None:
+        """Otherwise the same conflict is reported twice in the summary."""
+        from_pypi_metadata = make_conflict("Zope.Interface", ">=6.0", "SQLAlchemy")
+        from_requirements = make_conflict("zope-interface", ">=6.0", "sqlalchemy")
 
-        Applying normalization multiple times should produce same result.
-        """
-        # Arrange
-        name = "My_Package_NAME"
+        assert from_pypi_metadata == from_requirements
 
-        # Act
-        first_pass = _normalize_name(name)
-        second_pass = _normalize_name(first_pass)
-
-        # Assert
-        assert first_pass == second_pass
-        assert first_pass == "my-package-name"
-
-
-@pytest.mark.unit
-class TestConflictInit:
-    """Tests for Conflict initialization and post-init processing."""
-
-    @pytest.mark.unit
-    def test_basic_initialization(self) -> None:
-        """Test Conflict can be created with required parameters.
-
-        Happy path: Basic conflict creation with all required fields.
-        """
-        conflict = Conflict(
-            source_package="django",
-            target_package="requests",
-            required_spec=">=2.0.0",
-            conflicting_version="1.5.0",
+    def test_conflicts_differing_in_specifier_are_not_equal(self) -> None:
+        """Guard: normalisation must not flatten genuinely different records."""
+        assert make_conflict("flask", ">=2.2,<2.3", "werkzeug") != make_conflict(
+            "flask", ">=2.3.7", "werkzeug"
         )
-        assert conflict.source_package == "django"
-        assert conflict.target_package == "requests"
-        assert conflict.required_spec == ">=2.0.0"
-        assert conflict.conflicting_version == "1.5.0"
-        assert conflict.source_version is None
 
-    @pytest.mark.unit
-    def test_with_source_version(self) -> None:
-        """Test Conflict initialization with source version.
+    def test_conflicts_are_immutable(self) -> None:
+        """Conflicts are cached and shared across resolution passes.
 
-        Should properly store optional source_version parameter.
+        A mutable conflict could be rewritten by one pass and then re-evaluated
+        as if it had always said something else.
         """
-        conflict = Conflict(
-            source_package="django",
-            target_package="requests",
-            required_spec=">=2.0.0",
-            conflicting_version="1.5.0",
-            source_version="4.0.0",
-        )
-        assert conflict.source_version == "4.0.0"
+        conflict = make_conflict("flask", ">=2.3.7", "werkzeug")
 
-    @pytest.mark.unit
-    def test_package_name_normalization_on_init(self) -> None:
-        """Test package names are normalized in __post_init__.
-
-        Package names should be normalized according to PEP 503.
-        """
-        conflict = Conflict(
-            source_package="Django_App",
-            target_package="REQUESTS_Lib",
-            required_spec=">=2.0.0",
-            conflicting_version="1.5.0",
-        )
-        assert conflict.source_package == "django-app"
-        assert conflict.target_package == "requests-lib"
-
-    @pytest.mark.unit
-    def test_immutability(self) -> None:
-        """Test Conflict is frozen (immutable).
-
-        Frozen dataclass should prevent attribute modification.
-        """
-        conflict = Conflict(
-            source_package="django",
-            target_package="requests",
-            required_spec=">=2.0.0",
-            conflicting_version="1.5.0",
-        )
         with pytest.raises(AttributeError):
-            conflict.source_package = "flask"
+            conflict.required_spec = ">=3.0"  # type: ignore[misc]
 
-    @pytest.mark.unit
-    def test_empty_required_spec(self) -> None:
-        """Test Conflict with empty specifier string.
 
-        Edge case: Empty spec string (though invalid for version checks).
-        """
-        conflict = Conflict(
-            source_package="django",
-            target_package="requests",
-            required_spec="",
-            conflicting_version="1.0.0",
+class TestConflictRendering:
+    """Conflict text reaches CLI output and JSON consumers."""
+
+    def test_display_string_names_the_source_version_when_known(self) -> None:
+        """Without the version the user cannot tell which release imposed it."""
+        conflict = make_conflict(
+            "flask", ">=2.3.7", "werkzeug", source_version="2.3.3"
         )
-        assert conflict.required_spec == ""
 
-    @pytest.mark.unit
-    def test_complex_version_specifier(self) -> None:
-        """Test Conflict with complex version specifier.
+        assert conflict.to_display_string() == "flask==2.3.3 requires werkzeug>=2.3.7"
 
-        Should handle compound specifiers like >=2.0,<3.0.
-        """
-        conflict = Conflict(
-            source_package="django",
-            target_package="requests",
-            required_spec=">=2.0.0,<3.0.0,!=2.5.0",
-            conflicting_version="2.5.0",
+    def test_display_string_omits_an_unknown_source_version(self) -> None:
+        conflict = make_conflict("flask", ">=2.3.7", "werkzeug")
+
+        assert conflict.to_display_string() == "flask requires werkzeug>=2.3.7"
+
+    def test_short_string_drops_the_target_for_table_cells(self) -> None:
+        """The target is the table row, so repeating it wastes column width."""
+        conflict = make_conflict(
+            "celery", ">=5.3.4,<6.0", "kombu", source_version="5.3.6"
         )
-        assert conflict.required_spec == ">=2.0.0,<3.0.0,!=2.5.0"
 
-    @pytest.mark.unit
-    def test_wildcard_version(self) -> None:
-        """Test Conflict with wildcard version specifier.
+        assert conflict.to_short_string() == "celery needs >=5.3.4,<6.0"
 
-        Edge case: Wildcards like ==2.* should be preserved.
-        """
-        conflict = Conflict(
-            source_package="django",
-            target_package="requests",
-            required_spec="==2.*",
-            conflicting_version="3.0.0",
+    def test_str_is_the_display_string(self) -> None:
+        conflict = make_conflict(
+            "django", "<4,>=3.6.0", "asgiref", source_version="4.2.11"
         )
-        assert conflict.required_spec == "==2.*"
 
+        assert str(conflict) == conflict.to_display_string()
 
-@pytest.mark.unit
-class TestConflictDisplayMethods:
-    """Tests for Conflict string representation methods."""
-
-    @pytest.mark.unit
-    def test_to_display_string_without_source_version(
-        self, sample_conflict: Conflict
-    ) -> None:
-        """Test display string when source version is not known.
-
-        Should show only source package name, not version.
-
-        Args:
-            sample_conflict: Fixture providing a basic Conflict instance.
-        """
-        # Act
-        result = sample_conflict.to_display_string()
-
-        # Assert
-        assert result == "django requires requests>=2.0.0"
-
-    @pytest.mark.unit
-    def test_to_display_string_with_source_version(
-        self, sample_conflict_with_version: Conflict
-    ) -> None:
-        """Test display string when source version is known.
-
-        Should show source package with version pinned.
-
-        Args:
-            sample_conflict_with_version: Fixture providing a Conflict with source_version.
-        """
-        # Act
-        result = sample_conflict_with_version.to_display_string()
-
-        # Assert
-        assert result == "django==4.0.0 requires requests>=2.0.0"
-
-    @pytest.mark.unit
-    def test_to_short_string(self, sample_conflict: Conflict) -> None:
-        """Test compact conflict summary.
-
-        Should provide abbreviated format with just source and spec.
-
-        Args:
-            sample_conflict: Fixture providing a basic Conflict instance.
-        """
-        # Act
-        result = sample_conflict.to_short_string()
-
-        # Assert
-        assert result == "django needs >=2.0.0"
-
-    @pytest.mark.unit
-    def test_str_method(self, sample_conflict_with_version: Conflict) -> None:
-        """Test __str__ delegates to to_display_string.
-
-        String conversion should use the full display format.
-
-        Args:
-            sample_conflict_with_version: Fixture providing a Conflict with source_version.
-        """
-        # Act
-        result = str(sample_conflict_with_version)
-
-        # Assert
-        assert result == sample_conflict_with_version.to_display_string()
-        assert "django==4.0.0" in result
-
-    @pytest.mark.unit
-    def test_repr_method(self) -> None:
-        """Test __repr__ provides developer-friendly representation.
-
-        Should show Conflict constructor format for debugging.
-        """
-        conflict = Conflict(
-            source_package="django",
-            target_package="requests",
-            required_spec=">=2.0.0",
-            conflicting_version="1.5.0",
+    def test_json_carries_every_field_a_consumer_needs_to_act(self) -> None:
+        """CI gates parse this payload; a missing key silently disables a check."""
+        conflict = make_conflict(
+            "celery",
+            ">=5.3.4,<6.0",
+            "kombu",
+            source_version="5.3.6",
+            conflicting_version="5.2.4",
         )
-        result = repr(conflict)
-        assert result.startswith("Conflict(")
-        assert "source_package='django'" in result
-        assert "target_package='requests'" in result
-        assert "required_spec='>=2.0.0'" in result
-        assert "conflicting_version='1.5.0'" in result
 
-    @pytest.mark.unit
-    def test_display_string_with_complex_spec(self) -> None:
-        """Test display string with compound version specifier.
-
-        Edge case: Complex specifiers should be shown in full.
-        """
-        conflict = Conflict(
-            source_package="django",
-            target_package="requests",
-            required_spec=">=2.0,<3.0,!=2.5.0",
-            conflicting_version="2.5.0",
-        )
-        result = conflict.to_display_string()
-        assert ">=2.0,<3.0,!=2.5.0" in result
-
-    @pytest.mark.unit
-    def test_display_string_with_special_characters(self) -> None:
-        """Test display string with packages containing special chars.
-
-        Edge case: Normalized names should appear in output.
-        """
-        conflict = Conflict(
-            source_package="My_Package",
-            target_package="Other_Lib",
-            required_spec=">=1.0",
-            conflicting_version="0.5",
-        )
-        result = conflict.to_display_string()
-        # Should show normalized names
-        assert "my-package" in result
-        assert "other-lib" in result
-
-
-@pytest.mark.unit
-class TestConflictJSONSerialization:
-    """Tests for Conflict.to_json method."""
-
-    @pytest.mark.unit
-    def test_to_json_without_source_version(self) -> None:
-        """Test JSON serialization without source version.
-
-        Happy path: All fields should be present, source_version is None.
-        """
-        conflict = Conflict(
-            source_package="django",
-            target_package="requests",
-            required_spec=">=2.0.0",
-            conflicting_version="1.5.0",
-        )
-        result = conflict.to_json()
-
-        assert result["source_package"] == "django"
-        assert result["target_package"] == "requests"
-        assert result["required_spec"] == ">=2.0.0"
-        assert result["conflicting_version"] == "1.5.0"
-        assert result["source_version"] is None
-
-    @pytest.mark.unit
-    def test_to_json_with_source_version(self) -> None:
-        """Test JSON serialization with source version.
-
-        All fields including source_version should be serialized.
-        """
-        conflict = Conflict(
-            source_package="django",
-            target_package="requests",
-            required_spec=">=2.0.0",
-            conflicting_version="1.5.0",
-            source_version="4.0.0",
-        )
-        result = conflict.to_json()
-
-        assert result["source_version"] == "4.0.0"
-
-    @pytest.mark.unit
-    def test_to_json_dict_structure(self) -> None:
-        """Test JSON output is a dictionary with correct keys.
-
-        Should return dict with all expected keys.
-        """
-        conflict = Conflict(
-            source_package="django",
-            target_package="requests",
-            required_spec=">=2.0.0",
-            conflicting_version="1.5.0",
-        )
-        result = conflict.to_json()
-
-        assert isinstance(result, dict)
-        expected_keys = {
-            "source_package",
-            "source_version",
-            "target_package",
-            "required_spec",
-            "conflicting_version",
+        assert conflict.to_json() == {
+            "source_package": "celery",
+            "source_version": "5.3.6",
+            "target_package": "kombu",
+            "required_spec": ">=5.3.4,<6.0",
+            "conflicting_version": "5.2.4",
         }
-        assert set(result.keys()) == expected_keys
 
-    @pytest.mark.unit
-    def test_to_json_with_normalized_names(self) -> None:
-        """Test JSON serialization uses normalized package names.
+    def test_json_normalises_names_like_the_model_does(self) -> None:
+        """The payload must key on the same identity the rest of the run uses."""
+        payload = make_conflict("SQLAlchemy", ">=6.0", "Zope.Interface").to_json()
 
-        Normalized names should appear in JSON output.
-        """
-        conflict = Conflict(
-            source_package="Django_App",
-            target_package="REQUESTS_Lib",
-            required_spec=">=2.0.0",
-            conflicting_version="1.5.0",
+        assert payload["source_package"] == "sqlalchemy"
+        assert payload["target_package"] == "zope-interface"
+
+    def test_repr_is_debuggable(self) -> None:
+        conflict = make_conflict(
+            "flask", ">=2.3.7", "werkzeug", conflicting_version="2.2.3"
         )
-        result = conflict.to_json()
 
-        assert result["source_package"] == "django-app"
-        assert result["target_package"] == "requests-lib"
-
-    @pytest.mark.unit
-    def test_to_json_roundtrip_compatibility(self) -> None:
-        """Test JSON output can be used to reconstruct Conflict.
-
-        Integration test: JSON should contain all data for reconstruction.
-        """
-        original = Conflict(
-            source_package="django",
-            target_package="requests",
-            required_spec=">=2.0.0",
-            conflicting_version="1.5.0",
-            source_version="4.0.0",
+        assert repr(conflict) == (
+            "Conflict(source_package='flask', target_package='werkzeug', "
+            "required_spec='>=2.3.7', conflicting_version='2.2.3')"
         )
-        json_data = original.to_json()
-
-        # Remove source_version if None for reconstruction
-        kwargs = {k: v for k, v in json_data.items() if v is not None}
-        reconstructed = Conflict(**kwargs)
-
-        assert reconstructed.source_package == original.source_package
-        assert reconstructed.target_package == original.target_package
-        assert reconstructed.required_spec == original.required_spec
-        assert reconstructed.conflicting_version == original.conflicting_version
-        assert reconstructed.source_version == original.source_version
 
 
-@pytest.mark.unit
-class TestConflictSetInit:
-    """Tests for ConflictSet initialization."""
-
-    @pytest.mark.unit
-    def test_basic_initialization(self) -> None:
-        """Test ConflictSet can be created with package name.
-
-        Happy path: Basic ConflictSet with empty conflicts list.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        assert conflict_set.package_name == "requests"
-        assert conflict_set.conflicts == []
-
-    @pytest.mark.unit
-    def test_initialization_with_conflicts(self) -> None:
-        """Test ConflictSet can be initialized with existing conflicts.
-
-        Should accept a list of conflicts during construction.
-        """
-        conflicts = [
-            Conflict("django", "requests", ">=2.0", "1.5"),
-            Conflict("flask", "requests", ">=2.5", "1.5"),
-        ]
-        conflict_set = ConflictSet(package_name="requests", conflicts=conflicts)
-        assert len(conflict_set.conflicts) == 2
-        assert conflict_set.conflicts == conflicts
-
-    @pytest.mark.unit
-    def test_package_name_normalization(self) -> None:
-        """Test package name is normalized in __post_init__.
-
-        Package name should follow PEP 503 normalization.
-        """
-        conflict_set = ConflictSet(package_name="My_Package")
-        assert conflict_set.package_name == "my-package"
-
-    @pytest.mark.unit
-    def test_mutable_dataclass(self) -> None:
-        """Test ConflictSet is mutable (not frozen).
-
-        Should allow modification of conflicts list.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.package_name = "flask"  # Should not raise
-        assert conflict_set.package_name == "flask"
-
-    @pytest.mark.unit
-    def test_empty_package_name(self) -> None:
-        """Test ConflictSet with empty package name.
-
-        Edge case: Empty string should be accepted.
-        """
-        conflict_set = ConflictSet(package_name="")
-        assert conflict_set.package_name == ""
+# ---------------------------------------------------------------------------
+# ConflictSet
+# ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
-class TestConflictSetAddConflict:
-    """Tests for ConflictSet.add_conflict method."""
+class TestConflictSetBasics:
+    def test_starts_empty(self) -> None:
+        conflict_set = ConflictSet(package_name="urllib3")
 
-    @pytest.mark.unit
-    def test_add_single_conflict(
-        self, sample_conflict_set: ConflictSet, sample_conflict: Conflict
-    ) -> None:
-        """Test adding a single conflict to the set.
+        assert conflict_set.has_conflicts() is False
+        assert len(conflict_set) == 0
+        assert list(conflict_set) == []
 
-        Happy path: Conflict should be appended to conflicts list.
+    def test_package_name_is_normalised(self) -> None:
+        assert ConflictSet(package_name="Zope.Interface").package_name == (
+            "zope-interface"
+        )
 
-        Args:
-            sample_conflict_set: Fixture providing an empty ConflictSet.
-            sample_conflict: Fixture providing a basic Conflict instance.
-        """
-        # Act
-        sample_conflict_set.add_conflict(sample_conflict)
+    def test_accumulates_conflicts_in_arrival_order(self) -> None:
+        """Order is preserved so the summary lists constraints deterministically."""
+        conflict_set = ConflictSet(package_name="urllib3")
+        conflict_set.add_conflict(make_conflict("requests", "<3,>=1.21.1", "urllib3"))
+        conflict_set.add_conflict(make_conflict("internal-sdk", "<2.0", "urllib3"))
 
-        # Assert
-        assert len(sample_conflict_set.conflicts) == 1
-        assert sample_conflict_set.conflicts[0] == sample_conflict
-
-    @pytest.mark.unit
-    def test_add_multiple_conflicts(self, sample_conflict_set: ConflictSet) -> None:
-        """Test adding multiple conflicts sequentially.
-
-        All conflicts should be preserved in order.
-
-        Args:
-            sample_conflict_set: Fixture providing an empty ConflictSet.
-        """
-        # Arrange
-        conflict1 = Conflict("django", "requests", ">=2.0", "1.5")
-        conflict2 = Conflict("flask", "requests", ">=2.5", "1.5")
-        conflict3 = Conflict("fastapi", "requests", ">=3.0", "1.5")
-
-        # Act
-        sample_conflict_set.add_conflict(conflict1)
-        sample_conflict_set.add_conflict(conflict2)
-        sample_conflict_set.add_conflict(conflict3)
-
-        # Assert
-        assert len(sample_conflict_set.conflicts) == 3
-        assert sample_conflict_set.conflicts == [conflict1, conflict2, conflict3]
-
-    @pytest.mark.unit
-    def test_add_duplicate_conflicts(
-        self, sample_conflict_set: ConflictSet, sample_conflict: Conflict
-    ) -> None:
-        """Test adding duplicate conflicts.
-
-        Edge case: Duplicates should be allowed (no deduplication).
-
-        Args:
-            sample_conflict_set: Fixture providing an empty ConflictSet.
-            sample_conflict: Fixture providing a basic Conflict instance.
-        """
-        # Act
-        sample_conflict_set.add_conflict(sample_conflict)
-        sample_conflict_set.add_conflict(sample_conflict)
-
-        # Assert
-        assert len(sample_conflict_set.conflicts) == 2
-        assert sample_conflict_set.conflicts[0] is sample_conflict_set.conflicts[1]
-
-
-@pytest.mark.unit
-class TestConflictSetHasConflicts:
-    """Tests for ConflictSet.has_conflicts method."""
-
-    @pytest.mark.unit
-    def test_has_conflicts_when_empty(self, sample_conflict_set: ConflictSet) -> None:
-        """Test has_conflicts returns False for empty set.
-
-        Empty conflicts list should return False.
-
-        Args:
-            sample_conflict_set: Fixture providing an empty ConflictSet.
-        """
-        # Act & Assert
-        assert sample_conflict_set.has_conflicts() is False
-
-    @pytest.mark.unit
-    def test_has_conflicts_when_populated(
-        self, sample_conflict_set: ConflictSet, sample_conflict: Conflict
-    ) -> None:
-        """Test has_conflicts returns True when conflicts exist.
-
-        Non-empty conflicts list should return True.
-
-        Args:
-            sample_conflict_set: Fixture providing an empty ConflictSet.
-            sample_conflict: Fixture providing a basic Conflict instance.
-        """
-        # Arrange
-        sample_conflict_set.add_conflict(sample_conflict)
-
-        # Act & Assert
-        assert sample_conflict_set.has_conflicts() is True
-
-    @pytest.mark.unit
-    def test_has_conflicts_after_initialization(self) -> None:
-        """Test has_conflicts with conflicts provided at init.
-
-        Should return True when initialized with conflicts.
-        """
-        # Arrange
-        conflicts = [Conflict("django", "requests", ">=2.0", "1.5")]
-        conflict_set = ConflictSet(package_name="requests", conflicts=conflicts)
-
-        # Act & Assert
+        assert [c.source_package for c in conflict_set] == ["requests", "internal-sdk"]
+        assert len(conflict_set) == 2
         assert conflict_set.has_conflicts() is True
 
+    def test_duplicate_constraints_from_distinct_sources_are_both_kept(self) -> None:
+        """Two packages independently demanding ``<2.0`` is real signal.
 
-@pytest.mark.unit
-class TestConflictSetGetMaxCompatibleVersion:
-    """Tests for ConflictSet.get_max_compatible_version method."""
-
-    @pytest.mark.unit
-    def test_no_conflicts_returns_none(self) -> None:
-        """Test returns None when no conflicts exist.
-
-        Empty conflict set should return None.
+        Deduplicating would hide that relaxing one of them is not enough.
         """
-        conflict_set = ConflictSet(package_name="requests")
-        result = conflict_set.get_max_compatible_version(["1.0.0", "2.0.0"])
-        assert result is None
-
-    @pytest.mark.unit
-    def test_single_conflict_compatible_version(self) -> None:
-        """Test finds compatible version with single conflict.
-
-        Happy path: Should return highest compatible version.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", ">=2.0.0", "1.5.0"))
-
-        available = ["1.5.0", "2.0.0", "2.5.0", "3.0.0"]
-        result = conflict_set.get_max_compatible_version(available)
-
-        assert result == "3.0.0"
-
-    @pytest.mark.unit
-    def test_multiple_conflicts_intersection(self) -> None:
-        """Test finds version satisfying multiple constraints.
-
-        Should find version compatible with all conflicts.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", ">=2.0.0", "1.5.0"))
-        conflict_set.add_conflict(Conflict("flask", "requests", "<3.0.0", "3.5.0"))
-
-        available = ["1.5.0", "2.0.0", "2.5.0", "3.0.0", "3.5.0"]
-        result = conflict_set.get_max_compatible_version(available)
-
-        # Should be >=2.0.0 AND <3.0.0, so 2.5.0 is max
-        assert result == "2.5.0"
-
-    @pytest.mark.unit
-    def test_no_compatible_version_returns_none(self) -> None:
-        """Test returns None when no version satisfies all constraints.
-
-        Conflicting specifiers with no intersection should return None.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", ">=3.0.0", "1.5.0"))
-        conflict_set.add_conflict(Conflict("flask", "requests", "<2.0.0", "3.5.0"))
-
-        available = ["1.5.0", "2.0.0", "2.5.0", "3.0.0"]
-        result = conflict_set.get_max_compatible_version(available)
-
-        # No version satisfies both >=3.0.0 AND <2.0.0
-        assert result is None
-
-    @pytest.mark.unit
-    def test_excludes_prerelease_versions(self) -> None:
-        """Test pre-release versions are ignored.
-
-        Should skip versions with pre-release tags like alpha, beta, rc.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", ">=2.0.0", "1.5.0"))
-
-        available = ["2.0.0", "2.5.0", "3.0.0a1", "3.0.0b2", "3.0.0rc1"]
-        result = conflict_set.get_max_compatible_version(available)
-
-        # Should return 2.5.0, not any 3.0.0 pre-release
-        assert result == "2.5.0"
-
-    @pytest.mark.unit
-    def test_handles_invalid_version_strings(self) -> None:
-        """Test gracefully handles invalid version strings.
-
-        Edge case: Invalid versions should be skipped, not raise.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", ">=2.0.0", "1.5.0"))
-
-        available = ["invalid", "2.0.0", "not-a-version", "2.5.0", "bad"]
-        result = conflict_set.get_max_compatible_version(available)
-
-        # Should skip invalid and return 2.5.0
-        assert result == "2.5.0"
-
-    @pytest.mark.unit
-    def test_handles_invalid_specifier_returns_none(self) -> None:
-        """Test returns None when conflict has invalid specifier.
-
-        Edge case: Invalid specifier syntax should return None gracefully.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        # Invalid specifier syntax
-        conflict_set.add_conflict(
-            Conflict("django", "requests", "invalid>>spec", "1.5.0")
+        conflict_set = make_conflict_set(
+            "urllib3",
+            [
+                make_conflict("internal-sdk", "<2.0", "urllib3"),
+                make_conflict("legacy-client", "<2.0", "urllib3"),
+            ],
         )
-
-        available = ["1.0.0", "2.0.0", "3.0.0"]
-        result = conflict_set.get_max_compatible_version(available)
-
-        assert result is None
-
-    @pytest.mark.unit
-    def test_empty_available_versions(self) -> None:
-        """Test with empty available versions list.
-
-        Edge case: No available versions should return None.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", ">=2.0.0", "1.5.0"))
-
-        result = conflict_set.get_max_compatible_version([])
-        assert result is None
-
-    @pytest.mark.unit
-    def test_complex_specifier_combinations(self) -> None:
-        """Test complex version specifiers with multiple operators.
-
-        Should handle compound specifiers like >=2.0,<3.0,!=2.5.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(
-            Conflict("django", "requests", ">=2.0.0,<3.0.0,!=2.5.0", "1.5.0")
-        )
-
-        available = ["1.5.0", "2.0.0", "2.4.0", "2.5.0", "2.6.0", "3.0.0"]
-        result = conflict_set.get_max_compatible_version(available)
-
-        # Should return 2.6.0 (not 2.5.0 which is excluded, not 3.0.0 which is >=3.0)
-        assert result == "2.6.0"
-
-    @pytest.mark.unit
-    def test_wildcard_specifiers(self) -> None:
-        """Test wildcard version specifiers like ==2.*.
-
-        Edge case: Wildcard specifiers should match correct versions.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", "==2.*", "1.5.0"))
-
-        available = ["1.5.0", "2.0.0", "2.5.0", "2.9.9", "3.0.0"]
-        result = conflict_set.get_max_compatible_version(available)
-
-        # Should return highest 2.x version
-        assert result == "2.9.9"
-
-    @pytest.mark.unit
-    def test_exact_version_match(self) -> None:
-        """Test exact version specifier ==X.Y.Z.
-
-        Should only match the exact specified version.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", "==2.5.0", "1.5.0"))
-
-        available = ["2.0.0", "2.4.0", "2.5.0", "2.6.0", "3.0.0"]
-        result = conflict_set.get_max_compatible_version(available)
-
-        # Should return exactly 2.5.0
-        assert result == "2.5.0"
-
-    @pytest.mark.unit
-    def test_less_than_specifier(self) -> None:
-        """Test less-than version specifier <X.Y.Z.
-
-        Should return highest version below threshold.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", "<3.0.0", "3.5.0"))
-
-        available = ["2.0.0", "2.5.0", "2.9.9", "3.0.0", "3.5.0"]
-        result = conflict_set.get_max_compatible_version(available)
-
-        # Should return 2.9.9 (highest < 3.0.0)
-        assert result == "2.9.9"
-
-    @pytest.mark.unit
-    def test_tilde_compatible_release(self) -> None:
-        """Test tilde compatible release specifier ~=X.Y.
-
-        Edge case: ~= allows last version component to increment.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", "~=2.5", "1.5.0"))
-
-        available = ["2.0.0", "2.4.0", "2.5.0", "2.5.9", "2.6.0", "3.0.0"]
-        result = conflict_set.get_max_compatible_version(available)
-
-        # ~=2.5 means >=2.5,<3.0, so 2.6.0 is max
-        assert result == "2.6.0"
-
-    @pytest.mark.unit
-    def test_version_sorting(self) -> None:
-        """Test versions are correctly sorted to find max.
-
-        Should use proper version comparison, not string sorting.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", ">=1.0", "0.5.0"))
-
-        # Versions not in sorted order
-        available = ["2.10.0", "2.2.0", "2.1.0", "10.0.0", "2.20.0"]
-        result = conflict_set.get_max_compatible_version(available)
-
-        # Should return 10.0.0 (not "2.9" by string comparison)
-        assert result == "10.0.0"
-
-    @pytest.mark.unit
-    def test_dev_versions_excluded(self) -> None:
-        """Test development versions are excluded.
-
-        Edge case: .devN versions should be treated like pre-releases.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", ">=2.0", "1.5.0"))
-
-        available = ["2.0.0", "2.5.0", "3.0.0.dev1", "3.0.0.dev2"]
-        result = conflict_set.get_max_compatible_version(available)
-
-        # Should not include dev versions
-        assert result == "2.5.0"
-
-    @pytest.mark.unit
-    def test_post_release_versions_included(self) -> None:
-        """Test post-release versions are included.
-
-        Post-releases (.postN) are not pre-releases and should be considered.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", ">=2.0", "1.5.0"))
-
-        available = ["2.0.0", "2.5.0", "2.5.0.post1", "2.5.0.post2"]
-        result = conflict_set.get_max_compatible_version(available)
-
-        # Post-releases should be considered
-        assert result == "2.5.0.post2"
-
-
-@pytest.mark.unit
-class TestConflictSetMagicMethods:
-    """Tests for ConflictSet magic methods."""
-
-    @pytest.mark.unit
-    def test_len_empty(self) -> None:
-        """Test __len__ returns 0 for empty conflict set.
-
-        len() should return number of conflicts.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        assert len(conflict_set) == 0
-
-    @pytest.mark.unit
-    def test_len_with_conflicts(self) -> None:
-        """Test __len__ returns count of conflicts.
-
-        len() should accurately reflect number of conflicts.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", ">=2.0", "1.5"))
-        conflict_set.add_conflict(Conflict("flask", "requests", ">=2.5", "1.5"))
 
         assert len(conflict_set) == 2
 
-    @pytest.mark.unit
-    def test_iter_empty(self) -> None:
-        """Test __iter__ on empty conflict set.
 
-        Iteration over empty set should yield nothing.
+class TestMaxCompatibleVersionAcrossRealGraphs:
+    """``get_max_compatible_version`` intersects every constraint at once.
+
+    Each scenario below is a shape that occurs in practice, and each one breaks
+    a different naive implementation: taking the last constraint, taking the
+    tightest floor, or ignoring the fact that ranges only *partially* overlap.
+    """
+
+    def test_no_conflicts_means_nothing_to_solve(self) -> None:
+        """``None`` here means "not applicable", not "unsatisfiable"."""
+        assert ConflictSet("urllib3").get_max_compatible_version(URLLIB3_VERSIONS) is (
+            None
+        )
+
+    def test_three_concurrent_constraints_intersect_to_one_version(self) -> None:
+        """requests, an internal SDK and a legacy client all cap urllib3.
+
+        - ``requests==2.31.0`` allows ``<3,>=1.21.1`` (wide)
+        - ``internal-sdk`` is stuck on ``<2.0`` (blocks the 2.x line)
+        - ``legacy-client`` needs ``>=1.26.0`` (blocks 1.25.x)
+
+        Only the 1.26 series survives all three, and the newest member wins.
         """
-        conflict_set = ConflictSet(package_name="requests")
-        conflicts = list(conflict_set)
-        assert conflicts == []
+        conflict_set = make_conflict_set(
+            "urllib3",
+            [
+                make_conflict("requests", "<3,>=1.21.1", "urllib3", source_version="2.31.0"),
+                make_conflict("internal-sdk", "<2.0", "urllib3", source_version="4.2.0"),
+                make_conflict("legacy-client", ">=1.26.0", "urllib3", source_version="1.9.0"),
+            ],
+        )
 
-    @pytest.mark.unit
-    def test_iter_with_conflicts(self) -> None:
-        """Test __iter__ yields all conflicts.
+        assert conflict_set.get_max_compatible_version(URLLIB3_VERSIONS) == "1.26.18"
 
-        Should be able to iterate over conflicts.
+    def test_partially_overlapping_ranges_resolve_to_the_overlap(self) -> None:
+        """Flask 2.2.5 wants ``>=2.2.2`` and an internal plugin wants ``<2.3``.
+
+        Neither constraint alone excludes 2.3.7; together they leave exactly the
+        2.2.x band.
         """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict1 = Conflict("django", "requests", ">=2.0", "1.5")
-        conflict2 = Conflict("flask", "requests", ">=2.5", "1.5")
-        conflict_set.add_conflict(conflict1)
-        conflict_set.add_conflict(conflict2)
+        conflict_set = make_conflict_set(
+            "werkzeug",
+            [
+                make_conflict("flask", ">=2.2.2", "werkzeug", source_version="2.2.5"),
+                make_conflict("acme-auth", "<2.3", "werkzeug", source_version="1.4.0"),
+            ],
+        )
 
-        conflicts = list(conflict_set)
-        assert len(conflicts) == 2
-        assert conflicts[0] is conflict1
-        assert conflicts[1] is conflict2
+        resolved = conflict_set.get_max_compatible_version(
+            ["2.0.3", "2.1.2", "2.2.3", "2.3.7", "3.0.3"]
+        )
 
-    @pytest.mark.unit
-    def test_iter_in_for_loop(self) -> None:
-        """Test __iter__ works in for loop.
+        assert resolved == "2.2.3"
 
-        Integration test: Should work with standard Python iteration.
+    def test_nested_ranges_resolve_to_the_innermost(self) -> None:
+        """One constraint fully contains the other; the tighter one governs.
+
+        Celery 5.3.6 admits the whole ``>=5.3.4,<6.0`` band, while an internal
+        broker shim is only validated against ``>=5.3.4,<5.3.7``.
         """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", ">=2.0", "1.5"))
-        conflict_set.add_conflict(Conflict("flask", "requests", ">=2.5", "1.5"))
+        conflict_set = make_conflict_set(
+            "kombu",
+            [
+                make_conflict("celery", ">=5.3.4,<6.0", "kombu", source_version="5.3.6"),
+                make_conflict(
+                    "acme-broker", ">=5.3.4,<5.3.7", "kombu", source_version="2.1.0"
+                ),
+            ],
+        )
 
-        count = 0
-        for conflict in conflict_set:
-            assert isinstance(conflict, Conflict)
-            count += 1
+        resolved = conflict_set.get_max_compatible_version(
+            ["5.2.4", "5.3.4", "5.3.5", "5.3.7"]
+        )
 
-        assert count == 2
+        assert resolved == "5.3.5"
 
+    def test_disjoint_constraints_are_unsatisfiable(self) -> None:
+        """A hard security floor against a legacy cap has no answer.
 
-@pytest.mark.unit
-class TestConflictEquality:
-    """Tests for Conflict equality comparison."""
-
-    @pytest.mark.unit
-    def test_equal_conflicts(self) -> None:
-        """Test two conflicts with same data are equal.
-
-        Dataclass should implement structural equality.
+        Returning a version anyway would be worse than reporting failure: the
+        user would get a file that satisfies neither dependant.
         """
-        conflict1 = Conflict("django", "requests", ">=2.0", "1.5", "4.0")
-        conflict2 = Conflict("django", "requests", ">=2.0", "1.5", "4.0")
+        conflict_set = make_conflict_set(
+            "urllib3",
+            [
+                make_conflict("internal-sdk", "<2.0", "urllib3"),
+                make_conflict("security-policy", ">=2.2.0", "urllib3"),
+            ],
+        )
 
-        assert conflict1 == conflict2
+        assert conflict_set.get_max_compatible_version(URLLIB3_VERSIONS) is None
 
-    @pytest.mark.unit
-    def test_unequal_source_package(self) -> None:
-        """Test conflicts differ when source package differs.
+    def test_no_published_version_satisfies_the_constraint(self) -> None:
+        """A dependant may require a version that simply does not exist yet."""
+        conflict_set = make_conflict_set(
+            "urllib3", [make_conflict("future-client", ">=3.0", "urllib3")]
+        )
 
-        Different source packages should make conflicts unequal.
-        """
-        conflict1 = Conflict("django", "requests", ">=2.0", "1.5")
-        conflict2 = Conflict("flask", "requests", ">=2.0", "1.5")
+        assert conflict_set.get_max_compatible_version(URLLIB3_VERSIONS) is None
 
-        assert conflict1 != conflict2
+    def test_empty_release_history_yields_no_answer(self) -> None:
+        """Models a package whose metadata fetch failed: no candidates at all."""
+        conflict_set = make_conflict_set(
+            "urllib3", [make_conflict("requests", ">=1.21.1", "urllib3")]
+        )
 
-    @pytest.mark.unit
-    def test_unequal_required_spec(self) -> None:
-        """Test conflicts differ when required spec differs.
-
-        Different specifiers should make conflicts unequal.
-        """
-        conflict1 = Conflict("django", "requests", ">=2.0", "1.5")
-        conflict2 = Conflict("django", "requests", ">=3.0", "1.5")
-
-        assert conflict1 != conflict2
-
-    @pytest.mark.unit
-    def test_normalized_names_affect_equality(self) -> None:
-        """Test normalization affects equality comparison.
-
-        Conflicts with differently-cased names should be equal after normalization.
-        """
-        conflict1 = Conflict("Django", "Requests", ">=2.0", "1.5")
-        conflict2 = Conflict("django", "requests", ">=2.0", "1.5")
-
-        # Both should normalize to same values
-        assert conflict1 == conflict2
-
-
-@pytest.mark.integration
-class TestConflictSetIntegration:
-    """Integration tests combining multiple ConflictSet features."""
-
-    @pytest.mark.integration
-    def test_full_workflow(self) -> None:
-        """Test complete workflow from creation to version resolution.
-
-        Integration test: Create, populate, and resolve conflicts.
-        """
-        # Create conflict set
-        conflict_set = ConflictSet(package_name="requests")
-        assert not conflict_set.has_conflicts()
-
-        # Add conflicts
-        conflict_set.add_conflict(Conflict("django", "requests", ">=2.20.0", "2.0.0"))
-        conflict_set.add_conflict(Conflict("flask", "requests", "<3.0.0", "3.5.0"))
-        conflict_set.add_conflict(Conflict("fastapi", "requests", ">=2.25.0", "2.0.0"))
-        assert conflict_set.has_conflicts()
-        assert len(conflict_set) == 3
-
-        # Resolve compatible version
-        available = ["2.0.0", "2.20.0", "2.25.0", "2.28.0", "2.31.0", "3.0.0", "3.1.0"]
-        compatible = conflict_set.get_max_compatible_version(available)
-
-        # Should satisfy: >=2.20.0 AND <3.0.0 AND >=2.25.0
-        # So max is 2.31.0
-        assert compatible == "2.31.0"
-
-    @pytest.mark.integration
-    def test_iterate_and_display_conflicts(self) -> None:
-        """Test iterating and displaying all conflicts.
-
-        Integration test: Iteration with string formatting.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", ">=2.0", "1.5", "4.0"))
-        conflict_set.add_conflict(Conflict("flask", "requests", ">=2.5", "1.5", "2.0"))
-
-        displays = [conflict.to_display_string() for conflict in conflict_set]
-        assert len(displays) == 2
-        assert "django==4.0 requires requests>=2.0" in displays
-        assert "flask==2.0 requires requests>=2.5" in displays
-
-    @pytest.mark.integration
-    def test_json_serialization_workflow(self) -> None:
-        """Test serializing all conflicts to JSON.
-
-        Integration test: Convert all conflicts to JSON format.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", ">=2.0", "1.5"))
-        conflict_set.add_conflict(Conflict("flask", "requests", ">=2.5", "1.5"))
-
-        json_list = [conflict.to_json() for conflict in conflict_set]
-        assert len(json_list) == 2
-        assert all(isinstance(item, dict) for item in json_list)
-        assert json_list[0]["source_package"] == "django"
-        assert json_list[1]["source_package"] == "flask"
-
-
-@pytest.mark.unit
-class TestEdgeCases:
-    """Additional edge case tests."""
-
-    @pytest.mark.unit
-    def test_conflict_with_local_version(self) -> None:
-        """Test conflict with local version identifier.
-
-        Edge case: PEP 440 local versions like 1.0+local.
-        """
-        conflict = Conflict("django", "requests", ">=2.0", "1.0+local")
-        assert conflict.conflicting_version == "1.0+local"
-
-    @pytest.mark.unit
-    def test_conflict_with_epoch(self) -> None:
-        """Test conflict with epoch version.
-
-        Edge case: PEP 440 epochs like 1!2.0.0.
-        """
-        conflict = Conflict("django", "requests", ">=2.0", "1!2.0.0")
-        assert conflict.conflicting_version == "1!2.0.0"
-
-    @pytest.mark.unit
-    def test_very_long_package_names(self) -> None:
-        """Test conflicts with very long package names.
-
-        Edge case: Extremely long names should be handled.
-        """
-        long_name = "a" * 200
-        conflict = Conflict(long_name, "requests", ">=2.0", "1.5")
-        assert len(conflict.source_package) == 200
-
-    @pytest.mark.unit
-    def test_unicode_in_version_spec(self) -> None:
-        """Test handling of unicode characters in specifiers.
-
-        Edge case: Should handle or reject unicode gracefully.
-        """
-        # This might be invalid, but shouldn't crash
-        conflict = Conflict("django", "requests", ">=2.0™", "1.5")
-        assert conflict.required_spec == ">=2.0™"
-
-    @pytest.mark.unit
-    def test_max_compatible_with_only_prereleases(self) -> None:
-        """Test version resolution when only pre-releases available.
-
-        Edge case: If all versions are pre-release, should return None.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", ">=2.0", "1.5"))
-
-        available = ["2.0.0a1", "2.5.0b1", "3.0.0rc1"]
-        result = conflict_set.get_max_compatible_version(available)
-
-        # All are pre-releases, should return None
-        assert result is None
-
-    @pytest.mark.unit
-    def test_conflict_set_with_hundreds_of_conflicts(self) -> None:
-        """Test ConflictSet performance with many conflicts.
-
-        Edge case: Should handle large numbers of conflicts.
-        """
-        conflict_set = ConflictSet(package_name="requests")
-
-        # Add 100 conflicts
-        for i in range(100):
-            conflict_set.add_conflict(
-                Conflict(f"package{i}", "requests", f">={i}.0", "1.5")
-            )
-
-        assert len(conflict_set) == 100
-        assert conflict_set.has_conflicts()
-
-    @pytest.mark.unit
-    def test_version_with_many_segments(self) -> None:
-        """Test versions with many segments like 1.2.3.4.5.6.
-
-        Edge case: Non-standard version formats.
-        """
-        # Arrange
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", ">=1.2.3.4", "1.0"))
-
-        available = ["1.2.3.3", "1.2.3.4", "1.2.3.5", "1.2.4.0"]
-
-        # Act
-        result = conflict_set.get_max_compatible_version(available)
-
-        # Assert - Should handle multi-segment versions
-        assert result == "1.2.4.0"
-
-
-@pytest.mark.unit
-class TestConflictSetParametrized:
-    """Parametrized tests for ConflictSet with various version specifiers."""
+        assert conflict_set.get_max_compatible_version([]) is None
 
     @pytest.mark.parametrize(
-        "spec,available,expected",
+        ("spec", "expected"),
         [
-            # Greater than or equal
-            (">=2.0.0", ["1.0.0", "2.0.0", "3.0.0"], "3.0.0"),
-            (">=2.5.0", ["2.0.0", "2.5.0", "2.6.0"], "2.6.0"),
-            # Less than
-            ("<3.0.0", ["2.0.0", "2.9.0", "3.0.0"], "2.9.0"),
-            ("<2.0", ["1.5.0", "1.9.0", "2.0.0"], "1.9.0"),
-            # Exact match
-            ("==2.5.0", ["2.0.0", "2.5.0", "3.0.0"], "2.5.0"),
-            ("==1.0", ["0.9.0", "1.0", "1.1.0"], "1.0"),
-            # Not equal (should get highest that isn't excluded)
-            ("!=2.5.0", ["2.4.0", "2.5.0", "2.6.0"], "2.6.0"),
-            # Compatible release
-            ("~=2.5", ["2.0.0", "2.5.0", "2.9.0", "3.0.0"], "2.9.0"),
-            ("~=1.4.2", ["1.4.0", "1.4.2", "1.4.9", "1.5.0"], "1.4.9"),
-            # Compound specifiers
-            (">=2.0,<3.0", ["1.5.0", "2.5.0", "3.0.0"], "2.5.0"),
-            (">=1.0,<=2.0", ["0.5.0", "1.5.0", "2.0.0", "2.5.0"], "2.0.0"),
-            (">=1.0,<2.0,!=1.5.0", ["1.0.0", "1.5.0", "1.9.0", "2.0.0"], "1.9.0"),
-        ],
-        ids=[
-            "gte-simple",
-            "gte-specific",
-            "lt-major",
-            "lt-minor",
-            "exact-patch",
-            "exact-minor",
-            "not-equal",
-            "compatible-minor",
-            "compatible-patch",
-            "compound-range",
-            "compound-inclusive",
-            "compound-exclusion",
+            pytest.param("<=2.0.7", "2.0.7", id="inclusive-cap-admits-the-boundary"),
+            pytest.param("<2.0.7", "1.26.18", id="exclusive-cap-excludes-it"),
+            pytest.param(">=2.2.2", "2.2.2", id="inclusive-floor-admits-the-boundary"),
+            pytest.param(">2.0.7", "2.2.2", id="exclusive-floor-skips-it"),
+            pytest.param("==1.26.18", "1.26.18", id="exact-pin"),
+            pytest.param("!=2.2.2", "2.0.7", id="exclusion-falls-back-one-release"),
+            pytest.param("~=1.26.5", "1.26.18", id="compatible-release-stays-in-series"),
         ],
     )
-    def test_version_specifier_matching(
-        self, spec: str, available: List[str], expected: str
+    def test_boundary_conditions(self, spec: str, expected: str) -> None:
+        """Off-by-one at a range boundary is the classic resolver defect."""
+        conflict_set = make_conflict_set(
+            "urllib3", [make_conflict("requests", spec, "urllib3")]
+        )
+
+        assert conflict_set.get_max_compatible_version(URLLIB3_VERSIONS) == expected
+
+    def test_prereleases_are_never_selected(self) -> None:
+        """Silently upgrading a production file to an alpha is unacceptable.
+
+        The release candidate satisfies the specifier, so only the explicit
+        pre-release filter keeps it out.
+        """
+        conflict_set = make_conflict_set(
+            "urllib3", [make_conflict("requests", ">=2.0", "urllib3")]
+        )
+
+        resolved = conflict_set.get_max_compatible_version(
+            ["2.0.7", "2.2.2", "2.3.0rc1", "3.0.0a1"]
+        )
+
+        assert resolved == "2.2.2"
+
+    def test_a_history_of_only_prereleases_has_no_answer(self) -> None:
+        conflict_set = make_conflict_set(
+            "urllib3", [make_conflict("requests", ">=2.0", "urllib3")]
+        )
+
+        assert (
+            conflict_set.get_max_compatible_version(["2.0.0a1", "2.5.0b1", "3.0.0rc1"])
+            is None
+        )
+
+
+class TestMaxCompatibleVersionRobustness:
+    """Upstream metadata is untrusted input and is routinely malformed."""
+
+    def test_unparseable_specifier_yields_no_recommendation(self) -> None:
+        """A broken ``requires_dist`` entry must not be guessed at.
+
+        Proposing a version derived from a specifier we could not read would be
+        a fabricated answer; declining is the honest outcome.
+        """
+        conflict_set = make_conflict_set(
+            "urllib3", [make_conflict("broken-pkg", "not a specifier", "urllib3")]
+        )
+
+        assert conflict_set.get_max_compatible_version(URLLIB3_VERSIONS) is None
+
+    def test_one_unparseable_specifier_poisons_the_whole_set(self) -> None:
+        """The constraints are intersected as one specifier string.
+
+        Documenting this deliberately: a single malformed entry disables the
+        recommendation for that package rather than being skipped, so the user
+        is never handed a version that only satisfies *some* of its dependants.
+        """
+        conflict_set = make_conflict_set(
+            "urllib3",
+            [
+                make_conflict("requests", "<2.0", "urllib3"),
+                make_conflict("broken-pkg", ">>>1.0", "urllib3"),
+            ],
+        )
+
+        assert conflict_set.get_max_compatible_version(URLLIB3_VERSIONS) is None
+
+    def test_unparseable_versions_are_skipped_not_fatal(self) -> None:
+        """Legacy uploads carry non-PEP-440 tags; they must not abort the run."""
+        conflict_set = make_conflict_set(
+            "urllib3", [make_conflict("requests", ">=1.0", "urllib3")]
+        )
+
+        resolved = conflict_set.get_max_compatible_version(
+            ["1.26.18", "not-a-version", "2.0.7", "1.0-alpha"]
+        )
+
+        assert resolved == "2.0.7"
+
+    def test_selection_is_by_version_order_not_string_order(self) -> None:
+        """``"1.26.18" < "1.26.5"`` as strings; as versions the reverse holds."""
+        conflict_set = make_conflict_set(
+            "urllib3", [make_conflict("requests", ">=1.21.1,<2.0", "urllib3")]
+        )
+
+        resolved = conflict_set.get_max_compatible_version(
+            ["1.26.5", "1.26.18", "1.26.9"]
+        )
+
+        assert resolved == "1.26.18"
+
+    def test_post_releases_are_eligible(self) -> None:
+        """``6.4.post2`` is a real, installable zope-interface release."""
+        conflict_set = make_conflict_set(
+            "zope-interface", [make_conflict("sqlalchemy", ">=6.0", "zope-interface")]
+        )
+
+        resolved = conflict_set.get_max_compatible_version(
+            ["5.4.0", "6.0", "6.4.post2"]
+        )
+
+        assert resolved == "6.4.post2"
+
+    @pytest.mark.parametrize(
+        ("available", "expected"),
+        [
+            pytest.param(["1.4.0", "1.4.2", "1.4.9", "1.5.0"], "1.4.9", id="four-part-floor"),
+            pytest.param(["1.2.3.3", "1.2.3.4", "1.2.4.0"], "1.2.4.0", id="four-part-history"),
+        ],
+    )
+    def test_multi_segment_versions_compare_numerically(
+        self, available: List[str], expected: Optional[str]
     ) -> None:
-        """Test version resolution with various specifiers.
+        """Versions like ``3.6.4.0`` (billiard) and ``1.2.3.4`` occur upstream."""
+        spec = "~=1.4.2" if expected == "1.4.9" else ">=1.2.3.4"
+        conflict_set = make_conflict_set(
+            "billiard", [make_conflict("celery", spec, "billiard")]
+        )
 
-        Parametrized test covering all common version specifier patterns.
+        assert conflict_set.get_max_compatible_version(available) == expected
 
-        Args:
-            spec: Version specifier string to test.
-            available: List of available version strings.
-            expected: Expected maximum compatible version.
+
+class TestConflictSetWorkflow:
+    """The sequence the resolver actually performs, end to end."""
+
+    def test_collect_then_resolve_then_report(self) -> None:
+        """Three services constrain urllib3; the set drives both outputs.
+
+        This is the shape of a real ``depkeeper check`` run: conflicts arrive
+        one at a time from different sources, then a single version is chosen
+        and the same set is rendered for the user.
         """
-        # Arrange
-        conflict_set = ConflictSet(package_name="test-pkg")
-        conflict_set.add_conflict(Conflict("django", "test-pkg", spec, "0.0.0"))
+        conflict_set = ConflictSet(package_name="urllib3")
+        assert conflict_set.has_conflicts() is False
 
-        # Act
-        result = conflict_set.get_max_compatible_version(available)
+        conflict_set.add_conflict(
+            make_conflict("requests", "<3,>=1.21.1", "urllib3", source_version="2.31.0")
+        )
+        conflict_set.add_conflict(
+            make_conflict("internal-sdk", "<2.0", "urllib3", source_version="4.2.0")
+        )
+        conflict_set.add_conflict(
+            make_conflict("legacy-client", ">=1.26.0", "urllib3", source_version="1.9.0")
+        )
 
-        # Assert
-        assert result == expected
+        assert conflict_set.get_max_compatible_version(URLLIB3_VERSIONS) == "1.26.18"
 
-    @pytest.mark.parametrize(
-        "spec,available",
-        [
-            # No compatible versions
-            (">=5.0.0", ["1.0.0", "2.0.0", "3.0.0"]),
-            ("<1.0.0", ["1.0.0", "2.0.0", "3.0.0"]),
-            ("==4.0.0", ["1.0.0", "2.0.0", "3.0.0"]),
-            # Only pre-releases available
-            (">=1.0.0", ["1.0.0a1", "1.0.0b1", "1.0.0rc1"]),
-            # Contradictory specifiers
-            (">=3.0.0,<2.0.0", ["1.0.0", "2.0.0", "3.0.0"]),
-        ],
-        ids=[
-            "gte-too-high",
-            "lt-too-low",
-            "exact-missing",
-            "only-prereleases",
-            "contradictory",
-        ],
-    )
-    def test_no_compatible_version_cases(self, spec: str, available: List[str]) -> None:
-        """Test cases where no compatible version should be found.
-
-        Parametrized test for various scenarios that should return None.
-
-        Args:
-            spec: Version specifier string to test.
-            available: List of available version strings.
-        """
-        # Arrange
-        conflict_set = ConflictSet(package_name="test-pkg")
-        conflict_set.add_conflict(Conflict("django", "test-pkg", spec, "0.0.0"))
-
-        # Act
-        result = conflict_set.get_max_compatible_version(available)
-
-        # Assert
-        assert result is None
-
-
-@pytest.mark.unit
-class TestConflictDataConsistency:
-    """Tests for data consistency and immutability expectations."""
-
-    @pytest.mark.unit
-    def test_conflict_hash_consistency(self) -> None:
-        """Test that equal conflicts have equal hashes.
-
-        Frozen dataclasses should be hashable and consistent.
-        """
-        # Arrange
-        conflict1 = Conflict("django", "requests", ">=2.0", "1.5", "4.0")
-        conflict2 = Conflict("django", "requests", ">=2.0", "1.5", "4.0")
-
-        # Act & Assert
-        assert hash(conflict1) == hash(conflict2)
-        # Should be usable in sets/dicts
-        conflict_set = {conflict1, conflict2}
-        assert len(conflict_set) == 1  # Should deduplicate
-
-    @pytest.mark.unit
-    def test_conflict_set_mutations_dont_affect_conflicts(self) -> None:
-        """Test that ConflictSet mutations don't affect stored Conflicts.
-
-        Edge case: Frozen Conflicts should remain immutable after being added.
-        """
-        # Arrange
-        conflict = Conflict("django", "requests", ">=2.0", "1.5")
-        conflict_set = ConflictSet(package_name="requests")
-
-        # Act
-        conflict_set.add_conflict(conflict)
-        # Try to mutate the set
-        conflict_set.package_name = "different"
-
-        # Assert - Original conflict should be unchanged
-        assert conflict.target_package == "requests"
-        assert conflict_set.conflicts[0] is conflict
-
-    @pytest.mark.unit
-    def test_conflict_set_clear_behavior(self) -> None:
-        """Test clearing all conflicts from a ConflictSet.
-
-        Should be able to remove all conflicts and reset state.
-        """
-        # Arrange
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", ">=2.0", "1.5"))
-        conflict_set.add_conflict(Conflict("flask", "requests", ">=2.5", "1.5"))
-
-        # Act
-        conflict_set.conflicts.clear()
-
-        # Assert
-        assert len(conflict_set) == 0
-        assert not conflict_set.has_conflicts()
-
-
-@pytest.mark.unit
-class TestConflictSetRobustness:
-    """Tests for robustness and error handling."""
-
-    @pytest.mark.unit
-    def test_get_max_compatible_with_mixed_valid_invalid_versions(self) -> None:
-        """Test version resolution with mix of valid and invalid versions.
-
-        Should skip invalid versions and process valid ones normally.
-        """
-        # Arrange
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", ">=2.0", "1.5"))
-
-        # Mix of valid and invalid versions
-        # Note: "v3.0.0" is parsed as valid by packaging (v prefix is allowed)
-        available = [
-            "invalid",
-            "2.0.0",
-            "not-a-version",
-            "2.5.0",
-            "version-string",  # Invalid
-            "3.0.0",
-            "bad-version",
+        assert [c.to_display_string() for c in conflict_set] == [
+            "requests==2.31.0 requires urllib3<3,>=1.21.1",
+            "internal-sdk==4.2.0 requires urllib3<2.0",
+            "legacy-client==1.9.0 requires urllib3>=1.26.0",
+        ]
+        assert [c.to_json()["source_package"] for c in conflict_set] == [
+            "requests",
+            "internal-sdk",
+            "legacy-client",
         ]
 
-        # Act
-        result = conflict_set.get_max_compatible_version(available)
+    def test_relaxing_one_constraint_unblocks_the_upgrade(self) -> None:
+        """Demonstrates why the intersection — not any single cap — decides.
 
-        # Assert - Should return highest valid version
-        assert result == "3.0.0"
-
-    @pytest.mark.unit
-    def test_conflict_set_with_empty_string_versions(self) -> None:
-        """Test handling of empty string versions in available list.
-
-        Edge case: Empty strings should be skipped gracefully.
+        Dropping the internal SDK's ``<2.0`` is exactly the remediation
+        depkeeper's output is meant to prompt, and it moves the answer two
+        majors.
         """
-        # Arrange
-        conflict_set = ConflictSet(package_name="requests")
-        conflict_set.add_conflict(Conflict("django", "requests", ">=2.0", "1.5"))
+        blocking = make_conflict("internal-sdk", "<2.0", "urllib3")
+        shared = make_conflict("requests", "<3,>=1.21.1", "urllib3")
 
-        available = ["", "2.0.0", "", "2.5.0", ""]
+        with_sdk = make_conflict_set("urllib3", [shared, blocking])
+        without_sdk = make_conflict_set("urllib3", [shared])
 
-        # Act
-        result = conflict_set.get_max_compatible_version(available)
-
-        # Assert
-        assert result == "2.5.0"
-
-    @pytest.mark.unit
-    def test_conflict_set_iteration_after_modifications(self) -> None:
-        """Test that iteration works correctly after adding/removing conflicts.
-
-        Should reflect current state of conflicts list.
-        """
-        # Arrange
-        conflict_set = ConflictSet(package_name="requests")
-        conflict1 = Conflict("django", "requests", ">=2.0", "1.5")
-        conflict2 = Conflict("flask", "requests", ">=2.5", "1.5")
-
-        # Act - Add, iterate, add more, iterate again
-        conflict_set.add_conflict(conflict1)
-        first_iteration = list(conflict_set)
-        assert len(first_iteration) == 1
-
-        conflict_set.add_conflict(conflict2)
-        second_iteration = list(conflict_set)
-        assert len(second_iteration) == 2
-
-        # Assert
-        assert first_iteration[0] is conflict1
-        assert second_iteration[0] is conflict1
-        assert second_iteration[1] is conflict2
-
-    @pytest.mark.parametrize(
-        "package_name,expected",
-        [
-            ("CamelCase", "camelcase"),
-            ("under_score", "under-score"),
-            ("Mixed_CASE_under", "mixed-case-under"),
-            ("dots.in.name", "dots.in.name"),
-            ("123-numeric", "123-numeric"),
-        ],
-        ids=["camelcase", "underscore", "mixed", "dots", "numeric"],
-    )
-    def test_conflict_set_name_normalization_parametrized(
-        self, package_name: str, expected: str
-    ) -> None:
-        """Test ConflictSet normalizes various package name formats.
-
-        Parametrized test for PEP 503 normalization in ConflictSet.__post_init__.
-
-        Args:
-            package_name: Input package name to test.
-            expected: Expected normalized package name.
-        """
-        # Act
-        conflict_set = ConflictSet(package_name=package_name)
-
-        # Assert
-        assert conflict_set.package_name == expected
-
-
-@pytest.mark.unit
-class TestConflictJSONRobustness:
-    """Tests for JSON serialization robustness and edge cases."""
-
-    @pytest.mark.unit
-    def test_to_json_with_none_values(self) -> None:
-        """Test JSON serialization explicitly includes None values.
-
-        Should have source_version key even when None.
-        """
-        # Arrange
-        conflict = Conflict("django", "requests", ">=2.0", "1.5")
-
-        # Act
-        result = conflict.to_json()
-
-        # Assert
-        assert "source_version" in result
-        assert result["source_version"] is None
-
-    @pytest.mark.unit
-    def test_to_json_preserves_all_data(
-        self, sample_conflict_with_version: Conflict
-    ) -> None:
-        """Test JSON serialization preserves all conflict data.
-
-        No data should be lost during serialization.
-
-        Args:
-            sample_conflict_with_version: Fixture providing a complete Conflict.
-        """
-        # Act
-        result = sample_conflict_with_version.to_json()
-
-        # Assert
-        assert result["source_package"] == sample_conflict_with_version.source_package
-        assert result["target_package"] == sample_conflict_with_version.target_package
-        assert result["required_spec"] == sample_conflict_with_version.required_spec
-        assert (
-            result["conflicting_version"]
-            == sample_conflict_with_version.conflicting_version
-        )
-        assert result["source_version"] == sample_conflict_with_version.source_version
-
-    @pytest.mark.parametrize(
-        "source,target,spec,conflicting,source_ver",
-        [
-            ("pkg-a", "pkg-b", ">=1.0", "0.5", None),
-            ("Pkg_A", "Pkg_B", ">=1.0", "0.5", "2.0"),
-            ("", "", "", "", None),
-            ("a" * 100, "b" * 100, ">=1.0" * 10, "0.0.1", "1!2.3"),
-        ],
-        ids=["basic", "needs-normalization", "empty", "extreme"],
-    )
-    def test_json_serialization_various_inputs(
-        self,
-        source: str,
-        target: str,
-        spec: str,
-        conflicting: str,
-        source_ver: str | None,
-    ) -> None:
-        """Test JSON serialization with various input combinations.
-
-        Parametrized test ensuring JSON serialization works for edge cases.
-
-        Args:
-            source: Source package name.
-            target: Target package name.
-            spec: Version specifier.
-            conflicting: Conflicting version string.
-            source_ver: Optional source version.
-        """
-        # Arrange
-        conflict = Conflict(source, target, spec, conflicting, source_ver)
-
-        # Act
-        result = conflict.to_json()
-
-        # Assert - Should always be a dict with correct keys
-        assert isinstance(result, dict)
-        assert len(result) == 5
-        assert all(
-            key in result
-            for key in [
-                "source_package",
-                "target_package",
-                "required_spec",
-                "conflicting_version",
-                "source_version",
-            ]
-        )
+        assert with_sdk.get_max_compatible_version(URLLIB3_VERSIONS) == "1.26.18"
+        assert without_sdk.get_max_compatible_version(URLLIB3_VERSIONS) == "2.2.2"

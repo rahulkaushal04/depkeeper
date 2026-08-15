@@ -87,8 +87,7 @@
         links.forEach(link => {
             try {
                 const linkUrl = new URL(link.href);
-                const isExternal = linkUrl.hostname !== currentDomain &&
-                                 !linkUrl.hostname.endsWith('depkeeper.dev');
+                const isExternal = linkUrl.hostname !== currentDomain;
 
                 if (isExternal) {
                     // Add external link attributes
@@ -253,15 +252,6 @@
                 table.parentNode.insertBefore(wrapper, table);
                 wrapper.appendChild(table);
             }
-
-            // Add sortable class indicator
-            const headers = table.querySelectorAll('th');
-            headers.forEach(header => {
-                if (!header.querySelector('.sortable-icon')) {
-                    header.style.cursor = 'pointer';
-                    header.title = 'Click to sort';
-                }
-            });
         });
     }
 

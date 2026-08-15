@@ -225,6 +225,38 @@ class TestReadToml:
             assert "TOML support requires" in str(exc_info.value)
             assert "tomli" in str(exc_info.value)
 
+    def test_reads_toml_with_utf8_bom(self, tmp_path: Path) -> None:
+        """M3 regression: TOML parsers reject a BOM as an invalid statement."""
+        toml_file = tmp_path / "depkeeper.toml"
+        toml_file.write_bytes(
+            "[depkeeper]\ncheck_conflicts = false\n".encode("utf-8-sig")
+        )
+
+        result = _read_toml(toml_file)
+
+        assert result["depkeeper"]["check_conflicts"] is False
+
+    def test_raises_error_on_invalid_utf8(self, tmp_path: Path) -> None:
+        """Undecodable bytes surface as ConfigError, not UnicodeDecodeError."""
+        toml_file = tmp_path / "binary.toml"
+        toml_file.write_bytes(b"\xff\xfe\x00invalid")
+
+        with pytest.raises(ConfigError) as exc_info:
+            _read_toml(toml_file)
+
+        assert "not valid UTF-8" in str(exc_info.value)
+
+    def test_loads_config_file_with_utf8_bom(self, tmp_path: Path) -> None:
+        """End-to-end: a BOM-prefixed config file is honoured."""
+        config_file = tmp_path / "depkeeper.toml"
+        config_file.write_bytes(
+            "[depkeeper]\nstrict_version_matching = true\n".encode("utf-8-sig")
+        )
+
+        config = load_config(config_file)
+
+        assert config.strict_version_matching is True
+
 
 @pytest.mark.unit
 class TestParseSection:

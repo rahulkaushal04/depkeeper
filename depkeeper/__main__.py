@@ -1,8 +1,7 @@
-"""
-Module entry point for depkeeper.
+"""Module entry point for depkeeper.
 
-This file enables execution via ``python -m depkeeper`` and delegates
-control to the main CLI implementation.
+Enables execution via ``python -m depkeeper`` and delegates control to the
+main CLI implementation.
 """
 
 from __future__ import annotations

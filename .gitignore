@@ -208,3 +208,5 @@ __marimo__/
 
 # Test notebooks
 test_*.ipynb
+
+workspace/*
