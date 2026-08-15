@@ -150,5 +150,5 @@ Documented in full at
 
 ---
 
-[Unreleased]: https://github.com/rahulkaushal04/depkeeper/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/rahulkaushal04/depkeeper/compare/v0.1.0...main
 [0.1.0]: https://github.com/rahulkaushal04/depkeeper/releases/tag/v0.1.0

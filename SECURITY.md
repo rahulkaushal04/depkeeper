@@ -112,7 +112,7 @@ documented at <https://rahulkaushal04.github.io/depkeeper/guides/operations/#sec
 | Input limits | 10 MB per file. |
 | Parsing safety | No `eval`, no shell invocation, no dynamic import of analysed content. Version and specifier handling is delegated to `packaging`. |
 | Hash integrity | Updates that would strip `--hash` entries are **refused** unless `--allow-hash-removal` is passed explicitly. |
-| Path controls | `utils.filesystem.validate_path` can confine a resolved path to a base directory. |
+| Path controls | `utils.filesystem.validate_path` exists to confine a resolved path to a base directory, but it is **not** applied to `-r`/`-c` include resolution or to `update`'s write targets — see the residual risk below. |
 
 ### Known residual risks
 

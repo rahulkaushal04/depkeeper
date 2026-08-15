@@ -409,7 +409,7 @@ Report vulnerabilities privately — see [SECURITY.md](SECURITY.md), never a pub
 
 ## License
 
-[Apache License 2.0](LICENSE). Copyright 2024-2026 Rahul Kaushal.
+[Apache License 2.0](LICENSE). Copyright 2025-2026 Rahul Kaushal.
 
 Built with [Click](https://click.palletsprojects.com/),
 [Rich](https://rich.readthedocs.io/), [httpx](https://www.python-httpx.org/) and

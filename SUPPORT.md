@@ -28,7 +28,7 @@ Most questions are answered by one of these, in order:
 
 | Need | Channel |
 |---|---|
-| Usage question, "is this expected?", design discussion | [GitHub Discussions](https://github.com/rahulkaushal04/depkeeper/discussions) |
+| Usage question, "is this expected?", design discussion | [Open an issue](https://github.com/rahulkaushal04/depkeeper/issues/new) |
 | Reproducible defect | [Issues → Bug report](https://github.com/rahulkaushal04/depkeeper/issues/new?template=bug_report.md) |
 | Feature or enhancement | [Issues → Feature request](https://github.com/rahulkaushal04/depkeeper/issues/new?template=feature_request.md) |
 | Security vulnerability | **[SECURITY.md](SECURITY.md)** — never a public issue |

@@ -378,7 +378,7 @@ Summary:
 
 ## Getting help
 
-- Usage questions — [GitHub Discussions](https://github.com/rahulkaushal04/depkeeper/discussions)
+- Usage questions — [open an issue](https://github.com/rahulkaushal04/depkeeper/issues/new)
 - Defects — [Issues](https://github.com/rahulkaushal04/depkeeper/issues)
 - Vulnerabilities — [SECURITY.md](SECURITY.md), never a public issue
 - Everything else — [SUPPORT.md](SUPPORT.md)

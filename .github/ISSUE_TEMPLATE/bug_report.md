@@ -1,92 +1,76 @@
 ---
 name: Bug Report
-about: Help us improve depkeeper by reporting unexpected behavior or errors.
+about: Report unexpected behavior or an error in depkeeper.
 title: "[BUG] "
 labels: ["bug"]
 assignees: ""
 ---
 
-# 🐞 Bug Report
+<!--
+A report we can reproduce gets fixed far faster than one we can't. See SUPPORT.md for the same
+list with more context: https://github.com/rahulkaushal04/depkeeper/blob/main/SUPPORT.md
+-->
 
-## 🔍 Summary
+## Summary
 
-<!-- A clear and concise description of the problem. What’s happening? -->
+<!-- What's happening, in one or two sentences. -->
 
-## 🧪 Steps to Reproduce
+## Environment
 
-<!-- Provide the exact steps so we can reproduce the issue. -->
+- **depkeeper version:** (`depkeeper --version`)
+- **Python version:** (`python --version` — this matters more than usual: depkeeper filters
+  candidate versions against the interpreter *it* runs on, so a version mismatch is a common
+  cause of "the recommendation looks wrong")
+- **OS:**
+- **Installed via:** pip / pipx / source
 
-1.
-2.
-3.
-4.
+## Requirements file
 
-## ✅ Expected Behavior
+<!-- The SMALLEST file that reproduces the issue. Trim it down before pasting — a 200-line file
+     that happens to trigger the bug is much harder to act on than a 3-line one that isolates it. -->
 
-<!-- What did you expect to happen? -->
-
-## ❌ Actual Behavior
-
-<!-- What actually happened? Include any differences from the expected behavior. -->
-
-## 📦 Environment
-
-<!-- Please complete the following details -->
-
-- **OS:** (e.g., Windows 11, Ubuntu 22.04, macOS 14)
-- **Python Version:** (e.g., 3.11.6)
-- **depkeeper Version:** (e.g., 0.1.0 or commit SHA)
-- **Installation Method:** (pip, pipx, source, Git clone)
-- **Shell / Terminal:** (optional)
-
-## 📄 Requirements File (if applicable)
-
-<!-- If the issue relates to requirements.txt parsing, include the file or a minimal reproducible snippet. -->
-
-```txt
-# paste relevant snippet here
+```text
+# paste the minimal requirements.txt snippet here
 ```
 
-## 🧭 Command Executed
+## Command
 
-<!-- Provide the *exact* command that caused the issue. -->
+<!-- The exact command you ran. -->
 
 ```bash
 depkeeper <command> <options>
 ```
 
-## 🧾 Error Output
+## Expected behavior
 
-<!-- Paste the full traceback, error message, or CLI output. -->
+<!-- What you expected to happen. -->
 
+## Actual behavior
+
+<!-- What actually happened. Paste the full error output or traceback below, not a screenshot. -->
+
+```text
+<output here>
 ```
-<error logs here>
-```
 
-## 📚 Logs (Optional)
+## Diagnostic log
+
+<!-- Re-run with -vv and attach the result; this is usually what actually gets the bug fixed. -->
+
+```bash
+depkeeper -vv <command> <options> 2> debug.log
+```
 
 <details>
-<summary>Click to expand logs</summary>
+<summary>debug.log</summary>
 
-```
-<paste logs here>
+```text
+<paste debug.log contents here>
 ```
 
 </details>
 
-## 🖼️ Screenshots (Optional)
+## Additional context (optional)
 
-<!-- Add screenshots or terminal captures if helpful -->
-
-## 💬 Additional Context
-
-<!-- Any other relevant information -->
-
-- Does this happen consistently or intermittently?
-- Did this work in a previous version?
-- Are you using custom configuration, plugins, or non-standard index URLs?
-- Any temporary workaround you discovered?
-
-## 💡 Possible Solution (Optional)
-
-<!-- Suggest how this could be fixed or what the cause might be -->
+<!-- Intermittent vs consistent? Worked in a previous version? Non-default configuration
+     (depkeeper.toml / pyproject.toml)? A workaround you found? -->
