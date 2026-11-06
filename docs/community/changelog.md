@@ -8,11 +8,12 @@ description: Version history and behavioural changes for depkeeper
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). depkeeper follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-!!! note "Recommendation logic is a behavioural contract"
-
-    A change that makes the same requirements file produce a different update plan is at minimum
-    a minor release. Entries that alter recommendations are marked **Impact** so consumers gating
-    pipelines on the output know what to re-verify.
+> [!NOTE]
+> **Recommendation logic is a behavioural contract**
+>
+> A change that makes the same requirements file produce a different update plan is at minimum
+> a minor release. Entries that alter recommendations are marked **Impact** so consumers gating
+> pipelines on the output know what to re-verify.
 
 ---
 

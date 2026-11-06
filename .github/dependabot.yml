@@ -1,0 +1,18 @@
+# Dependabot keeps GitHub Actions versions current (actions are tag-pinned, not SHA-pinned).
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      python-dependencies:
+        update-types: ["minor", "patch"]

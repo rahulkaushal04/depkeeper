@@ -190,7 +190,7 @@ Each package receives a `ResolutionStatus`:
 
 ## Worked example
 
-```text title="conflict.txt"
+```text
 flask>=2.3,<3.0
 werkzeug>=2.2,<2.3
 ```
@@ -268,11 +268,12 @@ plan's `Change` column. They **are** applied by `update`. If you do not want tha
 The negative cache exists to prevent a retry storm: without it, an unreachable package would be
 re-requested — with full retry and backoff — on each of up to 100 passes.
 
-!!! note "Negative caching is analyzer-local"
-
-    The `PyPIDataStore` itself never caches failures, because `prefetch_packages` swallows errors
-    and the checker legitimately retries afterwards. Sticky failures there would regress recovery
-    from transient errors.
+> [!NOTE]
+> **Negative caching is analyzer-local**
+>
+> The `PyPIDataStore` itself never caches failures, because `prefetch_packages` swallows errors
+> and the checker legitimately retries afterwards. Sticky failures there would regress recovery
+> from transient errors.
 
 ---
 

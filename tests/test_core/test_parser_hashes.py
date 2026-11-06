@@ -1,11 +1,4 @@
-"""Regression tests for ``--hash`` directive parsing (M2).
-
-pip accepts both ``--hash=sha256:...`` and the space-separated
-``--hash sha256:...`` form.  Historically only the ``=`` form parsed; the
-space form leaked the bare digest token into the PEP 508 spec and raised a
-``ParseError``.  These tests lock in support for both forms and the
-combinations pip permits.
-"""
+"""``--hash`` directives parse in both the ``=`` and space-separated forms."""
 
 from __future__ import annotations
 
@@ -51,10 +44,7 @@ def test_parse_line_extracts_hashes_both_forms(
 
 
 def test_parse_line_space_form_does_not_leak_digest_into_spec() -> None:
-    """M2 regression: the space form must not raise ParseError.
-
-    Previously the digest token survived removal and broke PEP 508 parsing.
-    """
+    """The space form must not raise ParseError nor leak the digest."""
     parser = RequirementsParser()
 
     req = parser.parse_line("flask==2.0 --hash sha256:abc", 1, "req.txt")

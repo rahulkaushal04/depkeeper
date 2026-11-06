@@ -9,8 +9,11 @@ Supports two formats:
 Discovery order:
 
 1. Explicit path from ``--config`` or ``DEPKEEPER_CONFIG``
-2. ``depkeeper.toml`` in current directory
-3. ``pyproject.toml`` with ``[tool.depkeeper]`` section
+2. ``depkeeper.toml`` in the current directory or the nearest parent
+3. ``pyproject.toml`` with ``[tool.depkeeper]`` section, same search
+
+The upward search stops at the first directory containing ``.git`` (the
+repository root) or at the filesystem root.
 
 Configuration precedence: defaults < config file < environment < CLI args.
 
@@ -28,14 +31,17 @@ Example (``depkeeper.toml``)::
 
 from __future__ import annotations
 
-
 import tomli as tomllib
+import re
+from datetime import timedelta
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Union
 from dataclasses import dataclass, field
 
 from depkeeper.exceptions import ConfigError
 from depkeeper.utils.logger import get_logger
+from depkeeper.utils.naming import normalize_package_name
+from depkeeper.utils.version_utils import VERSIONING_CHOICES
 from depkeeper.constants import (
     DEFAULT_CHECK_CONFLICTS,
     DEFAULT_READ_ENCODING,
@@ -43,6 +49,67 @@ from depkeeper.constants import (
 )
 
 logger = get_logger("config")
+
+#: Valid ``fail_on`` values, from never failing to failing on any update.
+FAIL_ON_CHOICES = ("none", "updates", "minor", "major")
+
+#: Valid ``max_update`` values (per-package policy).
+MAX_UPDATE_CHOICES = ("patch", "minor", "major")
+
+_DURATION_RE = re.compile(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*([smhdw]?)\s*$", re.I)
+_DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800, "": 86400}
+_PYTHON_VERSION_RE = re.compile(r"^\d+\.\d+(\.\d+)?$")
+
+
+def parse_duration(value: Union[str, int, float]) -> timedelta:
+    """Parse a release-cooldown duration.
+
+    Accepts a number of days (``7``, ``"7"``) or a string with a unit suffix
+    ``s``/``m``/``h``/``d``/``w`` (``"12h"``, ``"7d"``, ``"2w"``).
+
+    Raises:
+        ValueError: Negative, boolean or unparseable input.
+    """
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        raise ValueError(f"invalid duration {value!r}")
+    if isinstance(value, (int, float)):
+        if value < 0:
+            raise ValueError(f"duration must not be negative, got {value!r}")
+        try:
+            return timedelta(days=value)
+        except OverflowError:
+            raise ValueError(f"duration {value!r} is too large") from None
+    match = _DURATION_RE.match(value)
+    if not match:
+        raise ValueError(f"invalid duration {value!r} (use e.g. '7d', '12h', '2w')")
+    try:
+        return timedelta(
+            seconds=float(match.group(1)) * _DURATION_UNITS[match.group(2).lower()]
+        )
+    except OverflowError:
+        raise ValueError(f"duration {value!r} is too large") from None
+
+
+@dataclass
+class PackagePolicy:
+    """Per-package overrides from ``[depkeeper.packages.<name>]``.
+
+    ``None`` means "inherit the global setting".
+
+    Attributes:
+        max_update: Largest update level allowed (``patch``/``minor``/``major``).
+            For calver packages ``month`` ranks as minor and ``year`` as major.
+        hold: Keep the package at its current version.
+        allow_prerelease: Consider pre-releases as candidates.
+        versioning: ``auto``/``semver``/``calver`` for this package.
+        ignore: Skip the package entirely (never recommend a change).
+    """
+
+    max_update: Optional[str] = None
+    hold: bool = False
+    allow_prerelease: bool = False
+    versioning: Optional[str] = None
+    ignore: bool = False
 
 
 @dataclass
@@ -57,11 +124,26 @@ class DepKeeperConfig:
             analyzes transitive dependencies to avoid conflicts.
         strict_version_matching: Only consider exact pins (``==``) as current
             versions. Ignores range constraints like ``>=2.0``.
+        fail_on: ``check`` exit-code gate: ``none`` (default), ``updates``,
+            ``minor`` or ``major``.
+        ignore: Package names that ``check`` skips.
+        python_version: Target Python (``"3.9"``) candidates must support;
+            ``None`` means the running interpreter.
+        min_age: Release cooldown; versions uploaded more recently are not
+            recommended. ``None`` disables it.
+        versioning: Global ``auto``/``semver``/``calver`` (default ``auto``).
+        packages: Per-package `PackagePolicy`, keyed by normalized name.
         source_path: Path to loaded config file, or ``None`` if using defaults.
     """
 
     check_conflicts: bool = DEFAULT_CHECK_CONFLICTS
     strict_version_matching: bool = DEFAULT_STRICT_VERSION_MATCHING
+    fail_on: str = "none"
+    ignore: List[str] = field(default_factory=list)
+    python_version: Optional[str] = None
+    min_age: Optional[timedelta] = None
+    versioning: str = "auto"
+    packages: Dict[str, PackagePolicy] = field(default_factory=dict)
 
     # Provenance, not a user-facing option: never serialized back to TOML.
     source_path: Optional[Path] = field(default=None, repr=False)
@@ -74,10 +156,22 @@ class DepKeeperConfig:
         Returns:
             Dictionary of configuration option names to values.
         """
-        return {
+        result: Dict[str, Any] = {
             "check_conflicts": self.check_conflicts,
             "strict_version_matching": self.strict_version_matching,
+            "fail_on": self.fail_on,
+            "ignore": list(self.ignore),
         }
+        # Optional settings appear only when set, keeping the default dict stable.
+        if self.python_version:
+            result["python_version"] = self.python_version
+        if self.min_age is not None:
+            result["min_age"] = str(self.min_age)
+        if self.versioning != "auto":
+            result["versioning"] = self.versioning
+        if self.packages:
+            result["packages"] = sorted(self.packages)
+        return result
 
 
 def discover_config_file(explicit_path: Optional[Path] = None) -> Optional[Path]:
@@ -100,7 +194,6 @@ def discover_config_file(explicit_path: Optional[Path] = None) -> Optional[Path]
     Raises:
         ConfigError: Explicit path provided but does not exist.
     """
-    # 1. Explicit path takes priority
     if explicit_path is not None:
         resolved = explicit_path.resolve()
         if not resolved.is_file():
@@ -113,36 +206,36 @@ def discover_config_file(explicit_path: Optional[Path] = None) -> Optional[Path]
 
     cwd = Path.cwd()
 
-    depkeeper_toml = cwd / "depkeeper.toml"
-    if depkeeper_toml.is_file():
-        logger.debug("Found depkeeper.toml: %s", depkeeper_toml)
-        return depkeeper_toml
+    # Walk up so running from a subdirectory finds the project's config; stop
+    # at the repository root (.git) so a stray file in $HOME is not adopted.
+    # Without a .git, never walk above $HOME (outside $HOME the walk ends at
+    # the filesystem root), so a file in a parent of $HOME is not adopted.
+    home = Path.home().resolve()
+    stop = home if home in (cwd, *cwd.parents) else None
+    for directory in (cwd, *cwd.parents):
+        depkeeper_toml = directory / "depkeeper.toml"
+        if depkeeper_toml.is_file():
+            logger.debug("Found depkeeper.toml: %s", depkeeper_toml)
+            return depkeeper_toml
 
-    # pyproject.toml is only adopted when it actually configures depkeeper;
-    # otherwise a project that merely has a pyproject.toml would shadow the
-    # built-in defaults.
-    pyproject_toml = cwd / "pyproject.toml"
-    if pyproject_toml.is_file():
-        if _pyproject_has_depkeeper_section(pyproject_toml):
+        # pyproject.toml is only adopted when it actually configures
+        # depkeeper; otherwise it would shadow the built-in defaults.
+        pyproject_toml = directory / "pyproject.toml"
+        if pyproject_toml.is_file() and _pyproject_has_depkeeper_section(
+            pyproject_toml
+        ):
             logger.debug("Found [tool.depkeeper] in pyproject.toml: %s", pyproject_toml)
             return pyproject_toml
+
+        if (directory / ".git").exists() or directory == stop:
+            break
 
     logger.debug("No configuration file found")
     return None
 
 
 def _pyproject_has_depkeeper_section(path: Path) -> bool:
-    """Check if pyproject.toml contains [tool.depkeeper] section.
-
-    Quick parse to avoid loading pyproject.toml without depkeeper config.
-    Parse errors are silently ignored for graceful fallback.
-
-    Args:
-        path: Path to pyproject.toml file.
-
-    Returns:
-        ``True`` if ``[tool.depkeeper]`` exists, ``False`` otherwise.
-    """
+    """Return True if *path* has a ``[tool.depkeeper]`` table (False on any error)."""
     try:
         raw = _read_toml(path)
         return "depkeeper" in raw.get("tool", {})
@@ -179,9 +272,19 @@ def load_config(config_path: Optional[Path] = None) -> DepKeeperConfig:
 
     # The two supported files nest the settings differently.
     if resolved.name == "pyproject.toml":
-        section = raw.get("tool", {}).get("depkeeper", {})
+        section = raw.get("tool", {}).get("depkeeper")
+        table_name = "[tool.depkeeper]"
     else:
-        section = raw.get("depkeeper", {})
+        section = raw.get("depkeeper")
+        table_name = "[depkeeper]"
+
+    # An explicitly requested file that configures nothing is almost surely a
+    # wrong path; silently using defaults would hide that.
+    if section is None and config_path is not None:
+        raise ConfigError(
+            f"Configuration file {resolved.name} has no {table_name} table",
+            config_path=str(resolved),
+        )
 
     if not section:
         logger.debug("Config file found but no depkeeper section — using defaults")
@@ -197,14 +300,8 @@ def load_config(config_path: Optional[Path] = None) -> DepKeeperConfig:
 def _read_toml(path: Path) -> Dict[str, Any]:
     """Read and parse a TOML file.
 
-    Parsing is delegated to ``tomli``, which is a hard runtime dependency so
-    that Python 3.8-3.10 (no ``tomllib`` in the standard library) behaves
-    identically to 3.11+.
-
-    The file is decoded with ``utf-8-sig`` so a leading byte order mark —
-    written by Windows editors — is removed. TOML parsers reject a BOM as an
-    invalid statement, so decoding here rather than handing bytes to the
-    parser keeps such files usable.
+    Decodes with ``utf-8-sig`` because TOML parsers reject a leading byte
+    order mark (written by some Windows editors).
 
     Args:
         path: Path to TOML file.
@@ -273,6 +370,12 @@ def _parse_section(
     known_top = {
         "check_conflicts",
         "strict_version_matching",
+        "fail_on",
+        "ignore",
+        "python_version",
+        "min_age",
+        "versioning",
+        "packages",
     }
 
     # Unknown keys are an error rather than a warning: silently ignoring a
@@ -304,4 +407,122 @@ def _parse_section(
             )
         config.strict_version_matching = val
 
+    if "fail_on" in section:
+        val = section["fail_on"]
+        if val not in FAIL_ON_CHOICES:
+            raise ConfigError(
+                f"fail_on must be one of {', '.join(FAIL_ON_CHOICES)}, got {val!r}",
+                config_path=config_path,
+                option="fail_on",
+            )
+        config.fail_on = val
+
+    if "ignore" in section:
+        val = section["ignore"]
+        if not isinstance(val, list) or not all(isinstance(v, str) for v in val):
+            raise ConfigError(
+                "ignore must be a list of package names",
+                config_path=config_path,
+                option="ignore",
+            )
+        config.ignore = list(val)
+
+    if "python_version" in section:
+        val = section["python_version"]
+        if not isinstance(val, str) or not _PYTHON_VERSION_RE.match(val):
+            raise ConfigError(
+                f"python_version must look like '3.9', got {val!r}",
+                config_path=config_path,
+                option="python_version",
+            )
+        config.python_version = val
+
+    if "min_age" in section:
+        try:
+            config.min_age = parse_duration(section["min_age"])
+        except ValueError as exc:
+            raise ConfigError(
+                f"min_age: {exc}", config_path=config_path, option="min_age"
+            ) from exc
+
+    if "versioning" in section:
+        config.versioning = _check_versioning(
+            section["versioning"], "versioning", config_path
+        )
+
+    if "packages" in section:
+        config.packages = _parse_packages(section["packages"], config_path)
+
     return config
+
+
+def _check_versioning(val: Any, option: str, config_path: str) -> str:
+    """Return *val* when it is a valid versioning mode, else raise `ConfigError`."""
+    if val not in VERSIONING_CHOICES:
+        raise ConfigError(
+            f"{option} must be one of {', '.join(VERSIONING_CHOICES)}, got {val!r}",
+            config_path=config_path,
+            option=option,
+        )
+    return str(val)
+
+
+def _parse_packages(raw: Any, config_path: str) -> Dict[str, PackagePolicy]:
+    """Validate the ``packages`` table into policies keyed by normalized name."""
+    if not isinstance(raw, dict):
+        raise ConfigError(
+            "packages must be a table of per-package tables",
+            config_path=config_path,
+            option="packages",
+        )
+    bool_keys = ("hold", "allow_prerelease", "ignore")
+    known = {"max_update", "versioning", *bool_keys}
+    policies: Dict[str, PackagePolicy] = {}
+
+    for name, body in raw.items():
+        option = f"packages.{name}"
+        if not isinstance(body, dict):
+            raise ConfigError(
+                f"{option} must be a table", config_path=config_path, option=option
+            )
+        unknown = set(body) - known
+        if unknown:
+            raise ConfigError(
+                f"Unknown keys in {option}: {', '.join(sorted(unknown))}",
+                config_path=config_path,
+                option=option,
+            )
+        key = normalize_package_name(name)
+        if key in policies:
+            raise ConfigError(
+                f"{option} duplicates another entry for '{key}'",
+                config_path=config_path,
+                option=option,
+            )
+        policy = PackagePolicy()
+        for flag in bool_keys:
+            if flag in body:
+                if not isinstance(body[flag], bool):
+                    raise ConfigError(
+                        f"{option}.{flag} must be a boolean, "
+                        f"got {type(body[flag]).__name__}",
+                        config_path=config_path,
+                        option=f"{option}.{flag}",
+                    )
+                setattr(policy, flag, body[flag])
+        if "max_update" in body:
+            if body["max_update"] not in MAX_UPDATE_CHOICES:
+                raise ConfigError(
+                    f"{option}.max_update must be one of "
+                    f"{', '.join(MAX_UPDATE_CHOICES)}, got {body['max_update']!r}",
+                    config_path=config_path,
+                    option=f"{option}.max_update",
+                )
+            policy.max_update = body["max_update"]
+        if "versioning" in body:
+            policy.versioning = _check_versioning(
+                body["versioning"], f"{option}.versioning", config_path
+            )
+        policies[key] = policy
+
+    return policies

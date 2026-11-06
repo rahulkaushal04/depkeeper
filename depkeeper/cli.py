@@ -40,7 +40,7 @@ logger = get_logger("cli")
 )
 @click.option(
     "--color/--no-color",
-    default=True,
+    default=None,
     help="Enable or disable colored output.",
     envvar="DEPKEEPER_COLOR",
 )
@@ -54,7 +54,7 @@ def cli(
     ctx: click.Context,
     config: Optional[Path],
     verbose: int,
-    color: bool,
+    color: Optional[bool],
 ) -> None:
     """depkeeper — modern dependency management for requirements.txt files.
 
@@ -83,23 +83,25 @@ def cli(
     depkeeper_ctx.config_path = config or (
         loaded_config.source_path if loaded_config.source_path else None
     )
-    depkeeper_ctx.color = color
+    # None means the user did not choose: defer to the NO_COLOR convention.
+    depkeeper_ctx.color = color if color is not None else not os.environ.get("NO_COLOR")
     depkeeper_ctx.verbose = verbose
     depkeeper_ctx.config = loaded_config
     ctx.obj = depkeeper_ctx
 
     # Rich and Click read NO_COLOR from the environment, so the flag has to be
     # projected there for downstream libraries to honor it.
-    if color:
-        os.environ.pop("NO_COLOR", None)
-    else:
+    if color is False:
         os.environ["NO_COLOR"] = "1"
+    elif color is True:
+        os.environ.pop("NO_COLOR", None)
 
     logger.debug("depkeeper v%s", __version__)
     logger.debug("Config path: %s", depkeeper_ctx.config_path)
     if loaded_config.source_path:
         logger.debug("Loaded configuration: %s", loaded_config.to_log_dict())
-    logger.debug("Verbosity: %s | Color: %s", verbose, color)
+    logger.debug("Verbosity: %s | Color: %s", verbose, depkeeper_ctx.color)
+
 
 def _configure_logging(verbose: int) -> None:
     """Map the repeatable ``-v`` count onto a logging level.
@@ -141,11 +143,18 @@ def main() -> int:
             0   Success
             1   Unhandled or application error
             2   Usage error (Click)
+            3   ``check --fail-on``: updates found
+            4   ``check``/``update``: a package lookup failed
             130 Interrupted by user (Ctrl+C)
     """
     try:
         cli(standalone_mode=False)
         return 0
+
+    except click.Abort:
+        # Ctrl-D / EOF at a prompt, or a declined confirmation.
+        print_warning("Aborted.", stderr=True)
+        return 130
 
     except click.ClickException as exc:
         exc.show()

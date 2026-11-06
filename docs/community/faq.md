@@ -77,9 +77,9 @@ One of four reasons, in order of likelihood:
 
 ### Why does `certifi` never update?
 
-Calendar versioning. `2023.7.22` has "major" `2023`, so `2024.x` is a boundary crossing. Either
-leave the requirement unversioned or bump it manually. See
-[Limitations](../reference/limitations.md#calendar-versioning-hits-the-major-boundary).
+Normally it does: calendar versioning is detected and `certifi 2023.7.22` updates across years
+(labelled `year`). If a package is misdetected set `versioning = "calver"` for it. See
+[Limitations](../reference/limitations.md#calendar-versioning-heuristics).
 
 ### Why did it propose a downgrade?
 

@@ -5,8 +5,7 @@ description: Typing, docstrings, comments and naming conventions enforced in dep
 
 # Code Style
 
-These conventions are enforced by review, by `mypy --strict`, and by the documentation build
-(`mkdocs.yml` sets `docstring_style: google`).
+These conventions are enforced by review and by `mypy --strict`.
 
 ---
 
@@ -35,8 +34,8 @@ request must not add a second.
 
 ## Docstrings
 
-**Google style**, without exception. This is what `mkdocstrings` is configured to parse, so a
-deviation degrades the generated [Python API](../reference/python-api.md) page.
+**Google style**, without exception. This keeps docstrings consistent and easy to scan, and the
+[Python API](../reference/python-api.md) reference follows the same shape.
 
 ```python
 def rewrite_version_specs(specs: Sequence[Spec], new_version: str) -> List[Spec]:
@@ -71,12 +70,9 @@ def rewrite_version_specs(specs: Sequence[Spec], new_version: str) -> List[Spec]
 ### Referencing other symbols
 
 Use a plain Markdown code span — `` `Requirement` ``, `` `_find_updates` `` — never a Sphinx
-role such as `:class:` or `:meth:`. This project's `mkdocs.yml` uses
-`docstring_style: google` without the `autorefs` plugin, so Sphinx interpreted-text roles are
-not resolved by `mkdocstrings`: they render as literal, broken text (`:meth:reset` instead of a
-link or even a code span). A prior revision of the codebase used them throughout; they were
-mechanically converted to plain code spans after the defect was found on the generated
-[Python API](../reference/python-api.md) page.
+role such as `:class:` or `:meth:`. Nothing in this project resolves those roles, so they show
+up as literal, broken text (`:meth:reset` instead of a code span). A prior revision of the
+codebase used them throughout; they were converted to plain code spans.
 
 ### Doctest examples
 
@@ -163,8 +159,7 @@ logger = get_logger("module_name")
 __all__ = ["PublicThing"]     # when the module has a curated public surface
 ```
 
-Within a class, order members: public API first, then private helpers, then dunders. `mkdocs.yml`
-sets `members_order: source`, so source order is what readers of the API page see.
+Within a class, order members: public API first, then private helpers, then dunders.
 
 ---
 
@@ -212,7 +207,7 @@ Level guidance:
 | Network I/O is `async`. | All of it goes through `HTTPClient`. |
 | Do not create an event loop in library code. | Commands own `asyncio.run`. |
 | Share the `PyPIDataStore`. | This is what guarantees one fetch per package. |
-| Bound concurrency with a semaphore, deduplicate with the in-flight map. | A semaphore alone cannot deduplicate. See [D2](../concepts/architecture.md#d2-request-coalescing-not-just-a-semaphore). |
+| Bound concurrency with a semaphore, deduplicate with the in-flight map. | A semaphore alone cannot deduplicate. See [D2](../concepts/architecture.md#d2--request-coalescing-not-just-a-semaphore). |
 | Use `asyncio.gather(..., return_exceptions=True)` for per-item work that must not abort the batch. | |
 
 ---

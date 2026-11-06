@@ -30,7 +30,6 @@ class DepKeeperError(Exception):
         details: Optional[Mapping[str, Any]] = None,
     ) -> None:
         self.message: str = message
-        # Internally normalize to a mutable dict
         self.details: MutableMapping[str, Any] = dict(details) if details else {}
         super().__init__(message)
 

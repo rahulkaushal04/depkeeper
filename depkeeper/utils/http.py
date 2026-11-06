@@ -14,7 +14,8 @@ import random
 import asyncio
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import Any, Optional, Dict, Iterable, Callable, cast
+from typing import Any, Optional, Dict, Iterable, Callable, Tuple, cast
+from urllib.parse import urljoin, urlsplit
 
 from depkeeper.utils.logger import get_logger
 from depkeeper.__version__ import __version__
@@ -27,6 +28,24 @@ from depkeeper.constants import (
 )
 
 logger = get_logger("http")
+
+#: Largest response body accepted; PyPI JSON for the biggest projects is a few MB.
+MAX_RESPONSE_BYTES = 20 * 1024 * 1024
+#: Wall-clock cap for one logical request including retries and backoff.
+DEFAULT_TOTAL_TIMEOUT = 180.0
+#: Maximum redirect hops followed for one request.
+MAX_REDIRECTS = 5
+#: Hosts a redirect may land on (besides the request's own host).
+_REDIRECT_HOSTS = frozenset({"pypi.org", "files.pythonhosted.org"})
+
+#: Seconds a request that exhausted its retries is remembered as failed.
+FAILURE_TTL = 30.0
+
+
+def _failure_key(url: str, params: Any) -> Tuple[str, str]:
+    """Return a hashable key identifying a request by URL and query params."""
+    items = sorted(params.items()) if hasattr(params, "items") else params
+    return (url, repr(items))
 
 
 def _parse_retry_after(header_value: Optional[str]) -> float:
@@ -75,8 +94,11 @@ class HTTPClient:
         verify_ssl: Whether to verify SSL certificates.
         user_agent: Custom User-Agent header value.
         max_concurrency: Maximum number of concurrent requests.
+        total_timeout: Wall-clock limit in seconds for one request including
+            all retries and backoff.
+        max_response_bytes: Largest response body accepted.
 
-    Example:
+    Example::
         >>> async with HTTPClient() as client:
         ...     data = await client.get_json("https://pypi.org/pypi/requests/json")
     """
@@ -90,7 +112,15 @@ class HTTPClient:
         verify_ssl: bool = True,
         user_agent: Optional[str] = None,
         max_concurrency: int = 10,
+        total_timeout: float = DEFAULT_TOTAL_TIMEOUT,
+        max_response_bytes: int = MAX_RESPONSE_BYTES,
     ) -> None:
+        self.total_timeout = total_timeout
+        self.max_response_bytes = max_response_bytes
+        # Requests that exhausted every retry, with the failure time. Repeating
+        # one within FAILURE_TTL (prefetch then check) would re-wait the
+        # backoff; the TTL stops one outage poisoning a long-lived client.
+        self._failed: Dict[Any, Tuple[float, NetworkError]] = {}
         self.timeout = timeout
         self.max_retries = max_retries
         self.rate_limit_delay = rate_limit_delay
@@ -123,7 +153,7 @@ class HTTPClient:
                 timeout=httpx.Timeout(self.timeout),
                 http2=True,
                 verify=self.verify_ssl,
-                follow_redirects=True,
+                follow_redirects=False,
                 headers={"User-Agent": self.user_agent},
             )
 
@@ -154,7 +184,90 @@ class HTTPClient:
             else:
                 self._last_request_time = now
 
+    async def _send_once(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
+        """Send one request, following only safe redirects and capping the body.
+
+        Redirects must stay on https and land on the original host or a PyPI
+        host; the body is read incrementally and rejected above
+        ``max_response_bytes``.
+        """
+        assert self._client is not None
+        origin_host = urlsplit(url).hostname
+        for _hop in range(MAX_REDIRECTS + 1):
+            request = self._client.build_request(method, url, **kwargs)
+            response = await self._client.send(request, stream=True)
+            try:
+                if response.is_redirect and "location" in response.headers:
+                    target = urljoin(url, response.headers["location"])
+                    parts = urlsplit(target)
+                    if parts.scheme != "https" or parts.hostname not in (
+                        _REDIRECT_HOSTS | {origin_host}
+                    ):
+                        raise NetworkError(
+                            f"Refusing unsafe redirect to {target}",
+                            url=url,
+                            status_code=response.status_code,
+                        )
+                    url = target
+                    continue
+
+                declared = response.headers.get("content-length", "")
+                if declared.isdigit() and int(declared) > self.max_response_bytes:
+                    raise NetworkError(
+                        f"Response too large ({declared} bytes): {url}", url=url
+                    )
+                chunks = []
+                size = 0
+                async for chunk in response.aiter_bytes():
+                    size += len(chunk)
+                    if size > self.max_response_bytes:
+                        raise NetworkError(
+                            f"Response exceeds {self.max_response_bytes} bytes: {url}",
+                            url=url,
+                        )
+                    chunks.append(chunk)
+                headers = httpx.Headers(response.headers)
+                # aiter_bytes already decoded the body.
+                headers.pop("content-encoding", None)
+                headers.pop("content-length", None)
+                return httpx.Response(
+                    response.status_code,
+                    headers=headers,
+                    content=b"".join(chunks),
+                    request=request,
+                )
+            finally:
+                await response.aclose()
+        raise NetworkError(f"Too many redirects: {url}", url=url)
+
     async def _request_with_retry(
+        self,
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Run `_request_attempts` under the total wall-clock deadline."""
+        clean_url = url.strip().strip("\"'")
+        key = _failure_key(clean_url, kwargs.get("params"))
+        entry = self._failed.get(key) if method == "GET" else None
+        if entry is not None:
+            if time.monotonic() - entry[0] < FAILURE_TTL:
+                # Fresh instance: re-raising one object grows its traceback.
+                raise NetworkError(entry[1].message, url=clean_url) from entry[
+                    1
+                ].__cause__
+            del self._failed[key]
+        try:
+            return await asyncio.wait_for(
+                self._request_attempts(method, url, **kwargs), self.total_timeout
+            )
+        except asyncio.TimeoutError as exc:
+            raise NetworkError(
+                f"Request timed out after {self.total_timeout:.0f}s: {clean_url}",
+                url=clean_url,
+            ) from exc
+
+    async def _request_attempts(
         self,
         method: str,
         url: str,
@@ -200,7 +313,7 @@ class HTTPClient:
                 await self._rate_limit()
 
                 async with self._semaphore:
-                    response = await self._client.request(method, clean_url, **kwargs)
+                    response = await self._send_once(method, clean_url, **kwargs)
 
                 if response.status_code == 429:
                     retry_429_count += 1
@@ -274,10 +387,17 @@ class HTTPClient:
                 logger.debug("Retrying in %.2fs", delay)
                 await asyncio.sleep(delay)
 
-        raise NetworkError(
+        failure = NetworkError(
             f"Request failed after {self.max_retries + 1} attempts: {clean_url}",
             url=clean_url,
-        ) from last_exc
+        )
+        failure.__cause__ = last_exc
+        if method == "GET":
+            self._failed[_failure_key(clean_url, kwargs.get("params"))] = (
+                time.monotonic(),
+                failure,
+            )
+        raise failure
 
     async def get(self, url: str, **kwargs: Any) -> httpx.Response:
         """Perform a GET request.
@@ -372,7 +492,7 @@ class HTTPClient:
 
         for url, result in zip(url_list, responses):
             if isinstance(result, BaseException):
-                logger.error("Failed to fetch %s: %s", url, result)
+                logger.debug("Failed to fetch %s: %s", url, result)
                 results[url] = {}
             else:
                 results[url] = result

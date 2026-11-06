@@ -202,9 +202,9 @@ interpreter. Pin the CI Python to your project's target.
 
 ### "A date-versioned package never updates"
 
-`certifi 2023.7.22` has "major" `2023`, so `2024.x` is a boundary crossing. Either leave the
-requirement unversioned so there is no anchor, or update the pin manually. See
-[Limitations](../reference/limitations.md#calendar-versioning-hits-the-major-boundary).
+Calver is detected automatically; if depkeeper treats the package as semver, set
+`versioning = "calver"` in `[depkeeper.packages.<name>]`. See
+[Limitations](../reference/limitations.md#calendar-versioning-heuristics).
 
 ### "It proposed a downgrade"
 

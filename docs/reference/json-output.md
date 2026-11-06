@@ -79,11 +79,12 @@ in `jq` and `.get()` in Python.
 | `required_spec` | string | The specifier the source requires, e.g. `">=2.3.7"`. |
 | `conflicting_version` | string | The version of the target that violated the specifier when the conflict was recorded. |
 
-!!! warning "Conflicts are cumulative"
-
-    The array holds every conflict recorded during resolution, **including ones a later pass
-    resolved**. It is an audit trail, not a list of live problems. The value in
-    `versions.recommended` is always the final, applied decision.
+> [!WARNING]
+> **Conflicts are cumulative**
+>
+> The array holds every conflict recorded during resolution, **including ones a later pass
+> resolved**. It is an audit trail, not a list of live problems. The value in
+> `versions.recommended` is always the final, applied decision.
 
 ---
 

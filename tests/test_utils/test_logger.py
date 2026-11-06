@@ -1,3 +1,5 @@
+"""Tests for :mod:`depkeeper.utils.logger`."""
+
 from __future__ import annotations
 
 import io

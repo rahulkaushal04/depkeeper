@@ -10,7 +10,7 @@ block on this page is real command output, not an illustration.
 
 ## 0. The sample project
 
-```text title="requirements.txt"
+```text
 requests==2.28.0
 flask>=2.0,<2.3
 celery[redis]>=5.0,<6.0
@@ -53,10 +53,11 @@ Converged: Yes (1 iterations)
 5 package(s) have updates available
 ```
 
-!!! note "The real table has a `Python Support` column"
-
-    It is omitted here for width. The full column set is documented in
-    [Reading the output](basic-usage.md#the-table-format).
+> [!NOTE]
+> **The real table has a `Python Support` column**
+>
+> It is omitted here for width. The full column set is documented in
+> [Reading the output](basic-usage.md#the-table-format).
 
 Three results are worth understanding immediately:
 
@@ -118,7 +119,7 @@ The prompt defaults to **yes**, because the plan table has already been displaye
 
 Result:
 
-```text title="requirements.txt (after)"
+```text
 requests==2.34.2
 flask>=2.2.5,<2.3
 celery[redis]>=5.6.3,<6.0
@@ -141,12 +142,13 @@ python -m pip install -r requirements.txt
 python -m pytest        # or your project's test command
 ```
 
-!!! warning "depkeeper is not a resolver substitute"
-
-    depkeeper checks the packages *listed in your file* against each other. It does not build a
-    complete transitive dependency graph, and it cannot see a conflict introduced by a package
-    that is not in the file. `pip install` remains the authority. See
-    [Conflict resolution → What is not checked](../concepts/conflict-resolution.md#what-is-not-checked).
+> [!WARNING]
+> **depkeeper is not a resolver substitute**
+>
+> depkeeper checks the packages *listed in your file* against each other. It does not build a
+> complete transitive dependency graph, and it cannot see a conflict introduced by a package
+> that is not in the file. `pip install` remains the authority. See
+> [Conflict resolution → What is not checked](../concepts/conflict-resolution.md#what-is-not-checked).
 
 ---
 

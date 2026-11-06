@@ -8,39 +8,11 @@ description: How to contribute to depkeeper — orientation, workflow and standa
 Contributions are welcome. This section documents the standards a change must meet before it can
 be merged.
 
-<div class="grid cards" markdown>
-
-- :material-tools:{ .lg .middle } **[Development setup](development-setup.md)**
-
-    ---
-
-    Environment, tooling, verification commands and the change workflow.
-
-- :material-format-align-left:{ .lg .middle } **[Code style](code-style.md)**
-
-    ---
-
-    Typing, docstrings, comments and naming conventions — all enforced.
-
-- :material-test-tube:{ .lg .middle } **[Testing](testing.md)**
-
-    ---
-
-    Suite layout, shared fixtures, isolation traps and what must be tested.
-
-- :material-puzzle:{ .lg .middle } **[Extending depkeeper](extending.md)**
-
-    ---
-
-    Where to add a flag, a format, a check or a parser, and the invariants you must not break.
-
-- :material-tag:{ .lg .middle } **[Release process](release-process.md)**
-
-    ---
-
-    Versioning, changelog, build and publish steps.
-
-</div>
+- **[Development setup](development-setup.md)** — Environment, tooling, verification commands and the change workflow.
+- **[Code style](code-style.md)** — Typing, docstrings, comments and naming conventions — all enforced.
+- **[Testing](testing.md)** — Suite layout, shared fixtures, isolation traps and what must be tested.
+- **[Extending depkeeper](extending.md)** — Where to add a flag, a format, a check or a parser, and the invariants you must not break.
+- **[Release process](release-process.md)** — Versioning, changelog, build and publish steps.
 
 ---
 

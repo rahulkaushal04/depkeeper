@@ -34,7 +34,7 @@ Anything else raises `ParseError` with the line number, the line content and the
 
 ## Include directives (`-r`)
 
-```text title="requirements.txt"
+```text
 -r requirements/base.txt
 click~=8.0
 ```
@@ -56,12 +56,12 @@ what allows `update` to rewrite the correct file:
 depkeeper update main.txt -y
 ```
 
-```text title="main.txt (unchanged directive)"
+```text
 -r sub/base.txt
 click~=8.4
 ```
 
-```text title="sub/base.txt (rewritten)"
+```text
 requests==2.34.2
 ```
 
@@ -69,11 +69,12 @@ Without provenance, line 1 of `sub/base.txt` would have been matched against lin
 and the `-r` directive itself would have been overwritten. `source_file` is excluded from
 `Requirement` equality — it is provenance, not identity.
 
-!!! warning "`update` writes every included file"
-
-    Running `depkeeper update main.txt` can modify files you did not name on the command line.
-    `--backup` backs up **all** affected files, not only the primary one. Preview with
-    `--dry-run` when the include graph is unfamiliar.
+> [!WARNING]
+> **`update` writes every included file**
+>
+> Running `depkeeper update main.txt` can modify files you did not name on the command line.
+> `--backup` backs up **all** affected files, not only the primary one. Preview with
+> `--dry-run` when the include graph is unfamiliar.
 
 ---
 

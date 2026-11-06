@@ -29,10 +29,10 @@ Packages published only to a private index always report as `[ERROR]`.
 **Workaround:** none in 0.1.x. Split private packages into a separate file that you do not run
 depkeeper against, or accept the error rows.
 
-### Only pip requirements files are supported
+### Supported file formats
 
-No `pyproject.toml` dependency tables, `Pipfile`, `poetry.lock`, `setup.py` or `setup.cfg`. The
-parser is intentionally monolithic and pip-shaped; there is no format plugin system.
+`requirements*.txt`, `pyproject.toml` (PEP 621, PEP 735, build-system, Poetry) and conda
+`environment.yml`. Not supported: `Pipfile`, `poetry.lock`, `setup.py`, `setup.cfg`.
 
 ### No security advisory scanning
 
@@ -42,10 +42,11 @@ depkeeper reports version drift, not vulnerabilities. Use `pip-audit` or `safety
 
 ## Version selection
 
-### Calendar versioning hits the major boundary
+### Calendar versioning heuristics
 
-The boundary rule compares `release[0]`, so for `certifi 2023.7.22` the "major" is `2023` and
-`2024.x` is a boundary crossing that will never be proposed.
+Calver packages (such as `certifi 2023.7.22`) are detected automatically and updated across years;
+the change is labelled `year`. Detection is heuristic: force it with `versioning = "calver"` (or
+`"semver"`) per package. A calver `year` counts as `minor` for gating (`--fail-on`, `--max-update`).
 
 **Workaround:** leave date-versioned packages unversioned so there is no anchor, or bump the pin
 by hand.
@@ -58,13 +59,14 @@ range permits `4.x`.
 **Workaround:** raise the floor yourself (`django>=4.2,<5.0`) and let depkeeper continue from
 there. Major upgrades are a deliberate human decision.
 
-### No target-Python override
+### Target Python defaults to the running interpreter
 
-Compatibility filtering uses the interpreter **depkeeper runs on**, not the interpreter your
-project targets. There is no flag to change this.
+Without `--python-version`, a `python_version` config key, or a `requires-python` /
+conda `python=` declaration in the file, compatibility filtering uses the interpreter
+**depkeeper runs on**.
 
-**Workaround:** install depkeeper into the project's environment, or
-`pipx install --python python3.12 depkeeper`.
+**Fix:** pass `--python-version 3.9` (or set `python_version`), or install depkeeper into the
+project's environment.
 
 ### No pre-release support
 
@@ -139,12 +141,11 @@ which some requirements have hashes and others do not.
 
 **Workaround:** regenerate hashes afterwards with `pip-compile --generate-hashes` or `hashin`.
 
-### Backslash line continuations are not joined
+### Hashes are only refreshed on request
 
-The default output of `pip-compile --generate-hashes` wraps hashes onto continuation lines and is
-therefore unparseable.
-
-**Workaround:** use single-line hash form, or do not run depkeeper against generated hash files.
+Backslash-continued files (`pip-compile --generate-hashes`) are parsed. Updating a hashed
+requirement is refused unless you pass `--refresh-hashes` (regenerate sha256 hashes for the new
+version) or `--allow-hash-removal` (drop them).
 
 ### URL package-name inference is unreliable
 
@@ -200,8 +201,8 @@ Each individual file is atomic, but a batch interrupted between commits is not r
 
 ### Discovery is not recursive
 
-`depkeeper.toml` / `pyproject.toml` are looked for in the current working directory only; parent
-directories are not searched.
+`depkeeper.toml` / `pyproject.toml` are looked for in the current directory and then in parent
+directories up to the repository root (the first directory containing `.git`).
 
 **Workaround:** pass `--config`, or run from the directory containing the file.
 

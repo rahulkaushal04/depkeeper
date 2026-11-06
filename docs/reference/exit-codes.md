@@ -7,33 +7,33 @@ description: Exit code semantics per command, with scripting patterns
 
 | Code | Name | Meaning |
 |---|---|---|
-| `0` | Success | The command completed. **Not** a statement about what it found. |
-| `1` | Error | An application error occurred; see stderr. |
+| `0` | Success | The command completed with nothing to report as a failure. |
+| `1` | Error | An application error occurred, or `update` was declined / matched nothing; see stderr. |
 | `2` | Usage error | Click rejected the command line before depkeeper ran. |
-| `130` | Interrupted | `Ctrl+C` (`128 + SIGINT`). |
+| `3` | Updates found | `check --fail-on` threshold met (`check` only). |
+| `4` | Lookup failed | At least one package could not be looked up on PyPI (`check` and `update`; wins over `3` for `check`). |
+| `130` | Interrupted | `Ctrl+C` (`128 + SIGINT`) or aborted prompt. |
 
-There is no dedicated code for "updates are available". Gate on the payload, not the exit code.
+Without `--fail-on`, `check` exits `0` even when updates exist. Direct references (editable, VCS,
+URL, local path) are never looked up on PyPI and never cause `4`.
 
 ---
 
 ## `0` — Success
 
-Both commands call `sys.exit(0)` after their asynchronous pipeline returns normally.
-
 | Situation | Exit |
 |---|---|
 | `check`: everything up to date | `0` |
-| `check`: outdated packages found | `0` |
-| `check`: unresolved conflicts found | `0` |
-| `check`: some packages unreachable on PyPI | `0` |
+| `check`: outdated packages found, no `--fail-on` | `0` |
+| `check`: unresolved conflicts found, no `--fail-on` | `0` |
 | `update`: updates applied | `0` |
 | `update`: nothing to update | `0` |
-| `update`: user declined at the prompt | `0` |
-| `update`: `--dry-run` | `0` |
-| `update`: `--packages` matched nothing | `0` |
+| `update`: `--dry-run` (and no lookup failed) | `0` |
 | `update`: a package skipped because its target violates the declared constraints | `0` |
 
 ## `1` — Error
+
+Also returned by `update` when you decline the confirmation prompt, or when `--packages` matches nothing.
 
 Raised when a `DepKeeperError` (or any unexpected exception) reaches a command boundary. The
 message is printed to **stderr** with an `[ERROR]` prefix.
@@ -44,10 +44,20 @@ message is printed to **stderr** with an `[ERROR]` prefix.
 | Circular include | `Circular dependency detected: a.txt -> b.txt -> a.txt` |
 | Configuration error | `Unknown configuration keys: check_conflict` |
 | Refused hashed update | `Refusing to update requirement(s) with --hash entries: requests. ...` |
+| `update --verify` conflict | `Proposed updates do not resolve (pip): ...` (also when no updates are found but the current set conflicts; nothing is written) |
 | Unsatisfiable rewrite | `Cannot update requirement at requirements.txt:3: ...` |
 | Write failure | `Failed to write /path/requirements.txt: ...` |
 | File too large / unreadable | `File too large: 12000000 bytes (max 10485760)` |
 | Unexpected exception | `Unexpected error: <detail>` (full traceback at `-vv`) |
+
+## `3` — Updates found (`check` only)
+
+`check --fail-on {updates,minor,major}` and an update at or above that level exists.
+
+## `4` — Lookup failed
+
+At least one non-ignored package could not be looked up on PyPI (not found, or network error).
+For `update`, the file is still updated for the packages that were found.
 
 ## `2` — Usage error
 
@@ -81,7 +91,7 @@ Files are left either fully old or fully new; see
 
 ## Gating on results
 
-`check` reports through its payload. The correct pattern separates *did depkeeper work* from
+`check` reports through its payload (or `--fail-on`). The correct pattern separates *did depkeeper work* from
 *what did it find*:
 
 ```bash
@@ -110,6 +120,8 @@ echo "$OUTDATED package(s) behind"
 depkeeper check
 case $? in
   0)   echo "check completed" ;;
+  3)   echo "updates available"; exit 3 ;;
+  4)   echo "PyPI lookup failed"; exit 4 ;;
   1)   echo "application error"; exit 1 ;;
   2)   echo "usage error"; exit 2 ;;
   130) echo "cancelled"; exit 130 ;;
@@ -149,4 +161,5 @@ deps-check:
 | Treating a `0` exit from `check` as "no updates". | Drift is never detected. |
 | Piping stdout to a parser without checking the exit code. | A failed run produces no payload and the parser sees empty input. |
 | Using `set -e` with `depkeeper check \| jq ...`. | The pipeline's exit status is `jq`'s. Use `set -o pipefail`, or capture to a file first. |
-| Assuming `update` fails when it declines to update a package. | Skips are warnings, not errors; the command still exits `0`. |
+| Assuming `update` fails when it skips a package. | Skips are warnings, not errors; the command still exits `0`. |
+| Piping `echo n \|` into `update` and expecting `0`. | Declining the prompt exits `1`. |

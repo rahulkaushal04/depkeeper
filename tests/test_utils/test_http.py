@@ -621,7 +621,9 @@ class TestConcurrencyLimit:
 
     async def test_permits_are_released_when_a_request_fails(self) -> None:
         """A leaked permit deadlocks every later request in the same run."""
-        client = _client([_response(500, text="boom")], max_concurrency=2, max_retries=0)
+        client = _client(
+            [_response(500, text="boom")], max_concurrency=2, max_retries=0
+        )
 
         async with client:
             for _ in range(4):
@@ -750,9 +752,7 @@ class TestBatchGetJson:
         )
 
         async with HTTPClient(verify_ssl=False) as client:
-            results = await client.batch_get_json(
-                [requests_url, private_url, dead_url]
-            )
+            results = await client.batch_get_json([requests_url, private_url, dead_url])
 
         assert results[requests_url] == REQUESTS_PAYLOAD
         assert results[private_url] == {}
@@ -770,7 +770,8 @@ class TestBatchGetJson:
 
         async with HTTPClient(verify_ssl=False) as client:
             await client.batch_get_json(
-                urls, progress_callback=lambda done, total: progress.append((done, total))
+                urls,
+                progress_callback=lambda done, total: progress.append((done, total)),
             )
 
         assert progress == [(1, 4), (2, 4), (3, 4), (4, 4)]
@@ -786,3 +787,76 @@ class TestBatchGetJson:
 
         assert results == {}
         assert progress == []
+
+
+class TestHardening:
+    async def test_oversized_body_is_rejected(self) -> None:
+        client = _client([_response(200, text="x" * 100)], max_retries=0)
+        client.max_response_bytes = 10
+        async with client:
+            with pytest.raises(NetworkError, match="too large|exceeds"):
+                await client.get("https://pypi.org/pypi/x/json")
+
+    async def test_redirect_to_other_host_is_refused(self) -> None:
+        redirect = _response(302, headers={"Location": "https://evil.example/x"})
+        client = _client([redirect], max_retries=0)
+        async with client:
+            with pytest.raises(NetworkError, match="unsafe redirect"):
+                await client.get("https://pypi.org/pypi/x/json")
+
+    async def test_redirect_downgrade_to_http_is_refused(self) -> None:
+        redirect = _response(302, headers={"Location": "http://pypi.org/x"})
+        client = _client([redirect], max_retries=0)
+        async with client:
+            with pytest.raises(NetworkError, match="unsafe redirect"):
+                await client.get("https://pypi.org/pypi/x/json")
+
+    async def test_safe_redirect_is_followed(self) -> None:
+        redirect = _response(301, headers={"Location": "https://pypi.org/pypi/y/json"})
+        client = _client([redirect, _response(200, json_body={"ok": 1})], max_retries=0)
+        async with client:
+            assert await client.get_json("https://pypi.org/pypi/x/json") == {"ok": 1}
+
+    async def test_total_deadline_bounds_the_request(self) -> None:
+        client = _client(
+            [httpx.ConnectError("down")], max_retries=5, total_timeout=0.05
+        )
+        async with client:
+            with pytest.raises(NetworkError, match="timed out"):
+                await client.get("https://pypi.org/pypi/x/json")
+
+    async def test_exhausted_get_is_not_retried_again(self) -> None:
+        seen: List[httpx.Request] = []
+        client = _client([httpx.ConnectError("down")], seen=seen, max_retries=0)
+        async with client:
+            for _ in range(2):
+                with pytest.raises(NetworkError):
+                    await client.get("https://pypi.org/pypi/x/json")
+        assert len(seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_failure_cache_expires_and_keys_on_params(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+    from depkeeper.exceptions import NetworkError
+    from depkeeper.utils import http as http_mod
+
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url)
+        return httpx.Response(503 if len(calls) <= 1 else 200, json={})
+
+    async with http_mod.HTTPClient(max_retries=0) as client:
+        client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        url = "https://pypi.org/pypi/x/json"
+        with pytest.raises(NetworkError):
+            await client.get(url)
+        with pytest.raises(NetworkError):  # served from cache, no request
+            await client.get(url)
+        assert len(calls) == 1
+        assert (await client.get(url, params={"a": "1"})).status_code == 200
+        monkeypatch.setattr(http_mod, "FAILURE_TTL", 0.0)
+        assert (await client.get(url)).status_code == 200

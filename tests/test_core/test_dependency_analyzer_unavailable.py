@@ -1,15 +1,4 @@
-"""Tests for graceful degradation when PyPI metadata is unavailable.
-
-Primary purpose: guard against regression M6 — an unguarded
-``get_package_data()`` inside the resolver let a ``PyPIError`` escape
-``resolve_and_annotate_conflicts()`` and abort the whole ``check`` /
-``update`` run with "Unexpected error".
-
-A package can legitimately reach the resolver with no cached metadata:
-``prefetch_packages()`` swallows per-package failures and
-``VersionChecker.get_package_info()`` returns an *unavailable stub*, so the
-package is still present in the package list handed to the analyzer.
-"""
+"""Conflict resolution degrades gracefully when PyPI metadata is unavailable."""
 
 from __future__ import annotations
 
@@ -51,7 +40,7 @@ def _conflicting_packages() -> List[Package]:
 
 @pytest.mark.unit
 class TestUnavailableMetadataDegradation:
-    """M6: missing metadata must degrade, never abort."""
+    """Missing metadata must degrade, never abort."""
 
     async def test_resolution_survives_unavailable_target(self) -> None:
         """The full resolver must not raise when the target 404s."""
@@ -102,7 +91,9 @@ class TestUnavailableMetadataDegradation:
         [
             PyPIError("not found", package_name="ghost"),
             NetworkError("Request failed after 4 attempts", url="https://pypi.org"),
-            NetworkError("Rate limit exceeded", url="https://pypi.org", status_code=429),
+            NetworkError(
+                "Rate limit exceeded", url="https://pypi.org", status_code=429
+            ),
         ],
         ids=["404", "timeout", "rate-limited"],
     )

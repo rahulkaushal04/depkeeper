@@ -1,3 +1,5 @@
+"""Tests for :mod:`depkeeper.config`."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -55,6 +57,8 @@ class TestDepKeeperConfig:
         assert result == {
             "check_conflicts": False,
             "strict_version_matching": True,
+            "fail_on": "none",
+            "ignore": [],
         }
         assert "source_path" not in result
 
@@ -226,7 +230,7 @@ class TestReadToml:
             assert "tomli" in str(exc_info.value)
 
     def test_reads_toml_with_utf8_bom(self, tmp_path: Path) -> None:
-        """M3 regression: TOML parsers reject a BOM as an invalid statement."""
+        """TOML parsers reject a BOM as an invalid statement."""
         toml_file = tmp_path / "depkeeper.toml"
         toml_file.write_bytes(
             "[depkeeper]\ncheck_conflicts = false\n".encode("utf-8-sig")
@@ -398,3 +402,43 @@ class TestLoadConfig:
         assert result.check_conflicts is True  # Defaults
         assert result.strict_version_matching is False
         assert result.source_path == config_file
+
+
+@pytest.mark.unit
+class TestDiscoveryAndNewKeys:
+    def test_walks_up_to_parent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "depkeeper.toml").write_text("[depkeeper]\ncheck_conflicts=false\n")
+        sub = tmp_path / "a" / "b"
+        sub.mkdir(parents=True)
+        monkeypatch.chdir(sub)
+        assert load_config().check_conflicts is False
+
+    def test_walk_stops_at_git_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "depkeeper.toml").write_text("[depkeeper]\ncheck_conflicts=false\n")
+        repo = tmp_path / "repo"
+        (repo / ".git").mkdir(parents=True)
+        monkeypatch.chdir(repo)
+        assert load_config().check_conflicts is True
+
+    def test_explicit_file_without_table_is_an_error(self, tmp_path: Path) -> None:
+        f = tmp_path / "x.toml"
+        f.write_text("foo = 1\n")
+        with pytest.raises(ConfigError, match=r"no \[depkeeper\] table"):
+            load_config(f)
+
+    def test_fail_on_and_ignore(self, tmp_path: Path) -> None:
+        f = tmp_path / "depkeeper.toml"
+        f.write_text('[depkeeper]\nfail_on="minor"\nignore=["django"]\n')
+        cfg = load_config(f)
+        assert (cfg.fail_on, cfg.ignore) == ("minor", ["django"])
+
+    @pytest.mark.parametrize("body", ['fail_on="bogus"', "ignore=3"])
+    def test_invalid_values_rejected(self, tmp_path: Path, body: str) -> None:
+        f = tmp_path / "depkeeper.toml"
+        f.write_text(f"[depkeeper]\n{body}\n")
+        with pytest.raises(ConfigError):
+            load_config(f)

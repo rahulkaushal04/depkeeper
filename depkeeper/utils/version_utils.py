@@ -7,6 +7,7 @@ with pip about what a version means.
 
 from __future__ import annotations
 
+import datetime as _dt
 from typing import Iterable, List, Optional, Sequence, Set, Tuple
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version, parse
@@ -25,16 +26,97 @@ _MIN_COMPATIBLE_RELEASE_PARTS = 2
 #: A parsed ``(operator, version)`` specifier pair.
 Spec = Tuple[str, str]
 
+#: Accepted ``versioning`` settings.
+VERSIONING_CHOICES: Tuple[str, ...] = ("auto", "semver", "calver")
+
+#: Update labels ordered by severity; calver labels map onto the semver ranks.
+UPDATE_RANK = {"patch": 0, "month": 1, "minor": 1, "year": 2, "major": 2}
+
+_FIRST_CALVER_YEAR = 1990
+
+
+def update_rank(update_type: str) -> int:
+    """Return the severity rank of an update label, or -1 if unranked.
+
+    Ranks are patch 0, minor/month 1, major/year 2.
+    """
+    return UPDATE_RANK.get(update_type, -1)
+
+
+def gating_type(update_type: str) -> str:
+    """Map an update label onto the semver label used by ``--fail-on``/``--max-update``.
+
+    A calver ``year`` change is at most ``minor``-equivalent (it is not a
+    breaking boundary); ``month`` is ``minor``. Other labels pass through.
+    """
+    return {"year": "minor", "month": "minor"}.get(update_type, update_type)
+
+
+def _leading_is_year(version: str) -> bool:
+    """Return whether the first release component looks like a calendar year."""
+    try:
+        release = Version(version).release
+    except InvalidVersion:
+        return False
+    return bool(release) and (
+        _FIRST_CALVER_YEAR <= release[0] <= _dt.date.today().year + 1
+    )
+
+
+def _history_is_yy_m(versions: Sequence[str]) -> bool:
+    """Strong evidence of ``YY.M`` calver: every stable release looks like it."""
+    yy = _dt.date.today().year % 100
+    parsed = []
+    for raw in versions:
+        try:
+            v = Version(raw)
+        except InvalidVersion:
+            continue
+        if not v.is_prerelease:
+            parsed.append(v.release)
+    if len(parsed) < 5:
+        return False
+    if any(
+        len(r) < 2 or not (15 <= r[0] <= yy + 1) or not (1 <= r[1] <= 12)
+        for r in parsed
+    ):
+        return False
+    return len({r[0] for r in parsed}) >= 2
+
+
+def detect_versioning(
+    mode: str = "auto",
+    current_version: Optional[str] = None,
+    history: Sequence[str] = (),
+) -> str:
+    """Resolve a ``versioning`` setting to ``"semver"`` or ``"calver"``.
+
+    ``"semver"``/``"calver"`` are returned as-is. ``"auto"`` picks calver when
+    the current (else newest historical) version leads with a plausible 4-digit
+    year (1990..this year+1, e.g. ``2024.8.30``), or when the whole release
+    history strongly looks like ``YY.M`` (e.g. black ``24.2.0``). A lone
+    ``23.1.0`` is never guessed to be calver.
+    """
+    if mode in ("semver", "calver"):
+        return mode
+    sample = current_version or (history[0] if history else None)
+    if sample and _leading_is_year(sample):
+        return "calver"
+    return "calver" if _history_is_yy_m(history) else "semver"
+
 
 def get_update_type(
     current_version: Optional[str],
     target_version: Optional[str],
+    versioning: str = "semver",
 ) -> str:
     """Determine the semantic update type between two versions.
 
     Args:
         current_version: Currently installed version, or ``None`` if not installed.
         target_version: Target version to compare against.
+        versioning: ``"semver"`` or ``"calver"``; selects the classification
+            scheme for upgrades.
 
     Returns:
         One of:
@@ -44,10 +126,12 @@ def get_update_type(
             - ``"major"``     : Major version change
             - ``"minor"``     : Minor version change
             - ``"patch"``     : Patch-level change
+            - ``"year"`` / ``"month"`` / ``"patch"`` : calver
+              (*versioning* ``"calver"``): leading year, second, later part
             - ``"update"``    : Update that cannot be classified further
             - ``"unknown"``   : Invalid or unsupported version comparison
 
-    Examples:
+    Example::
         >>> get_update_type("1.0.0", "2.0.0")
         'major'
         >>> get_update_type(None, "1.0.0")
@@ -74,10 +158,24 @@ def get_update_type(
         if target < current:
             return "downgrade"
 
+        if versioning == "calver":
+            return _classify_calver(current, target)
         return _classify_upgrade(current, target)
 
     except InvalidVersion:
         return "unknown"
+
+
+def _classify_calver(current: Version, target: Version) -> str:
+    """Classify an upgrade of calendar-versioned releases."""
+    c, t = _normalize_release(current), _normalize_release(target)
+    if c[0] != t[0]:
+        return "year"
+    if c[1] != t[1]:
+        return "month"
+    if c[2] != t[2]:
+        return "patch"
+    return "update"
 
 
 def _classify_upgrade(current: Version, target: Version) -> str:
@@ -104,7 +202,7 @@ def _classify_upgrade(current: Version, target: Version) -> str:
     if current_patch != target_patch:
         return "patch"
 
-    # Covers pre-release → release or metadata-only updates
+    # Pre-release promotion or metadata-only change.
     return "update"
 
 
@@ -139,7 +237,7 @@ def parse_version_lenient(version: Optional[str]) -> Optional[Version]:
         The parsed `Version`, or ``None`` when *version* is ``None``
         or cannot be resolved to a version by either path.
 
-    Examples:
+    Example::
         >>> parse_version_lenient("2.3.3") == Version("2.3.3")
         True
         >>> parse_version_lenient("2.*") == Version("2")
@@ -168,11 +266,6 @@ def parse_version_lenient(version: Optional[str]) -> Optional[Version]:
         return None
 
 
-# ---------------------------------------------------------------------------
-# Specifier-set helpers
-# ---------------------------------------------------------------------------
-
-
 def specs_to_string(specs: Iterable[Spec]) -> str:
     """Render ``(operator, version)`` pairs as a PEP 440 specifier string.
 
@@ -183,7 +276,7 @@ def specs_to_string(specs: Iterable[Spec]) -> str:
         Comma-joined specifier string, e.g. ``">=2.0,<3.0"``. Empty when
         *specs* is empty.
 
-    Examples:
+    Example::
         >>> specs_to_string([(">=", "2.0"), ("<", "3.0")])
         '>=2.0,<3.0'
         >>> specs_to_string([])
@@ -201,7 +294,7 @@ def is_lower_bound(operator: str) -> bool:
     Returns:
         ``True`` for ``>=``, ``>`` and ``~=``.
 
-    Examples:
+    Example::
         >>> is_lower_bound(">=")
         True
         >>> is_lower_bound("<")
@@ -224,7 +317,7 @@ def retained_specs(specs: Iterable[Spec]) -> List[Spec]:
     Returns:
         The subset of *specs* that `rewrite_version_specs` preserves.
 
-    Examples:
+    Example::
         >>> retained_specs([(">=", "5.0"), ("<", "6.0")])
         [('<', '6.0')]
         >>> retained_specs([("==", "2.20.0")])
@@ -256,7 +349,7 @@ def specs_allow_version(specs: Iterable[Spec], version: str) -> bool:
         ``True`` when the version satisfies all specifiers (or the inputs
         cannot be interpreted), ``False`` otherwise.
 
-    Examples:
+    Example::
         >>> specs_allow_version([("<", "3.0")], "2.9.0")
         True
         >>> specs_allow_version([("<", "3.0")], "3.1.0")
@@ -311,7 +404,7 @@ def rewrite_version_specs(specs: Sequence[Spec], new_version: str) -> List[Spec]
         (e.g. ``>=2.0,>2.1`` collapsing to two identical floors) are removed
         while preserving order.
 
-    Examples:
+    Example::
         >>> rewrite_version_specs([(">=", "5.0"), ("<", "6.0")], "5.5.3")
         [('>=', '5.5.3'), ('<', '6.0')]
         >>> rewrite_version_specs([("~=", "2.0")], "2.3.3")

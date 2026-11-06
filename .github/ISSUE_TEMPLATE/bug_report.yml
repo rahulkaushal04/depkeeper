@@ -1,0 +1,86 @@
+name: Bug report
+description: Report unexpected behavior or an error in depkeeper.
+title: "[BUG] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A report we can reproduce gets fixed much faster. Please trim the input file to the smallest one that shows the problem.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is happening, in one or two sentences.
+    validations:
+      required: true
+  - type: input
+    id: depkeeper-version
+    attributes:
+      label: depkeeper version
+      description: Output of `depkeeper --version`.
+      placeholder: "0.1.1"
+    validations:
+      required: true
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      description: Output of `python --version` for the interpreter depkeeper runs on. It filters candidate versions against that interpreter.
+      placeholder: "3.12.4"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "macOS 14, Ubuntu 22.04, Windows 11"
+    validations:
+      required: true
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Install method
+      options:
+        - pip
+        - pipx
+        - From source (git clone)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command run
+      description: The exact command line.
+      placeholder: "depkeeper check requirements.txt"
+    validations:
+      required: true
+  - type: textarea
+    id: input-file
+    attributes:
+      label: Input file snippet
+      description: Minimal requirements.txt, pyproject.toml or environment.yml snippet that reproduces the issue.
+      render: text
+  - type: textarea
+    id: expected-actual
+    attributes:
+      label: Expected vs actual behavior
+      description: What you expected, and what happened instead. Paste text, not screenshots.
+    validations:
+      required: true
+  - type: textarea
+    id: verbose-output
+    attributes:
+      label: Output with -vv
+      description: Re-run the command with `-vv` and paste the output, including any traceback.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and found no duplicate.
+          required: true
+        - label: I removed private index URLs and credentials from everything pasted above.
+          required: true

@@ -162,12 +162,13 @@ themselves — see [Python API](../reference/python-api.md).
 | Input size limit | 10 MB per file, to bound memory on hostile or accidental input. |
 | Untrusted input | The parser is the only component that consumes untrusted text. It performs no `eval`, no shell invocation and no path writes. |
 
-!!! warning "Running depkeeper on an untrusted repository"
-
-    `update` writes to every file reachable through `-r` includes, and include paths are resolved
-    relative to the including file — including `../` segments. A hostile requirements file can
-    therefore direct writes outside the directory you invoked depkeeper in. Run `--dry-run` first,
-    or run in a container with only the project directory mounted.
+> [!WARNING]
+> **Running depkeeper on an untrusted repository**
+>
+> `update` writes to every file reachable through `-r` includes, and include paths are resolved
+> relative to the including file — including `../` segments. A hostile requirements file can
+> therefore direct writes outside the directory you invoked depkeeper in. Run `--dry-run` first,
+> or run in a container with only the project directory mounted.
 
 Vulnerability reporting: [Security policy](../community/security.md).
 
@@ -200,12 +201,13 @@ Attach both files to a bug report, together with the requirements file, `depkeep
 Loggers live under the `depkeeper` namespace (`depkeeper.parser`, `depkeeper.http`,
 `depkeeper.data_store`, `depkeeper.dependency_analyzer`, `depkeeper.commands.update`, …).
 
-!!! note "`setup_logging` reconfigures the process"
-
-    It clears handlers on the `depkeeper` logger, installs its own, and sets `propagate = False`.
-    Embedding depkeeper in a larger application means its log records will **not** reach your root
-    logger unless you reconfigure that logger afterwards. Test suites must snapshot and restore
-    the logger's handlers, level and `propagate` flag — see [Testing](../contributing/testing.md#logging-isolation).
+> [!NOTE]
+> **`setup_logging` reconfigures the process**
+>
+> It clears handlers on the `depkeeper` logger, installs its own, and sets `propagate = False`.
+> Embedding depkeeper in a larger application means its log records will **not** reach your root
+> logger unless you reconfigure that logger afterwards. Test suites must snapshot and restore
+> the logger's handlers, level and `propagate` flag — see [Testing](../contributing/testing.md#logging-isolation).
 
 ---
 

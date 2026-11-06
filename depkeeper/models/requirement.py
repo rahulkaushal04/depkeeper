@@ -37,6 +37,13 @@ class Requirement:
             update writer to rewrite the correct file. Excluded from equality
             comparison as it is provenance metadata, not part of the
             requirement's semantic identity.
+        constraint_specs: Specifiers imposed by ``-c`` constraint files
+            (informational; never rendered).
+        direct_reference: ``url`` came from a PEP 508 ``name @ url`` spec.
+        source_format: Adapter name that produced it (e.g. ``requirements.txt``).
+        span: Optional (start, end) character offsets in the source text.
+        approximate: The PyPI lookup is a best-effort match (conda packages).
+        series: Significant release components of a fuzzy conda spec, else None.
     """
 
     name: str
@@ -50,6 +57,22 @@ class Requirement:
     line_number: int = 0
     raw_line: Optional[str] = None
     source_file: Optional[str] = field(default=None, compare=False)
+    # Specs imposed by ``-c`` constraint files. Informational only: never
+    # rendered into the requirement line.
+    constraint_specs: List[Tuple[str, str]] = field(default_factory=list, compare=False)
+    # True when ``url`` came from a PEP 508 ``name @ url`` spec, so the name
+    # must be rendered alongside the URL.
+    direct_reference: bool = False
+    # Optional provenance for source adapters (see core/sources). ``span`` is
+    # (start, end) character offsets in the original text, for formats that
+    # are not line oriented; requirements.txt uses ``line_number`` instead.
+    source_format: Optional[str] = field(default=None, compare=False)
+    span: Optional[Tuple[int, int]] = field(default=None, compare=False)
+    # True when the name was matched on PyPI only approximately (conda packages).
+    approximate: bool = field(default=False, compare=False)
+    # Fuzzy conda specs (``numpy=1.24``) pin a *series*: the number of release
+    # components that are significant (2 for ``1.24``). None for exact specs.
+    series: Optional[int] = field(default=None, compare=False)
 
     def to_string(
         self,
@@ -75,13 +98,11 @@ class Requirement:
         if self.editable:
             parts.append("-e")
 
-        if self.url:
-            requirement = self.url
+        extras = f"[{','.join(self.extras)}]" if self.extras else ""
+        if self.url and self.direct_reference:
+            requirement = f"{self.name}{extras} @ {self.url}"
         else:
-            requirement = self.name
-
-        if self.extras:
-            requirement += f"[{','.join(self.extras)}]"
+            requirement = (self.url or self.name) + extras
 
         if self.specs and not self.url:
             requirement += ",".join(
@@ -178,6 +199,8 @@ class Requirement:
             comment=self.comment,
             line_number=self.line_number,
             source_file=self.source_file,
+            constraint_specs=list(self.constraint_specs),
+            direct_reference=self.direct_reference,
         )
 
         result = updated.to_string(

@@ -1,0 +1,27 @@
+name: Question
+description: Ask how to use depkeeper.
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please read the [docs](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/index.md) and the FAQ first.
+        For a bug, use the bug report form instead.
+  - type: textarea
+    id: question
+    attributes:
+      label: What do you want to do?
+      description: Describe your goal and what you tried.
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Example input
+      description: A minimal requirements, pyproject.toml or environment.yml snippet. Remove private index URLs and credentials.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: depkeeper version
+      description: Output of `depkeeper --version`.

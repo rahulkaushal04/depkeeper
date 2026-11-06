@@ -19,11 +19,12 @@ depkeeper follows [Semantic Versioning](https://semver.org/).
 | **Minor** | New commands, flags or output fields; a behavioural change that produces different (but still safe) recommendations. |
 | **Patch** | Bug fixes and documentation that do not change recommendations. |
 
-!!! warning "Recommendation logic is a behavioural contract"
-
-    A change that makes the same requirements file produce a different update plan is at minimum
-    a **minor** release, even if the diff looks like a bug fix. Consumers gate pipelines on this
-    output.
+> [!WARNING]
+> **Recommendation logic is a behavioural contract**
+>
+> A change that makes the same requirements file produce a different update plan is at minimum
+> a **minor** release, even if the diff looks like a bug fix. Consumers gate pipelines on this
+> output.
 
 While the project is `0.x`, the CLI surface is stable within a patch series; anything may change
 between minor versions.
@@ -51,10 +52,9 @@ python -m pytest tests -q --no-cov
 python -m mypy depkeeper --python-version 3.13
 python -m compileall -q depkeeper
 pre-commit run --all-files
-mkdocs build --strict
 ```
 
-All five must pass on a clean checkout of `main`.
+All four must pass on a clean checkout of `main`.
 
 ### 2. Bump the version
 
@@ -152,23 +152,7 @@ build and verification still run, so the failure is isolated and nothing partial
 Watch the run under **Actions** and confirm the `pypi.org/project/depkeeper/` page shows the new
 version before moving on.
 
-### 8. Documentation deploys automatically — no manual step
-
-Two independent workflows keep the docs site in sync, both using `mike` as the version provider:
-
-- **`.github/workflows/docs.yml`** deploys every push to `main` that touches `docs/**` or
-  `mkdocs.yml` under the `dev` version, so docs-only fixes go live immediately without waiting
-  for a release. `dev` is never the default — it will not appear as `latest`.
-- **`.github/workflows/publish.yml`**, in its `docs` job (which runs only after the PyPI publish
-  succeeds), deploys the same commit under the release's own version number (e.g. `0.2.0`),
-  updates the `latest` alias to point to it, and sets `latest` as the site's default. This is what
-  keeps the docs shown at the bare site URL matching what is actually installable from PyPI —
-  `main` can be ahead of the latest release; the `latest` docs never are.
-
-Confirm the version selector on the deployed site shows the new version and that `latest` points
-to it.
-
-### 9. Announce
+### 8. Announce
 
 Create a GitHub release from the tag, using the changelog section as the body. Link the
 documentation for the new version.
@@ -178,7 +162,6 @@ documentation for the new version.
 ## Post-release
 
 - [ ] `pip install depkeeper==0.2.0` works from a clean environment.
-- [ ] The documentation site shows the new version.
 - [ ] The GitHub release exists and its notes match the changelog.
 - [ ] Open a follow-up issue for anything deferred from this release.
 

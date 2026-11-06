@@ -8,6 +8,7 @@ evaluation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from packaging.version import Version
@@ -44,6 +45,18 @@ class Package:
         recommended_version: Best version considering constraints.
         metadata: Arbitrary metadata (typically from PyPI).
         conflicts: Dependency conflicts affecting this package.
+        versioning: Resolved scheme, ``"semver"`` or ``"calver"``; selects the
+            update-type labels (calver: ``year``/``month``/``patch``).
+        held: Package policy ``hold`` kept it on its current version.
+        ignored: Package policy ``ignore`` excluded it from recommendations.
+        recommended_released: Upload time of the recommended version, if known.
+        current_released: Upload time of the current version, if known.
+        latest_released: Upload time of the latest version, if known.
+        cooldown_skipped: Newest version withheld by the ``min_age`` cooldown
+            (the recommendation fell back to an older eligible one).
+        retained_specs: The requirement's own upper bounds and exclusions.
+        conflict_held: A conflict was resolved by holding or reverting a
+            version, so ``conflicts`` may be empty.
     """
 
     name: str
@@ -52,6 +65,22 @@ class Package:
     recommended_version: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     conflicts: List[Conflict] = field(default_factory=list)
+    # The requirement's own upper bounds / exclusions; resolver searches must
+    # honour them so a chosen version never violates the declared range.
+    retained_specs: List[Tuple[str, str]] = field(
+        default_factory=list, compare=False, repr=False
+    )
+
+    versioning: str = field(default="semver", compare=False)
+    held: bool = field(default=False, compare=False)
+    ignored: bool = field(default=False, compare=False)
+    recommended_released: Optional[datetime] = field(default=None, compare=False)
+    current_released: Optional[datetime] = field(default=None, compare=False)
+    latest_released: Optional[datetime] = field(default=None, compare=False)
+    cooldown_skipped: Optional[str] = field(default=None, compare=False)
+    # A conflict was recorded and resolved by holding/reverting a version, so
+    # `conflicts` may be empty although the resolver still counts it.
+    conflict_held: bool = field(default=False, compare=False)
 
     _parsed_versions: Dict[str, Optional[Version]] = field(
         default_factory=dict,
@@ -62,10 +91,6 @@ class Package:
     def __post_init__(self) -> None:
         """Normalize the name so lookups match the parser and data store keys."""
         self.name = _normalize_name(self.name)
-
-    # ------------------------------------------------------------------
-    # Version parsing & accessors
-    # ------------------------------------------------------------------
 
     def _parse_version(self, version: Optional[str]) -> Optional[Version]:
         """Parse and cache a version string.
@@ -106,15 +131,11 @@ class Package:
         """Parsed recommended version."""
         return self._parse_version(self.recommended_version)
 
-    # ------------------------------------------------------------------
-    # State & conflict handling
-    # ------------------------------------------------------------------
-
     @property
     def requires_downgrade(self) -> bool:
-        """Whether the recommended version is lower than the current one.
+        """Return whether the recommended version is lower than the current one.
 
-        True when conflict resolution or Python incompatibility forced the
+        This holds when conflict resolution or Python incompatibility forced the
         recommendation below the version declared in the requirements file.
         """
         return (
@@ -122,6 +143,20 @@ class Package:
             and self.recommended is not None
             and self.current > self.recommended
         )
+
+    @property
+    def update_type(self) -> str:
+        """Update label for current -> recommended under this package's scheme."""
+        return get_update_type(
+            self.current_version, self.recommended_version, self.versioning
+        )
+
+    def recommended_age_days(self, now: Optional[datetime] = None) -> Optional[int]:
+        """Whole days since the recommended version was uploaded (``None`` if unknown)."""
+        if self.recommended_released is None:
+            return None
+        now = now or datetime.now(timezone.utc)
+        return max(0, (now - self.recommended_released).days)
 
     def has_conflicts(self) -> bool:
         """Return ``True`` when dependency conflicts were recorded."""
@@ -152,10 +187,6 @@ class Package:
         """Return one detailed description per recorded conflict."""
         return [conflict.to_display_string() for conflict in self.conflicts]
 
-    # ------------------------------------------------------------------
-    # Update & compatibility logic
-    # ------------------------------------------------------------------
-
     def has_update(self) -> bool:
         """Return ``True`` when the recommended version is newer than current."""
         return (
@@ -180,10 +211,6 @@ class Package:
             value = meta.get("requires_python")
             return value if isinstance(value, str) else None
         return None
-
-    # ------------------------------------------------------------------
-    # Reporting & serialization
-    # ------------------------------------------------------------------
 
     def get_status_summary(self) -> Tuple[str, str, str, Optional[str]]:
         """Compute the high-level status used by line-based output.
@@ -254,10 +281,19 @@ class Package:
             entry["versions"] = versions
 
         if status in ("outdated", "downgrade"):
-            entry["update_type"] = get_update_type(
-                self.current_version,
-                self.recommended_version,
-            )
+            entry["update_type"] = self.update_type
+
+        if self.versioning != "semver":
+            entry["versioning"] = self.versioning
+        if self.held:
+            entry["held"] = True
+        if self.recommended_released is not None:
+            entry["released"] = self.recommended_released.isoformat()
+            entry["age_days"] = self.recommended_age_days()
+        if self.cooldown_skipped:
+            entry["cooldown_skipped"] = self.cooldown_skipped
+        if self.conflict_held:
+            entry["conflict_held"] = True
 
         python_reqs: Dict[str, str] = {}
         for key in ("current", "latest", "recommended"):
@@ -275,10 +311,6 @@ class Package:
             entry["error"] = "Package information unavailable"
 
         return entry
-
-    # ------------------------------------------------------------------
-    # Presentation helpers
-    # ------------------------------------------------------------------
 
     def render_python_compatibility(self) -> str:
         """Render Python compatibility as a multi-line cell for the table view.
@@ -300,7 +332,7 @@ class Package:
         if self.has_update():
             rec_req = self.get_version_python_req("recommended")
             if rec_req:
-                parts.append(f"Recommended:{rec_req}")
+                parts.append(f"Recommended: {rec_req}")
 
         return "\n".join(parts) if parts else "[dim]-[/dim]"
 
@@ -321,9 +353,7 @@ class Package:
             "requires_downgrade": downgrade_required,
             "update_target": self.recommended_version,
             "update_type": (
-                get_update_type(self.current_version, self.recommended_version)
-                if update_available or downgrade_required
-                else None
+                self.update_type if update_available or downgrade_required else None
             ),
             "has_conflicts": self.has_conflicts(),
             "conflict_summary": (
@@ -331,17 +361,12 @@ class Package:
             ),
         }
 
-    # ------------------------------------------------------------------
-    # Dunder helpers
-    # ------------------------------------------------------------------
-
     def __str__(self) -> str:
         """Return a human-readable package summary."""
         if self.current_version and self.latest_version:
             status = "outdated" if self.has_update() else "up-to-date"
             text = (
-                f"{self.name} {self.current_version} → "
-                f"{self.latest_version} ({status})"
+                f"{self.name} {self.current_version} → {self.latest_version} ({status})"
             )
             if self.has_update():
                 text += f" [recommended: {self.recommended_version}]"

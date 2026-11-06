@@ -1,10 +1,4 @@
-"""Tests for deterministic, source-faithful specifier ordering.
-
-``packaging`` stores specifiers in an unordered ``frozenset``, so iteration
-order varies between processes under PEP 456 string hash randomisation. Since
-M5 made the update writer preserve multiple specifiers per line, an unstable
-order would produce spurious, non-reproducible diffs in requirements files.
-"""
+"""Specifier ordering is deterministic and source-faithful."""
 
 from __future__ import annotations
 

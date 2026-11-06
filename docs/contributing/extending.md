@@ -112,4 +112,4 @@ Design discussion first.
 - [ ] Are boundary cases tested (empty, unparseable, missing metadata, excluded target)?
 - [ ] Are [CLI commands](../reference/cli-commands.md),
       [Error reference](../reference/errors.md) and the relevant concept page updated?
-- [ ] Does `mkdocs build --strict` still pass?
+- [ ] Do all relative links in the docs still resolve?

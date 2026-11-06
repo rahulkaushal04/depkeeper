@@ -160,11 +160,12 @@ the writer cannot see. On such a failure you will see:
 [OK] Restored original file(s) from backup
 ```
 
-!!! note "Backups are never cleaned up"
-
-    depkeeper does not delete old backups. In a repository, add `*.backup.*` to `.gitignore`, or
-    prefer version control over `--backup` entirely — `git diff` is a better review tool and
-    `git checkout` a better restore.
+> [!NOTE]
+> **Backups are never cleaned up**
+>
+> depkeeper does not delete old backups. In a repository, add `*.backup.*` to `.gitignore`, or
+> prefer version control over `--backup` entirely — `git diff` is a better review tool and
+> `git checkout` a better restore.
 
 ---
 

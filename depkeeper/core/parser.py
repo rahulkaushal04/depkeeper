@@ -15,14 +15,12 @@ Typical usage::
 
     from depkeeper.core.parser import RequirementsParser
 
-    # Parse from file
     parser = RequirementsParser()
     requirements = parser.parse_file("requirements.txt")
 
     for req in requirements:
         print(f"{req.name} {req.specs}")
 
-    # Parse from string
     content = \"\"\"
     requests>=2.25.0
     -r base.txt
@@ -30,12 +28,10 @@ Typical usage::
     \"\"\"
     reqs = parser.parse_string(content, source_file_path="inline")
 
-    # Access constraint requirements loaded via -c
     constraints = parser.get_constraints()
     if "django" in constraints:
         print(f"Django constrained to {constraints['django'].specs}")
 
-    # Reset parser state before reusing
     parser.reset()
 """
 
@@ -64,10 +60,7 @@ from depkeeper.constants import (
     BOM_CHARACTER,
 )
 
-# ---------------------------------------------------------------------------
-# Recognized VCS and network URL schemes
-# ---------------------------------------------------------------------------
-
+#: Recognized VCS and network URL schemes.
 URL_SCHEMES = (
     "git+https://",
     "git+http://",
@@ -87,15 +80,46 @@ URL_SCHEMES = (
     "file://",
 )
 
-# ---------------------------------------------------------------------------
-# --hash directive matching
-# ---------------------------------------------------------------------------
-# pip accepts both ``--hash=sha256:...`` and ``--hash sha256:...`` (space
-# form).  A single pattern is used for BOTH extracting the digest (capture
-# group) and removing the entire directive from the spec, so the two steps
-# can never disagree.  ``[=\s]+`` tolerates the ``=`` separator, one or more
-# spaces, or line-continuation whitespace between the flag and the digest.
+# Accepts ``--hash=sha256:...`` and ``--hash sha256:...``. The same pattern both
+# extracts the digest and strips the directive, so the two steps cannot disagree.
 _HASH_DIRECTIVE_PATTERN = re.compile(r"--hash[=\s]+(\S+)")
+
+# ``-r file``, ``-rfile``, ``-r=file``, ``--requirement file`` and
+# ``--requirement=file`` (likewise for -c / --constraint), as pip accepts.
+_INCLUDE_PATTERN = re.compile(r"(?:--requirement(?:\s*=\s*|\s+|$)|-r\s*=?\s*)(.*)$")
+_CONSTRAINT_PATTERN = re.compile(r"(?:--constraint(?:\s*=\s*|\s+|$)|-c\s*=?\s*)(.*)$")
+
+# Credentials embedded in URLs (``://user:pass@host``) must not reach errors.
+_URL_CREDENTIALS_PATTERN = re.compile(r"(://)[^/@\s]+@")
+
+# A ``#egg=`` value is a project name, never a path.
+_EGG_NAME_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?")
+
+
+def _redact(text: str) -> str:
+    """Mask ``user:pass@`` credentials in URLs found in *text*."""
+    return _URL_CREDENTIALS_PATTERN.sub(r"\1***@", text)
+
+
+def _join_continuations(content: str) -> List[Tuple[int, str]]:
+    """Return ``(first_line_number, text)`` with ``\\`` continuations joined."""
+    joined: List[Tuple[int, str]] = []
+    pending: List[str] = []
+    start = 0
+    for number, line in enumerate(content.splitlines(), start=1):
+        if not pending:
+            start = number
+        trailing = len(line) - len(line.rstrip("\\"))
+        # pip never continues a comment line (COMMENT_RE).
+        if trailing % 2 == 1 and not (not pending and line.lstrip().startswith("#")):
+            pending.append(line[:-1].strip())
+            continue
+        pending.append(line.strip() if pending else line)
+        joined.append((start, " ".join(pending)))
+        pending = []
+    if pending:
+        joined.append((start, " ".join(pending)))
+    return joined
 
 
 class RequirementsParser:
@@ -117,16 +141,9 @@ class RequirementsParser:
     def __init__(self) -> None:
         """Initialize the parser with empty state."""
         self.logger = get_logger("parser")
-
-        # Stack of files currently being parsed (guards against cycles)
+        # Files currently being parsed; guards against include cycles.
         self._included_files_stack: List[Path] = []
-
-        # Constraint requirements loaded via -c directives
         self._constraint_requirements: Dict[str, Requirement] = {}
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     def parse_file(
         self,
@@ -174,7 +191,6 @@ class RequirementsParser:
             " (constraint file)" if is_constraint_file else "",
         )
 
-        # Detect circular includes before reading
         if resolved_path in self._included_files_stack:
             cycle_path = " -> ".join(
                 str(p) for p in self._included_files_stack + [resolved_path]
@@ -243,22 +259,20 @@ class RequirementsParser:
             >>> [r.name for r in reqs]
             ['flask', 'requests']
         """
-        # A byte order mark is a stream-level signature, not part of line 1.
-        # It survives non-BOM-aware decoding and is not removed by strip().
+        # A BOM survives non-BOM-aware decoding and is not removed by strip().
         if requirements_content.startswith(BOM_CHARACTER):
-            requirements_content = requirements_content[len(BOM_CHARACTER):]
+            requirements_content = requirements_content[len(BOM_CHARACTER) :]
 
         parsed_requirements: List[Requirement] = []
-        total_lines = len(requirements_content.splitlines())
+        logical_lines = _join_continuations(requirements_content)
+        total_lines = len(logical_lines)
         self.logger.debug(
             "Parsing %d line(s)%s",
             total_lines,
             f" from {source_file_path}" if source_file_path else "",
         )
 
-        for line_number, line_text in enumerate(
-            requirements_content.splitlines(), start=1
-        ):
+        for line_number, line_text in logical_lines:
             parse_result = self.parse_line(
                 line_text,
                 line_number,
@@ -267,11 +281,9 @@ class RequirementsParser:
             )
 
             if parse_result is None:
-                # Comment or blank line
                 continue
 
             if isinstance(parse_result, list):
-                # Nested requirements from -r directive
                 self.logger.debug(
                     "Included %d requirement(s) from directive on line %d",
                     len(parse_result),
@@ -279,15 +291,19 @@ class RequirementsParser:
                 )
                 parsed_requirements.extend(parse_result)
             elif isinstance(parse_result, Requirement):
-                # Record provenance so the update writer can rewrite the
-                # correct file. Requirements flattened in from -r includes
-                # (the list branch above) already carry the included file's
-                # path set by the recursive parse_string call.
+                # Included requirements (list branch) already carry their own
+                # source_file from the recursive call.
                 parse_result.source_file = source_file_path
 
                 if is_constraint_file:
-                    # Store in constraint map instead of returning
-                    self._constraint_requirements[parse_result.name] = parse_result
+                    existing = self._constraint_requirements.get(parse_result.name)
+                    if existing is None:
+                        self._constraint_requirements[parse_result.name] = parse_result
+                    else:
+                        # pip intersects repeated constraints for one name.
+                        existing.specs.extend(
+                            s for s in parse_result.specs if s not in existing.specs
+                        )
                     self.logger.debug(
                         "Stored constraint: %s %s",
                         parse_result.name,
@@ -295,6 +311,10 @@ class RequirementsParser:
                     )
                 else:
                     parsed_requirements.append(parse_result)
+
+        # Constraints apply globally, wherever the ``-c`` line appears.
+        for requirement in parsed_requirements:
+            self._apply_constraint_to_requirement(requirement)
 
         self.logger.debug(
             "Completed parsing: %d requirement(s)", len(parsed_requirements)
@@ -341,10 +361,8 @@ class RequirementsParser:
         if not stripped_line or stripped_line.startswith("#"):
             return None
 
-        # Extract inline comment (everything after a non-URL '#')
         requirement_spec, inline_comment = self._extract_inline_comment(stripped_line)
 
-        # ── Handle -r / --requirement (include another file) ──────────
         if requirement_spec.startswith((INCLUDE_DIRECTIVE, INCLUDE_DIRECTIVE_LONG)):
             return self._handle_include_directive(
                 requirement_spec,
@@ -353,7 +371,6 @@ class RequirementsParser:
                 _current_directory_path,
             )
 
-        # ── Handle -c / --constraint (load constraints) ───────────────
         if requirement_spec.startswith(
             (CONSTRAINT_DIRECTIVE, CONSTRAINT_DIRECTIVE_LONG)
         ):
@@ -363,10 +380,9 @@ class RequirementsParser:
                 source_file_path,
                 _current_directory_path,
             )
-            return None  # constraints are stored, not returned
+            return None
 
-        # Recognized pip global options configure installer behavior and are
-        # not package requirements, so they should be ignored by the parser.
+        # Recognized pip global options are installer settings, not requirements.
         if self._is_supported_global_option_line(requirement_spec):
             self.logger.debug(
                 "Line %d: Skipping supported pip global option: %s",
@@ -375,31 +391,21 @@ class RequirementsParser:
             )
             return None
 
-        # Strip quotes that may wrap the entire spec
         requirement_spec = self._remove_surrounding_quotes(requirement_spec)
 
-        # ── Check for -e / --editable flag ────────────────────────────
         is_editable = requirement_spec.startswith(
             (EDITABLE_DIRECTIVE, EDITABLE_DIRECTIVE_LONG)
         )
         if is_editable:
-            # Extract everything after "-e " or "--editable "
             requirement_spec = (
                 requirement_spec.split(None, 1)[1] if " " in requirement_spec else ""
             )
 
-        # ── Extract --hash directives ──────────────────────────────────
         hash_values: List[str] = _HASH_DIRECTIVE_PATTERN.findall(requirement_spec)
         if hash_values:
-            # Remove the entire ``--hash <digest>`` / ``--hash=<digest>``
-            # directive (flag AND digest) using the same pattern that
-            # extracted it.  Token-based filtering only dropped the ``--hash``
-            # flag and left the space-separated digest behind, which then
-            # failed PEP 508 parsing.
             requirement_spec = _HASH_DIRECTIVE_PATTERN.sub(" ", requirement_spec)
             requirement_spec = " ".join(requirement_spec.split())
 
-        # ── Dispatch to appropriate builder ────────────────────────────
         url_components = self._parse_direct_url(requirement_spec)
         if url_components:
             parsed_requirement = self._build_url_based_requirement(
@@ -424,7 +430,6 @@ class RequirementsParser:
             )
 
         else:
-            # Standard PEP 508 package specifier
             parsed_requirement = self._build_standard_pep508_requirement(
                 requirement_spec=requirement_spec,
                 is_editable=is_editable,
@@ -435,7 +440,6 @@ class RequirementsParser:
                 source_file_path=source_file_path,
             )
 
-        # Apply any constraint loaded via -c directive
         return self._apply_constraint_to_requirement(parsed_requirement)
 
     def get_constraints(self) -> Dict[str, Requirement]:
@@ -455,10 +459,6 @@ class RequirementsParser:
         """
         self._included_files_stack = []
         self._constraint_requirements = {}
-
-    # ------------------------------------------------------------------
-    # Directive handlers (private)
-    # ------------------------------------------------------------------
 
     def _handle_include_directive(
         self,
@@ -487,14 +487,13 @@ class RequirementsParser:
             ParseError: The included file cannot be read or contains a
                 circular reference.
         """
-        line_parts = directive_line.split(maxsplit=1)
-        if len(line_parts) < 2:
+        match = _INCLUDE_PATTERN.match(directive_line)
+        included_file_path = match.group(1).strip() if match else ""
+        if not included_file_path:
             self.logger.warning(
                 "Line %d: Include directive missing file path", line_number
             )
             return None
-
-        included_file_path = line_parts[1].strip()
 
         if not current_directory:
             self.logger.warning(
@@ -538,14 +537,13 @@ class RequirementsParser:
         Raises:
             ParseError: The constraint file cannot be read or is malformed.
         """
-        line_parts = directive_line.split(maxsplit=1)
-        if len(line_parts) < 2:
+        match = _CONSTRAINT_PATTERN.match(directive_line)
+        constraint_file_path = match.group(1).strip() if match else ""
+        if not constraint_file_path:
             self.logger.warning(
                 "Line %d: Constraint directive missing file path", line_number
             )
             return
-
-        constraint_file_path = line_parts[1].strip()
 
         if not current_directory:
             self.logger.warning(
@@ -567,10 +565,6 @@ class RequirementsParser:
                 line_content=directive_line,
                 file_path=source_file_path,
             ) from exc
-
-    # ------------------------------------------------------------------
-    # Requirement builders (private)
-    # ------------------------------------------------------------------
 
     def _build_standard_pep508_requirement(
         self,
@@ -606,14 +600,13 @@ class RequirementsParser:
             parsed_pkg = PkgRequirement(requirement_spec)
         except InvalidRequirement as exc:
             raise ParseError(
-                f"Invalid requirement syntax: {exc}",
+                f"Invalid requirement syntax: {_redact(str(exc))}",
                 line_number=line_number,
-                line_content=requirement_spec,
+                line_content=_redact(requirement_spec),
                 file_path=source_file_path,
             ) from exc
 
-        # ``packaging`` already validates version strings; this guards only
-        # against a specifier that parsed with an empty version.
+        # Guards only against a specifier that parsed with an empty version.
         for spec in parsed_pkg.specifier:
             if not spec.version:
                 raise ParseError(
@@ -626,9 +619,10 @@ class RequirementsParser:
         return Requirement(
             name=_normalize_package_name(parsed_pkg.name),
             specs=_ordered_specs(parsed_pkg.specifier, requirement_spec),
-            extras=list(parsed_pkg.extras),
+            extras=sorted(parsed_pkg.extras),
             markers=str(parsed_pkg.marker) if parsed_pkg.marker else None,
             url=getattr(parsed_pkg, "url", None),
+            direct_reference=bool(getattr(parsed_pkg, "url", None)),
             editable=is_editable,
             hashes=hash_values,
             comment=inline_comment,
@@ -671,8 +665,7 @@ class RequirementsParser:
         package_name = url_components.get("egg")
 
         if not package_name:
-            # Inference is a best-effort fallback; the warning tells the user
-            # to add an explicit #egg= fragment if the guess is wrong.
+            # Best-effort fallback; the warning tells users to add #egg= if wrong.
             package_name = self._infer_package_name_from_url(url_string)
 
             if package_name:
@@ -685,8 +678,10 @@ class RequirementsParser:
                 raise ParseError(
                     "URL requirements must include '#egg=<name>' or an inferable package name.",
                     line_number=line_number,
-                    line_content=url_string,
+                    line_content=_redact(url_string),
                 )
+
+        self._validate_egg_name(package_name, line_number, url_string)
 
         return Requirement(
             name=_normalize_package_name(package_name),
@@ -700,6 +695,16 @@ class RequirementsParser:
             line_number=line_number,
             raw_line=original_line,
         )
+
+    @staticmethod
+    def _validate_egg_name(name: str, line_number: int, line_content: str) -> None:
+        """Reject ``#egg=`` values that are not plain project names."""
+        if not _EGG_NAME_PATTERN.fullmatch(name):
+            raise ParseError(
+                f"Invalid '#egg=' name {name!r}: must be a project name, not a path.",
+                line_number=line_number,
+                line_content=_redact(line_content),
+            )
 
     def _build_local_path_requirement(
         self,
@@ -747,6 +752,8 @@ class RequirementsParser:
         package_name = path_components.get("egg") or self._infer_package_name_from_path(
             resolved_path
         )
+        if path_components.get("egg"):
+            self._validate_egg_name(package_name, line_number, path_value)
 
         return Requirement(
             name=_normalize_package_name(package_name),
@@ -760,10 +767,6 @@ class RequirementsParser:
             line_number=line_number,
             raw_line=original_line,
         )
-
-    # ------------------------------------------------------------------
-    # Parsing helpers (private)
-    # ------------------------------------------------------------------
 
     def _resolve_file_path(
         self, file_path: Path, parent_directory: Optional[Path]
@@ -783,8 +786,7 @@ class RequirementsParser:
             Absolute `Path`.
         """
         if parent_directory and not file_path.is_absolute():
-            # parent_directory is the including *file*, so relative includes
-            # resolve against its directory, matching pip's behavior.
+            # parent_directory is the including file; pip resolves against its folder.
             return (parent_directory.parent / file_path).resolve()
         return file_path.resolve()
 
@@ -810,10 +812,8 @@ class RequirementsParser:
 
                 if "#egg=" in requirement_line:
                     url_part, egg_part = requirement_line.split("#egg=", 1)
-                    # An egg fragment may be followed by other fragment keys
-                    # (&subdirectory=...) or by trailing options. An empty
-                    # fragment carries no name — treated like "#egg=" being
-                    # absent, so the caller's inference fallback applies.
+                    # May be followed by other fragment keys (&subdirectory=...);
+                    # an empty fragment means no name, so inference applies.
                     egg_tokens = egg_part.split("&")[0].split()
                     egg_name = egg_tokens[0] if egg_tokens else None
                     return {
@@ -860,8 +860,7 @@ class RequirementsParser:
         elif requirement_line.startswith("/"):
             is_local_path = True
 
-        # Windows drive letter (``C:\``). Checked positionally rather than
-        # with a regex so a spec such as ``pkg==1.0`` can never match.
+        # Windows drive letter (``C:\``); positional check so ``pkg==1.0`` never matches.
         elif (
             len(requirement_line) >= 3
             and requirement_line[1] == ":"
@@ -874,9 +873,7 @@ class RequirementsParser:
 
         if "#egg=" in requirement_line:
             path_part, egg_part = requirement_line.split("#egg=", 1)
-            # See the matching comment in `_parse_direct_url`: an empty
-            # fragment yields no name rather than crashing, falling back to
-            # the caller's own path-based inference.
+            # An empty fragment yields no name, so path-based inference applies.
             egg_tokens = egg_part.split("&")[0].split()
             egg_name = egg_tokens[0] if egg_tokens else None
             return {"path": path_part, "egg": egg_name}
@@ -918,8 +915,7 @@ class RequirementsParser:
             Inferred package name, or ``None`` if the URL has no meaningful
             path segments.
         """
-        # A URL fragment or query string is never part of the package name —
-        # strip it before inspecting path segments.
+        # Fragment and query are never part of the package name.
         url_path = url.split("#", 1)[0].split("?", 1)[0]
         url_path = url_path.split("://", 1)[1] if "://" in url_path else url_path
         url_path = url_path.rstrip("/")
@@ -1017,13 +1013,10 @@ class RequirementsParser:
     def _apply_constraint_to_requirement(self, requirement: Requirement) -> Requirement:
         """Apply stored constraints to a requirement if a match exists.
 
-        When a requirement has no version specs (``specs == []``) and a
-        constraint for the same package name exists in
-        `_constraint_requirements`, the constraint's specs are copied
-        to the requirement.
+        The constraint's specs are recorded in ``requirement.constraint_specs``
+        (never ``specs``, which is rendered back into the file).
 
-        **Side-effect:** Mutates *requirement.specs* in place when a
-        constraint is applied.
+        **Side-effect:** Mutates *requirement.constraint_specs* in place.
 
         Args:
             requirement: Requirement to potentially constrain.
@@ -1033,15 +1026,9 @@ class RequirementsParser:
         """
         if requirement.name in self._constraint_requirements:
             constraint = self._constraint_requirements[requirement.name]
-            if constraint.specs and not requirement.specs:
-                requirement.specs = constraint.specs
+            requirement.constraint_specs = list(constraint.specs)
 
         return requirement
-
-
-# ---------------------------------------------------------------------------
-# Module-level helpers
-# ---------------------------------------------------------------------------
 
 
 def _normalize_package_name(package_name: str) -> str:

@@ -114,11 +114,9 @@ class TestPinnedApplicationUpgrade:
 
         - ``urllib3`` is on 1.26.18 while 2.2.2 exists. Crossing a major
           boundary is never done implicitly, because 2.x removed APIs.
-        - ``certifi`` uses calendar versioning, so 2023.7.22 -> 2024.7.4 is a
-          *major* change by PEP 440 arithmetic and is held back by the same
-          rule. This is a real and frequently surprising consequence of the
-          major-boundary policy, so it is pinned here rather than left to be
-          rediscovered.
+        - ``certifi`` uses calendar versioning (auto-detected from the
+          4-digit year), so its leading component is not a breaking boundary
+          and 2023.7.22 -> 2024.7.4 is applied.
         """
         await run_update(project, store)
 
@@ -126,7 +124,7 @@ class TestPinnedApplicationUpgrade:
             "# Runtime dependencies for the payments service.\n"
             "# Regenerate with: pip-compile requirements.in\n"
             "\n"
-            "certifi==2023.7.22\n"
+            "certifi==2024.7.4\n"
             "charset-normalizer==3.3.2\n"
             "idna==3.7\n"
             "requests==2.32.3\n"
@@ -138,14 +136,14 @@ class TestPinnedApplicationUpgrade:
     ) -> None:
         """``charset-normalizer`` is deliberately absent from the fake index,
         standing in for a private or yanked distribution. It must degrade to an
-        unavailable stub — no known latest, recommendation held at the declared
-        version — while every other pin still advances.
+        unavailable stub — no known latest and no recommendation (so ``update``
+        reports it as a failed lookup rather than "up to date") — while every other pin still advances.
         """
         packages, updates = await run_update(project, store)
 
         stub = next(p for p in packages if p.name == "charset-normalizer")
         assert stub.latest_version is None
-        assert stub.recommended_version == "3.3.2"
+        assert stub.recommended_version is None
         assert stub.has_update() is False
         assert "charset-normalizer" not in applied_versions(updates)
         assert applied_versions(updates)["requests"] == "2.32.3"
@@ -173,7 +171,7 @@ class TestPinnedApplicationUpgrade:
 
 
 class TestLibraryRangePreservation:
-    """Regression M5, end to end: a library's compatibility contract survives."""
+    """End to end: a library's compatibility contract survives."""
 
     @pytest.fixture
     def project(self, tmp_path: Path) -> Path:
@@ -248,7 +246,7 @@ class TestLibraryRangePreservation:
 
 
 class TestLayeredProjectRouting:
-    """Regression C1, end to end: each update lands in the file that declared it."""
+    """End to end: each update lands in the file that declared it."""
 
     @pytest.fixture
     def project(self, tmp_path: Path) -> Dict[str, Path]:
@@ -308,9 +306,7 @@ class TestLayeredProjectRouting:
         self, project: Dict[str, Path], store: FakePyPIStore
     ) -> None:
         """Backups and writes are scoped to the files that actually change."""
-        requirements = RequirementsParser().parse_file(
-            project["requirements/prod.txt"]
-        )
+        requirements = RequirementsParser().parse_file(project["requirements/prod.txt"])
         packages = await VersionChecker(data_store=store).check_packages(requirements)
         updates = _find_updates(packages, requirements)
 
@@ -324,7 +320,7 @@ class TestLayeredProjectRouting:
     async def test_the_editable_checkout_is_never_selected_for_update(
         self, project: Dict[str, Path], store: FakePyPIStore
     ) -> None:
-        """Regression C2: dev.txt carries ``-e ../packages/internal-sdk``.
+        """dev.txt carries ``-e ../packages/internal-sdk``.
 
         A direct reference has no PyPI version, so appending one would emit an
         uninstallable line. It must be skipped, and dev.txt left untouched.
@@ -345,9 +341,8 @@ class TestLayeredProjectRouting:
 class TestConflictDrivenResolution:
     """The version reported to the user must be the version written to disk.
 
-    Regression M10: the resolver's decision was overwritten by an independent
-    "compatible alternative" search, so ``check`` advertised one version and
-    ``update`` wrote another.
+    The resolver's decision must not be overridden by an independent
+    "compatible alternative" search, or ``check`` and ``update`` would disagree.
     """
 
     @pytest.fixture
@@ -383,7 +378,7 @@ class TestConflictDrivenResolution:
     async def test_the_written_version_matches_the_reported_resolution(
         self, tmp_path: Path, store: FakePyPIStore
     ) -> None:
-        """The M10 invariant, asserted across the whole pipeline."""
+        """The invariant, asserted across the whole pipeline."""
         path = tmp_path / "requirements.txt"
         path.write_text("flask==2.0.0\nwerkzeug==2.0.3\n", encoding="utf-8")
 
@@ -433,9 +428,7 @@ class TestDuplicateDeclarationIsolation:
 
     async def _project(self, tmp_path: Path, include_order: str) -> Path:
         (tmp_path / "base.txt").write_text("click==8.0.4\n", encoding="utf-8")
-        (tmp_path / "dev.txt").write_text(
-            "click>=8.0.4,<8.1.5\n", encoding="utf-8"
-        )
+        (tmp_path / "dev.txt").write_text("click>=8.0.4,<8.1.5\n", encoding="utf-8")
         path = tmp_path / "requirements.txt"
         path.write_text(include_order, encoding="utf-8")
         return path
@@ -477,7 +470,7 @@ class TestDuplicateDeclarationIsolation:
 
 
 class TestHashPinnedLockfile:
-    """Regression C3: a lockfile's integrity guarantees are not dropped silently."""
+    """A lockfile's integrity guarantees are not dropped silently."""
 
     @pytest.fixture
     def project(self, tmp_path: Path) -> Path:
@@ -508,9 +501,9 @@ class TestHashPinnedLockfile:
         """Hashes are version-specific, so keeping them would be worse than
         removing them: pip would reject the install outright.
 
-        Only the line that changes loses its digests. ``certifi`` is held back
-        by the major-boundary rule (calendar versioning) and ``urllib3`` by its
-        own 1.x pin, so both keep their hashes. The resulting file is therefore
+        Only the lines that change lose their digests. ``certifi`` moves (calendar
+        versioning has no major boundary) while ``urllib3`` is held by its own
+        1.x pin and keeps its hashes. The resulting file is therefore
         *partially* hashed, which ``pip install --require-hashes`` rejects — the
         user is expected to regenerate the lockfile, which is why the opt-in
         exists rather than this being the default.
@@ -522,8 +515,7 @@ class TestHashPinnedLockfile:
             "# This file is autogenerated by pip-compile with Python 3.11\n"
             "# To update, run: pip-compile --generate-hashes requirements.in\n"
             "#\n"
-            "certifi==2023.7.22 --hash=sha256:539cc1d13202e33ca466e88b2807e29f"
-            "4c13049d6d87031a3c110744495cb082\n"
+            "certifi==2024.7.4\n"
             "requests==2.32.3\n"
             "urllib3==1.26.18 --hash=sha256:34b97092d7e0a3a8cf7cd10e386f401b37"
             "37364026c45e622aa02903dffe0f07\n"
@@ -574,7 +566,7 @@ class TestFileIntegrity:
     async def test_a_utf8_bom_survives_a_rewrite(
         self, tmp_path: Path, store: FakePyPIStore
     ) -> None:
-        """Regression M3: Windows editors write a BOM, and losing it makes the
+        """Windows editors write a BOM, and losing it makes the
         file unreadable to tools that assume the signature is present.
         """
         import codecs
@@ -586,7 +578,7 @@ class TestFileIntegrity:
 
         raw = path.read_bytes()
         assert raw.startswith(codecs.BOM_UTF8)
-        assert not raw[len(codecs.BOM_UTF8):].startswith(codecs.BOM_UTF8)
+        assert not raw[len(codecs.BOM_UTF8) :].startswith(codecs.BOM_UTF8)
         assert path.read_text(encoding="utf-8-sig") == (
             "requests==2.32.3\nurllib3==1.26.18\n"
         )
@@ -594,7 +586,7 @@ class TestFileIntegrity:
     async def test_a_failed_write_leaves_the_original_file_intact(
         self, tmp_path: Path, store: FakePyPIStore, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Regression M7: the writer is atomic. A disk-full or permission error
+        """The writer is atomic. A disk-full or permission error
         mid-write must not leave a truncated requirements file behind — that
         turns a routine update into an outage.
         """

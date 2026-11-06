@@ -55,12 +55,13 @@ Dry run mode - no changes applied
 would have written the file. `Current: not specified` marks a requirement that had no version
 specifier and will receive a pin.
 
-!!! warning "`Python Requires` can be stale after conflict resolution"
-
-    The column shows the `requires_python` recorded for the recommendation that the **checker**
-    produced. If the resolver subsequently moved the package to a different version, this column
-    is not refreshed. Verify with `pip install` rather than relying on it. Tracked in
-    [Known limitations](../reference/limitations.md#python-requires-can-be-stale-after-resolution).
+> [!WARNING]
+> **`Python Requires` can be stale after conflict resolution**
+>
+> The column shows the `requires_python` recorded for the recommendation that the **checker**
+> produced. If the resolver subsequently moved the package to a different version, this column
+> is not refreshed. Verify with `pip install` rather than relying on it. Tracked in
+> [Known limitations](../reference/limitations.md#python-requires-can-be-stale-after-resolution).
 
 ---
 
@@ -102,7 +103,7 @@ still the mutually consistent ones. It does not re-resolve for the subset.
 
 Only the floor of a requirement moves. Everything else you declared is preserved:
 
-```text title="before"
+```text
 requests==2.28.0
 flask>=2.0,<2.3
 celery[redis]>=5.0,<6.0
@@ -111,7 +112,7 @@ certifi
 urllib3==1.26.0
 ```
 
-```text title="after: depkeeper update -y"
+```text
 requests==2.34.2
 flask>=2.2.5,<2.3
 celery[redis]>=5.6.3,<6.0
@@ -147,7 +148,7 @@ depkeeper update --pin
 
 Replaces the entire specifier set with an exact pin:
 
-```text title="after: depkeeper update --pin -y"
+```text
 requests==2.34.2
 flask==2.2.5
 celery[redis]==5.6.3
@@ -188,18 +189,19 @@ depkeeper update --allow-hash-removal
 [WARNING] Proceeding with --allow-hash-removal: hashes will be removed for requests
 ```
 
-!!! danger "The result is a partially hashed file"
-
-    Only the lines that changed lose their digests. `pip install --require-hashes` rejects a file
-    in which *some* requirements have hashes and others do not, so the resulting file will not
-    install in hash-checking mode.
-
-    The supported workflow for hash-pinned files is:
-
-    ```bash
-    depkeeper update --allow-hash-removal -y
-    pip-compile --generate-hashes requirements.in   # or: hashin <pkg>
-    ```
+> [!CAUTION]
+> **The result is a partially hashed file**
+>
+> Only the lines that changed lose their digests. `pip install --require-hashes` rejects a file
+> in which *some* requirements have hashes and others do not, so the resulting file will not
+> install in hash-checking mode.
+>
+> The supported workflow for hash-pinned files is:
+>
+> ```bash
+> depkeeper update --allow-hash-removal -y
+> pip-compile --generate-hashes requirements.in   # or: hashin <pkg>
+> ```
 
 Also note that `pip-compile --generate-hashes` output uses backslash line continuations by
 default, which depkeeper's parser does not join. See
@@ -232,12 +234,12 @@ requirement:
 depkeeper update main.txt -y
 ```
 
-```text title="main.txt — directive untouched"
+```text
 -r sub/base.txt
 click~=8.4
 ```
 
-```text title="sub/base.txt — rewritten"
+```text
 requests==2.34.2
 ```
 

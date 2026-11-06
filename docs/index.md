@@ -12,9 +12,7 @@ without discarding the constraints you authored.
 It is a single-purpose CLI. It does not manage virtual environments, does not install packages,
 does not replace `pip`, and does not introduce a lock file format.
 
-[Install](getting-started/installation.md){ .md-button .md-button--primary }
-[Quick Start](getting-started/quickstart.md){ .md-button }
-[Architecture](concepts/architecture.md){ .md-button }
+[Install](getting-started/installation.md) · [Quick Start](getting-started/quickstart.md) · [Architecture](concepts/architecture.md)
 
 ---
 
@@ -56,7 +54,7 @@ major upgrade you eventually need. See [Known limitations](reference/limitations
 
 Given this `requirements.txt`:
 
-```text title="requirements.txt"
+```text
 requests==2.28.0
 flask>=2.0,<2.3
 celery[redis]>=5.0,<6.0
@@ -67,7 +65,7 @@ urllib3==1.26.0
 
 `depkeeper update -y` produces:
 
-```text title="requirements.txt (after)" hl_lines="2 3 4"
+```text hl_lines="2 3 4"
 requests==2.34.2
 flask>=2.2.5,<2.3
 celery[redis]>=5.6.3,<6.0
@@ -87,45 +85,12 @@ Note what did **not** happen:
 
 ## Where to go next
 
-<div class="grid cards" markdown>
-
-- :material-download:{ .lg .middle } **[Install](getting-started/installation.md)**
-
-    ---
-
-    Requirements, install methods, and verification.
-
-- :material-play-circle:{ .lg .middle } **[Quick Start](getting-started/quickstart.md)**
-
-    ---
-
-    The five commands that cover most day-to-day use.
-
-- :material-sitemap:{ .lg .middle } **[Architecture](concepts/architecture.md)**
-
-    ---
-
-    Module responsibilities, data flow, and design decisions.
-
-- :material-console:{ .lg .middle } **[CLI reference](reference/cli-commands.md)**
-
-    ---
-
-    Every flag, its default, and its precedence.
-
-- :material-vector-triangle:{ .lg .middle } **[Conflict resolution](concepts/conflict-resolution.md)**
-
-    ---
-
-    The resolution loop, its guarantees, and its failure modes.
-
-- :material-wrench:{ .lg .middle } **[Troubleshooting](guides/troubleshooting.md)**
-
-    ---
-
-    Symptom-indexed diagnosis for the errors you will actually hit.
-
-</div>
+- **[Install](getting-started/installation.md)** — Requirements, install methods, and verification.
+- **[Quick Start](getting-started/quickstart.md)** — The five commands that cover most day-to-day use.
+- **[Architecture](concepts/architecture.md)** — Module responsibilities, data flow, and design decisions.
+- **[CLI reference](reference/cli-commands.md)** — Every flag, its default, and its precedence.
+- **[Conflict resolution](concepts/conflict-resolution.md)** — The resolution loop, its guarantees, and its failure modes.
+- **[Troubleshooting](guides/troubleshooting.md)** — Symptom-indexed diagnosis for the errors you will actually hit.
 
 ---
 

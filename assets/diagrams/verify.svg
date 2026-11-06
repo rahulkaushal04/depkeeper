@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 280" role="img">
+<title>--verify dry-runs pip over the proposed set and ends in one of three outcomes: ok, conflict exits 1, or skipped warns and continues</title>
+<desc>Proposed requirement strings plus constraints go to verify_plan, which runs pip install --dry-run --ignore-installed --only-binary=:all: --report. A resolved plan continues; a resolver conflict or missing wheel sets ok=False and exits 1; an old pip, no network or a timeout sets skipped=True, warns and continues.</desc>
+<defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2563EB"/></marker>
+<marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#16A34A"/></marker>
+<marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#DC2626"/></marker>
+<marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+</defs>
+<rect x="0.5" y="0.5" width="899" height="279" rx="12" fill="#FFFFFF" stroke="#CBD5E1"/>
+<g font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#0F172A" text-anchor="middle">
+<rect x="16" y="112" width="100" height="56" rx="8" fill="#F1F5F9" stroke="#CBD5E1"/><text x="66" y="136" font-weight="600">proposed</text><text x="66" y="154" font-size="11" fill="#475569">+ -c constraints</text>
+<rect x="188" y="112" width="90" height="56" rx="8" fill="#F1F5F9" stroke="#CBD5E1"/><text x="233" y="136" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="700">verify_plan</text><text x="233" y="154" font-size="11" fill="#475569">never raises</text>
+<rect x="350" y="104" width="160" height="72" rx="8" fill="#FFFBEB" stroke="#F59E0B" stroke-width="1.5"/><text x="430" y="127" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" font-weight="700">pip install --dry-run</text><text x="430" y="143" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" fill="#475569">--ignore-installed</text><text x="430" y="157" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" fill="#475569">--only-binary=:all:</text><text x="430" y="171" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" fill="#475569">--report</text>
+<g text-anchor="start"><circle cx="656" cy="60" r="5" fill="#16A34A"/><text x="670" y="64" font-weight="600">ok</text>
+<circle cx="656" cy="140" r="5" fill="#DC2626"/><text x="670" y="144" font-weight="600">ok=False → exit 1</text>
+<circle cx="656" cy="220" r="5" fill="#475569"/><text x="670" y="224" font-weight="600">skipped=True → warn, continue</text></g>
+<rect x="640" y="32" width="244" height="56" rx="8" fill="none" stroke="#16A34A" stroke-width="1.5"/>
+<rect x="640" y="112" width="244" height="56" rx="8" fill="none" stroke="#DC2626" stroke-width="1.5"/>
+<rect x="640" y="192" width="244" height="56" rx="8" fill="none" stroke="#475569" stroke-width="1.5"/>
+<g text-anchor="start" font-size="11" fill="#475569"><text x="656" y="78">continue to confirm and write</text><text x="656" y="158">resolver conflict, or no wheel</text><text x="656" y="238">pip &lt; 22.2, no network, timeout</text></g>
+<g fill="none" stroke-width="1.5"><g stroke="#2563EB"><path d="M118,140 H186" marker-end="url(#ah)"/><path d="M280,140 H348" marker-end="url(#ah)"/><path d="M510,140 H558 M558,60 V220"/></g>
+<path d="M558,60 H638" stroke="#16A34A" marker-end="url(#ag)"/><path d="M558,140 H638" stroke="#DC2626" marker-end="url(#ar)"/><path d="M558,220 H638" stroke="#475569" marker-end="url(#as)"/></g>
+<g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" fill="#475569"><text x="152" y="130">List[str]</text><text x="314" y="130">subprocess</text><text x="598" y="50">resolved</text><text x="598" y="130">conflict</text><text x="598" y="210">can't run</text></g>
+</g>
+</svg>

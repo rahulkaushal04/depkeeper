@@ -156,12 +156,15 @@ def _atomic_write(
             os.fsync(tmp.fileno())
 
         if target.exists():
+            if not os.access(target, os.W_OK):
+                raise PermissionError(f"{target} is read-only")
             # NamedTemporaryFile creates 0600; keep the original file's mode.
             shutil.copymode(target, temp_path)
 
         _replace_with_retry(temp_path, target)
         _fsync_directory(target.parent)
-    except Exception as exc:
+    except BaseException as exc:
+        # BaseException: Ctrl-C / SIGTERM must not leak the temporary file.
         if temp_path and temp_path.exists():
             try:
                 temp_path.unlink()
@@ -173,6 +176,8 @@ def _atomic_write(
                     cleanup_exc,
                 )
 
+        if not isinstance(exc, Exception):
+            raise
         raise FileOperationError(
             f"Atomic write failed: {exc}",
             file_path=str(target),
@@ -228,6 +233,7 @@ def safe_read_file(
     *,
     max_size: Optional[int] = MAX_FILE_SIZE,
     encoding: str = DEFAULT_READ_ENCODING,
+    newline: Optional[str] = None,
 ) -> str:
     """Safely read a text file with optional size limits.
 
@@ -242,6 +248,7 @@ def safe_read_file(
         max_size: Maximum allowed file size in bytes (None disables limit).
             Measured in bytes on disk, so a BOM counts toward the limit.
         encoding: Text encoding.
+        newline: Passed to ``open``; ``""`` keeps line terminators verbatim.
 
     Returns:
         File contents as a string, without a leading byte order mark.
@@ -261,7 +268,10 @@ def safe_read_file(
         )
 
     try:
-        return path.read_text(encoding=encoding)
+        if newline is None:
+            return path.read_text(encoding=encoding)
+        with path.open("r", encoding=encoding, newline=newline) as handle:
+            return handle.read()
     except Exception as exc:
         raise FileOperationError(
             f"Failed to read file: {exc}",

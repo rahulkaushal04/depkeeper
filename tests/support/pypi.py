@@ -221,7 +221,9 @@ ECOSYSTEM: Dict[str, Distribution] = {
         _dist(
             "sqlalchemy",
             Release("1.4.52", ">=2.7", ("greenlet!=0.4.17",)),
-            Release("2.0.30", ">=3.7", ("greenlet!=0.4.17", "typing-extensions>=4.6.0")),
+            Release(
+                "2.0.30", ">=3.7", ("greenlet!=0.4.17", "typing-extensions>=4.6.0")
+            ),
         ),
         _dist("greenlet", Release("3.0.3", ">=3.7")),
         _dist("typing-extensions", Release("4.12.2", ">=3.8")),
@@ -232,7 +234,9 @@ ECOSYSTEM: Dict[str, Distribution] = {
         ),
         # Deliberately dotted and mixed-case upstream names: these exercise the
         # PEP 503 normalisation path that keyed lookups depend on.
-        _dist("zope-interface", Release("5.4.0", ">=2.7"), Release("6.4.post2", ">=3.7")),
+        _dist(
+            "zope-interface", Release("5.4.0", ">=2.7"), Release("6.4.post2", ">=3.7")
+        ),
         _dist("ruamel-yaml", Release("0.17.40", ">=3.7"), Release("0.18.6", ">=3.7")),
     )
 }
@@ -267,7 +271,8 @@ def package_data(
         distribution = ECOSYSTEM[name]
         ordered = distribution.versions
         python_requirements: Dict[str, Optional[str]] = {
-            release.version: release.requires_python for release in distribution.releases
+            release.version: release.requires_python
+            for release in distribution.releases
         }
     else:
         ordered = sorted(versions, key=parse, reverse=True)
@@ -287,7 +292,9 @@ def package_data(
     )
 
 
-def pypi_json_payload(name: str, *, versions: Optional[Sequence[str]] = None) -> Dict[str, Any]:
+def pypi_json_payload(
+    name: str, *, versions: Optional[Sequence[str]] = None
+) -> Dict[str, Any]:
     """Render *name* as a raw PyPI ``/pypi/{name}/json`` response body.
 
     Use this for tests that exercise :class:`PyPIDataStore`'s own parsing;

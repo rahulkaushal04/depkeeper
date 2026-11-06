@@ -1,3 +1,5 @@
+# Runs lint checks and the test suite (Python 3.8-3.12 on Linux, macOS, Windows).
+# Triggers: pushes and pull requests targeting main or develop.
 name: Tests
 
 on:
@@ -9,10 +11,31 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: python -m pip install ruff
+      - name: Check formatting
+        run: ruff format --check depkeeper tests
+      - name: Check for syntax errors and undefined names
+        run: ruff check --select E9,F depkeeper tests
+
   test:
     name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
 
     strategy:
       fail-fast: false
@@ -71,6 +94,7 @@ jobs:
     name: Test Summary
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: always()
 
     steps:

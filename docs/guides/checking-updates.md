@@ -30,11 +30,12 @@ depkeeper check --outdated-only        # suppress up-to-date rows
 `--outdated-only` keeps packages that have an update **or** a recorded conflict. When everything
 is current it prints `[OK] All packages are up to date!`.
 
-!!! note "Exit code is not a signal"
-
-    `check` exits `0` whenever it completed successfully, regardless of what it found. To gate a
-    build on the result, parse the JSON payload. See
-    [Exit codes](../reference/exit-codes.md#gating-on-results).
+> [!NOTE]
+> **Exit code is not a signal**
+>
+> `check` exits `0` whenever it completed successfully, regardless of what it found. To gate a
+> build on the result, parse the JSON payload. See
+> [Exit codes](../reference/exit-codes.md#gating-on-results).
 
 ---
 

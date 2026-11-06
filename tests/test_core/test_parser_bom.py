@@ -1,10 +1,4 @@
-"""Tests for UTF-8 BOM handling in the requirements parser.
-
-Regression guard for audit finding M3: a leading byte order mark survived
-``utf-8`` decoding as ``\\ufeff`` (``str.strip()`` does not remove it), so the
-first line of any file written by Notepad or PowerShell ``Set-Content``
-failed to parse and aborted the whole command.
-"""
+"""A leading UTF-8 byte order mark does not break requirements parsing."""
 
 from __future__ import annotations
 
@@ -24,7 +18,7 @@ class TestParserBomHandling:
     """BOM-prefixed requirement files must parse identically to plain UTF-8."""
 
     def test_requirement_on_first_line(self, tmp_path: Path) -> None:
-        """M3 regression: a pinned requirement on line 1 parses."""
+        """A pinned requirement on line 1 parses."""
         req_file = tmp_path / "requirements.txt"
         _write_bom(req_file, "flask==2.0.0\nrequests>=2.25.0\n")
 

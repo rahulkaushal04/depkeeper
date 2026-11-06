@@ -13,61 +13,62 @@ description: Install depkeeper with pip or pipx, verify the install, and underst
 | OS | Linux, macOS, Windows | Path handling, atomic writes and byte-order-mark handling are tested on all three. |
 | Network | HTTPS to `pypi.org` | Required at runtime, not only at install time. |
 
-!!! warning "The interpreter matters"
-
-    depkeeper filters candidate versions using the `requires_python` metadata of each release,
-    compared against **the interpreter depkeeper itself is running on** — not the interpreter of
-    your project's virtual environment.
-
-    If you install depkeeper globally on Python 3.8 but your service targets Python 3.12,
-    depkeeper will refuse versions that dropped 3.8 support even though your project could use
-    them. Install it *into the environment whose requirements file you are managing*, or use a
-    `pipx` install whose Python matches. See
-    [Version recommendation](../concepts/version-recommendation.md#python-compatibility-filtering).
+> [!WARNING]
+> **The interpreter matters**
+>
+> depkeeper filters candidate versions using the `requires_python` metadata of each release,
+> compared against **the interpreter depkeeper itself is running on** — not the interpreter of
+> your project's virtual environment.
+>
+> If you install depkeeper globally on Python 3.8 but your service targets Python 3.12,
+> depkeeper will refuse versions that dropped 3.8 support even though your project could use
+> them. Install it *into the environment whose requirements file you are managing*, or use a
+> `pipx` install whose Python matches. See
+> [Version recommendation](../concepts/version-recommendation.md#python-compatibility-filtering).
 
 ---
 
 ## Install
 
-=== "pip (project environment — recommended)"
+**pip (project environment — recommended)**
 
-    ```bash
-    python -m pip install depkeeper
-    ```
+```bash
+python -m pip install depkeeper
+```
 
-    Installing into the project's own virtual environment guarantees the interpreter used for
-    compatibility filtering matches the project's target interpreter.
+Installing into the project's own virtual environment guarantees the interpreter used for
+compatibility filtering matches the project's target interpreter.
 
-=== "pipx (isolated global tool)"
+**pipx (isolated global tool)**
 
-    ```bash
-    pipx install depkeeper
+```bash
+pipx install depkeeper
 
-    # Pin the interpreter to match your projects
-    pipx install --python python3.12 depkeeper
-    ```
+# Pin the interpreter to match your projects
+pipx install --python python3.12 depkeeper
+```
 
-    Use `pipx` when you manage many projects that all target the same Python version.
+Use `pipx` when you manage many projects that all target the same Python version.
 
-=== "From source"
+**From source**
 
-    ```bash
-    git clone https://github.com/rahulkaushal04/depkeeper.git
-    cd depkeeper
-    python -m pip install -e .
-    ```
+```bash
+git clone https://github.com/rahulkaushal04/depkeeper.git
+cd depkeeper
+python -m pip install -e .
+```
 
-    For a full contributor setup (dev extras, pre-commit, test tooling), follow
-    [Development setup](../contributing/development-setup.md).
+For a full contributor setup (dev extras, pre-commit, test tooling), follow
+[Development setup](../contributing/development-setup.md).
 
-=== "CI (ephemeral)"
+**CI (ephemeral)**
 
-    ```bash
-    python -m pip install --no-cache-dir depkeeper==0.1.1
-    ```
+```bash
+python -m pip install --no-cache-dir depkeeper==0.1.1
+```
 
-    Pin the version in CI. depkeeper is still `0.x`, so an unpinned install can change
-    recommendation behaviour between pipeline runs.
+Pin the version in CI. depkeeper is still `0.x`, so an unpinned install can change
+recommendation behaviour between pipeline runs.
 
 ---
 

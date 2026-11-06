@@ -47,7 +47,7 @@ class Conflict:
 
     def __post_init__(self) -> None:
         """Normalize both endpoints so they match ``Package.name`` keys."""
-        # object.__setattr__ is required: the dataclass is frozen.
+        # The dataclass is frozen, so bypass __setattr__.
         object.__setattr__(self, "source_package", _normalize_name(self.source_package))
         object.__setattr__(self, "target_package", _normalize_name(self.target_package))
 

@@ -5,8 +5,12 @@ description: Accepted requirements-file syntax, encoding rules and rewrite seman
 
 # File Formats
 
-depkeeper reads and writes **pip requirements files** only. It does not read `Pipfile`,
-`poetry.lock`, `pyproject.toml` dependency tables, `setup.py`, `setup.cfg` or `environment.yml`.
+depkeeper reads and writes **pip requirements files** (`requirements*.txt`), **`pyproject.toml`**
+(`[project]` / optional / PEP 735 dependency groups and Poetry tables) and conda **`environment.yml`**
+(including its `pip:` list). It does not read `Pipfile`, `poetry.lock`, `setup.py` or `setup.cfg`.
+The rest of this page describes requirements-file syntax. In `pyproject.toml`, dependency strings
+containing backslash escapes are skipped with a warning naming `file:line`. In `environment.yml`,
+fuzzy specs such as `numpy=1.24` pin a series and update only to a newer series (`numpy=1.26`).
 
 Behavioural background: [Requirements parsing](../concepts/requirements-parsing.md).
 
@@ -126,16 +130,17 @@ requests==2.31.0 --hash sha256:abcdef...
 Both separators are accepted. Hashed requirements are refused by `update` unless
 `--allow-hash-removal` is passed.
 
-!!! warning "Line continuations are not supported"
-
-    ```text
-    requests==2.31.0 \
-        --hash=sha256:aaa... \
-        --hash=sha256:bbb...
-    ```
-
-    depkeeper does not join backslash continuations, so this — the default output of
-    `pip-compile --generate-hashes` — fails to parse. Use the single-line form.
+> [!WARNING]
+> **Line continuations are not supported**
+>
+> ```text
+> requests==2.31.0 \
+>     --hash=sha256:aaa... \
+>     --hash=sha256:bbb...
+> ```
+>
+> depkeeper does not join backslash continuations, so this — the default output of
+> `pip-compile --generate-hashes` — fails to parse. Use the single-line form.
 
 ### pip global options
 
@@ -182,7 +187,7 @@ CRLF, a mixed file keeps its mixture, and a file without a trailing newline does
 
 Given:
 
-```text title="requirements.txt"
+```text
 # Web stack
 requests==2.28.0
 flask>=2.0,<2.3          # capped: 2.3 needs a newer werkzeug
@@ -197,7 +202,7 @@ git+https://github.com/org/tool.git@v1.0#egg=tool
 
 `depkeeper update -y` produces:
 
-```text title="requirements.txt (after)"
+```text
 # Web stack
 requests==2.34.2
 flask>=2.2.5,<2.3          # capped: 2.3 needs a newer werkzeug
@@ -212,7 +217,7 @@ git+https://github.com/org/tool.git@v1.0#egg=tool
 
 `depkeeper update --pin -y` produces:
 
-```text title="requirements.txt (after, --pin)"
+```text
 # Web stack
 requests==2.34.2
 flask==2.2.5          # capped: 2.3 needs a newer werkzeug
@@ -228,10 +233,11 @@ git+https://github.com/org/tool.git@v1.0#egg=tool
 Preserved in both cases: comments (including inline ones), blank lines, ordering, extras, markers,
 directives, direct references, encoding and line endings.
 
-!!! note "Inline comments can become stale"
-
-    The comment above still says "capped: 2.3 needs a newer werkzeug" after the version moved.
-    depkeeper preserves comments verbatim; it does not interpret or update them.
+> [!NOTE]
+> **Inline comments can become stale**
+>
+> The comment above still says "capped: 2.3 needs a newer werkzeug" after the version moved.
+> depkeeper preserves comments verbatim; it does not interpret or update them.
 
 ### Edge cases
 
@@ -247,6 +253,33 @@ directives, direct references, encoding and line endings.
 
 ---
 
+## conda `environment.yml`
+
+`environment.yml` / `environment.yaml` files are read by a small built-in line reader (no YAML
+dependency) that supports block-style `dependencies:` lists and a nested `- pip:` list.
+
+> [!WARNING]
+> **Conda results are approximate**
+>
+> Packages under `pip:` are checked against PyPI exactly like `requirements.txt` entries.
+> Conda-channel packages are looked up on **PyPI by name only**. Conda and PyPI can disagree on
+> names, versions and release timing, so treat these recommendations as hints and verify them
+> with `conda search` before changing an environment. They are flagged `approximate`.
+
+| Entry | Handling |
+|---|---|
+| `numpy=1.24`, `numpy=1.24.*`, `numpy 1.24.*` | Checked; rewritten as `numpy=1.26` / `numpy=1.26.*` (precision and style kept) |
+| `numpy>=1.24,<2`, `numpy==1.24.1` | Checked; rewritten with the usual upper-bound preservation |
+| `conda-forge::numpy=1.24` | Channel prefix kept |
+| `numpy=1.24=py311_0` (build string), `a=1\|2`, `a=*` | Skipped, left untouched |
+| `python=3.11` | Never updated; used as the file's Python constraint |
+| `pip`, `mkl`, `libgcc-ng`, `openssl`, `cuda*`, `lib*`, `r-*` and similar | Skipped quietly (not PyPI packages) |
+
+Flow-style lists (`dependencies: [a, b]`) are rejected with a parse error. Edits are in place;
+comments, quoting, indentation and line endings are preserved.
+
+---
+
 ## Backup files
 
 `--backup` writes `<stem>.<timestamp>_<uuid8>.backup<suffix>` beside each affected file:
@@ -258,9 +291,10 @@ requirements.20260815_144129_853745_d54d785d.backup.txt
 The original suffix stays last so the file remains recognisable by extension. depkeeper never
 deletes backups. Add `*.backup.*` to `.gitignore` if you use the flag in a repository.
 
-!!! note "A second, different backup layout exists"
-
-    The programmatic helper `create_backup()` uses `<name><suffix>.<timestamp>_<uuid8>.backup`,
-    and `restore_backup()`'s target inference only understands **that** layout. The CLI uses
-    `create_timestamped_backup()`, so CLI-produced backups must be restored by copying them
-    manually. See [Python API](python-api.md#filesystem-utilities).
+> [!NOTE]
+> **A second, different backup layout exists**
+>
+> The programmatic helper `create_backup()` uses `<name><suffix>.<timestamp>_<uuid8>.backup`,
+> and `restore_backup()`'s target inference only understands **that** layout. The CLI uses
+> `create_timestamped_backup()`, so CLI-produced backups must be restored by copying them
+> manually. See [Python API](python-api.md#filesystem-utilities).

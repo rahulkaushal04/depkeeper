@@ -17,34 +17,34 @@ description: Local environment, tooling, verification commands and the change wo
 
 ## Setup
 
-=== "Scripted"
+**Scripted**
 
-    ```bash
-    git clone https://github.com/rahulkaushal04/depkeeper.git
-    cd depkeeper
+```bash
+git clone https://github.com/rahulkaushal04/depkeeper.git
+cd depkeeper
 
-    bash scripts/setup_dev.sh          # macOS / Linux
-    .\scripts\setup_dev.ps1            # Windows PowerShell
-    ```
+bash scripts/setup_dev.sh          # macOS / Linux
+.\scripts\setup_dev.ps1            # Windows PowerShell
+```
 
-=== "Manual"
+**Manual**
 
-    ```bash
-    git clone https://github.com/rahulkaushal04/depkeeper.git
-    cd depkeeper
+```bash
+git clone https://github.com/rahulkaushal04/depkeeper.git
+cd depkeeper
 
-    python -m venv venv
-    source venv/bin/activate           # Windows: venv\Scripts\activate
+python -m venv venv
+source venv/bin/activate           # Windows: venv\Scripts\activate
 
-    pip install -e ".[dev]"
-    pre-commit install
-    ```
+pip install -e ".[dev]"
+pre-commit install
+```
 
-=== "Make"
+**Make**
 
-    ```bash
-    make install-dev                   # editable install + dev extras + pre-commit hooks
-    ```
+```bash
+make install-dev                   # editable install + dev extras + pre-commit hooks
+```
 
 ### Dependency extras
 
@@ -52,13 +52,6 @@ description: Local environment, tooling, verification commands and the change wo
 |---|---|
 | `dev` | pytest, pytest-cov, pytest-asyncio, pytest-mock, pytest-httpx, mypy, types-setuptools, pre-commit |
 | `test` | the pytest stack only |
-| `docs` | mkdocs, mkdocs-material, mkdocstrings[python], pymdown-extensions, mkdocs-minify-plugin |
-
-Install the docs extra when touching anything under `docs/`:
-
-```bash
-pip install -e ".[dev,docs]"
-```
 
 ---
 
@@ -80,16 +73,17 @@ python -m compileall -q depkeeper
 pre-commit run --all-files
 ```
 
-!!! note "Why `--python-version 3.13`"
-
-    `pyproject.toml` sets `python_version = "3.8"` for mypy, which current mypy releases refuse to
-    analyse. Pass the flag explicitly. The project's baseline is a single known error
-    (`data_store.py`, `no-any-return`); anything beyond that is yours.
-
-!!! note "Why `--no-cov`"
-
-    `addopts` in `pyproject.toml` enables coverage with term, HTML and XML reports on every run.
-    That is what CI wants and what a fast edit-test loop does not. `--no-cov` skips it.
+> [!NOTE]
+> **Why `--python-version 3.13`**
+>
+> `pyproject.toml` sets `python_version = "3.8"` for mypy, which current mypy releases refuse to
+> analyse. Pass the flag explicitly. The project's baseline is a single known error
+> (`data_store.py`, `no-any-return`); anything beyond that is yours.
+> [!NOTE]
+> **Why `--no-cov`**
+>
+> `addopts` in `pyproject.toml` enables coverage with term, HTML and XML reports on every run.
+> That is what CI wants and what a fast edit-test loop does not. `--no-cov` skips it.
 
 Coverage when you do want it:
 
@@ -170,8 +164,6 @@ git push origin fix/parser-line-continuations
 | `make test` | `pytest` with term, HTML and XML coverage |
 | `make typecheck` | `mypy depkeeper` |
 | `make all` | `typecheck` then `test` |
-| `make docs` | `mkdocs build` |
-| `make docs-serve` | `mkdocs serve` |
 | `make clean` | Removes build, cache and coverage artefacts |
 
 The Makefile targets assume a POSIX shell. On Windows, run the underlying commands directly.
@@ -180,14 +172,8 @@ The Makefile targets assume a POSIX shell. On Windows, run the underlying comman
 
 ## Working on the documentation
 
-```bash
-pip install -e ".[docs]"
-mkdocs serve                # http://127.0.0.1:8000, live reload
-mkdocs build --strict       # what CI runs
-```
-
-`mkdocs.yml` sets `strict: true`, so a broken internal link, a missing snippet or an unresolved
-`mkdocstrings` reference **fails the build**. Always run `--strict` before pushing.
+The docs are plain Markdown under `docs/` and render directly on GitHub. Preview them in any
+Markdown viewer, and check that relative links still resolve before pushing.
 
 Documentation conventions:
 
@@ -196,8 +182,8 @@ Documentation conventions:
 - Cross-link rather than duplicate. Concepts live in `concepts/`, exhaustive lists in `reference/`,
   tasks in `guides/`.
 - Prefer tables to prose for enumerable facts.
-- API documentation is generated from docstrings via `mkdocstrings`; fix the docstring, not the
-  page.
+- Use GitHub-flavoured Markdown only: GitHub alerts (`> [!NOTE]`) for callouts, and plain headings
+  instead of tabs or cards.
 
 ---
 
@@ -208,9 +194,8 @@ depkeeper/          Package source (see the architecture module map)
 tests/              Test suite, mirroring the package layout
   support/          Shared factories, fake PyPI, dataset builders
   integration/      Multi-component workflow tests
-docs/               This documentation site
+docs/               This documentation
 scripts/            Developer setup scripts
-mkdocs.yml          Documentation site configuration
 pyproject.toml      Packaging, mypy, pytest and coverage configuration
 Makefile            Development shortcuts
 .pre-commit-config.yaml
@@ -225,7 +210,7 @@ Pinned so a local run applies exactly the checks CI applies:
 - `trailing-whitespace`, `end-of-file-fixer`
 - `mixed-line-ending --fix=lf` — the repository itself is LF-only, so diffs stay meaningful (this
   is independent of depkeeper's runtime behaviour, which preserves whatever a target file uses)
-- `check-yaml` (excluding `mkdocs.yml`, which uses `!!python/name:` tags a safe loader rejects)
+- `check-yaml`
 - `check-json`, `check-toml`, `check-ast`
 - `check-added-large-files --maxkb=1000`
 - `check-case-conflict`, `check-merge-conflict`
@@ -244,5 +229,4 @@ pre-commit run --files depkeeper/core/parser.py
 | `mypy: Python 3.8 is not supported` | Pass `--python-version 3.13`. |
 | Tests are slow | Use `--no-cov`; coverage reporting is on by default. |
 | `caplog` captures nothing in a new test module | `setup_logging` sets `propagate = False` process-wide. See [Testing → Logging isolation](testing.md#logging-isolation). |
-| `mkdocs build` fails on a link | `strict: true` treats broken links as errors. Fix the link. |
 | Console colour leaks between tests | Use the `_isolate_console` fixture; `reconfigure_console()` clears the memoised consoles. |

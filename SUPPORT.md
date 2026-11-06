@@ -1,94 +1,75 @@
 # Support
 
-How to get help with depkeeper, and where each kind of request belongs.
+Where to get help with depkeeper.
+
+depkeeper is maintained on a best-effort basis. There is no paid support and no SLA.
 
 ---
 
-## Before asking
+## Try these first
 
-Most questions are answered by one of these, in order:
-
-1. **[Troubleshooting guide](https://rahulkaushal04.github.io/depkeeper/guides/troubleshooting/)** —
-   symptom-indexed diagnosis for the errors you are most likely to hit.
-2. **[Known limitations](https://rahulkaushal04.github.io/depkeeper/reference/limitations/)** —
-   surprising behaviour is often documented and intentional, with a workaround.
-3. **[FAQ](https://rahulkaushal04.github.io/depkeeper/community/faq/)**.
-4. **Your own diagnostics:**
+1. [Troubleshooting guide](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/guides/troubleshooting.md)
+2. [Known limitations](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/reference/limitations.md). Odd behaviour is often intended.
+3. [FAQ](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/community/faq.md)
+4. [Full documentation](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/index.md)
+5. Debug output:
 
    ```bash
    depkeeper -vv check --format json > report.json 2> debug.log
    ```
 
-   `debug.log` names the file parsed, the effective configuration, every HTTP retry and every
-   resolution decision.
+   `debug.log` shows the file parsed, the settings in effect, HTTP retries and each decision.
 
 ---
 
-## Where to go
+## Where to ask
 
-| Need | Channel |
+| You want to | Go to |
 |---|---|
-| Usage question, "is this expected?", design discussion | [Open an issue](https://github.com/rahulkaushal04/depkeeper/issues/new) |
-| Reproducible defect | [Issues → Bug report](https://github.com/rahulkaushal04/depkeeper/issues/new?template=bug_report.md) |
-| Feature or enhancement | [Issues → Feature request](https://github.com/rahulkaushal04/depkeeper/issues/new?template=feature_request.md) |
-| Security vulnerability | **[SECURITY.md](SECURITY.md)** — never a public issue |
-| Code of Conduct concern | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) |
-| Contributing a change | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Ask how something works | [Open a question issue](https://github.com/rahulkaushal04/depkeeper/issues/new?template=question.yml) |
+| Report a bug | [Bug report](https://github.com/rahulkaushal04/depkeeper/issues/new?template=bug_report.yml) |
+| Suggest a feature | [Feature request](https://github.com/rahulkaushal04/depkeeper/issues/new?template=feature_request.yml) |
+| Report a security problem | [SECURITY.md](SECURITY.md). Never a public issue. |
+| Report a Code of Conduct problem | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) |
+| Send a fix | [CONTRIBUTING.md](CONTRIBUTING.md) |
+
+Not sure if it is a bug? Open a question issue. We can relabel it as a bug.
 
 ---
 
 ## What to include in a bug report
 
-A report we can reproduce is fixed far faster than one we cannot:
-
 1. `depkeeper --version` and `python --version`
-2. The **smallest** requirements file that reproduces the behaviour
-3. The exact command line
-4. `depkeeper -vv <command> … 2> debug.log`, with `debug.log` attached
-5. Expected versus actual behaviour
-6. Your operating system, and whether depkeeper was installed with pip, pipx or from source
+2. Your OS, and how you installed depkeeper (pip, pipx, source)
+3. The smallest requirements file that shows the problem
+4. The exact command
+5. `debug.log` from `depkeeper -vv <command> 2> debug.log`
+6. What you expected, and what happened
 
-The Python version matters more than it usually would: depkeeper filters candidate versions
-against the interpreter **it runs on**, so a version mismatch is a common cause of
-"the recommendation looks wrong".
-
----
-
-## Response expectations
-
-depkeeper is maintained on a best-effort basis. There is no commercial support offering and no
-service-level agreement.
-
-| Request type | Typical handling |
-|---|---|
-| Security report | Acknowledged within 48 hours — see [SECURITY.md](SECURITY.md) |
-| Bug report with a reproducer | Triaged first |
-| Bug report without a reproducer | May be closed as not actionable after a request for detail |
-| Feature request | Discussed before implementation; scope is deliberately narrow |
-| Pull request | Reviewed as promptly as possible; ping the thread if it goes quiet |
+Python version matters. depkeeper filters versions for the Python it runs on (or `--python-version`),
+so a wrong-looking recommendation is often a version mismatch.
 
 ---
 
-## Version support
+## Versions
 
-Only the latest `0.1.x` release is supported. Reproduce your issue on the current release before
-reporting it.
+Only the latest `0.1.x` release is supported. Try the newest release before you report.
 
-depkeeper is alpha software: pin the version in automation, and read
-[CHANGELOG.md](CHANGELOG.md) before upgrading. Recommendation logic is a behavioural contract, so
-an upgrade can legitimately change an update plan.
+depkeeper is early software. Pin the version in automation and read
+[CHANGELOG.md](CHANGELOG.md) before upgrading. Recommendation logic is a behaviour contract, so an
+upgrade can change an update plan.
 
 ---
 
-## Out of scope
+## What depkeeper does not do
 
-depkeeper is a narrow tool by design. These are not defects:
+These are not bugs:
 
-- It does not perform full transitive dependency resolution — `pip` does that.
-- It does not query private package indexes.
-- It does not scan for vulnerabilities — use `pip-audit` or `safety`.
-- It does not propose major-version upgrades.
-- It does not manage virtual environments or install packages.
+- Full transitive dependency resolution. `pip` does that.
+- Vulnerability scanning. Use `pip-audit` or `safety`.
+- Private index authentication.
+- Major-version upgrades.
+- Managing virtual environments or installing packages.
 
-See [Known limitations](https://rahulkaushal04.github.io/depkeeper/reference/limitations/) for the
-full list, each with a workaround.
+See [Known limitations](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/reference/limitations.md) for
+workarounds.

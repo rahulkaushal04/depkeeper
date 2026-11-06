@@ -21,7 +21,7 @@ Programmatic usage::
     >>> requirements = parser.parse_file("requirements.txt")
 
 For more information, see:
-    https://rahulkaushal04.github.io/depkeeper/
+    https://github.com/rahulkaushal04/depkeeper/blob/main/docs/index.md
 """
 
 from __future__ import annotations

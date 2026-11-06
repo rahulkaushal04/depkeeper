@@ -126,17 +126,10 @@ LAYERED_PROJECT: Dict[str, str] = {
         "urllib3>=1.26.18,<2.0  # 2.x drops the retry kwargs we rely on\n"
     ),
     "requirements/prod.txt": (
-        "-r base.txt\n"
-        "-c ../constraints.txt\n"
-        "\n"
-        "gunicorn==22.0.0\n"
-        "flask>=2.2,<3.0\n"
+        "-r base.txt\n-c ../constraints.txt\n\ngunicorn==22.0.0\nflask>=2.2,<3.0\n"
     ),
     "requirements/dev.txt": (
-        "-r prod.txt\n"
-        "\n"
-        "pytest>=8.2.0\n"
-        "-e ../packages/internal-sdk\n"
+        "-r prod.txt\n\npytest>=8.2.0\n-e ../packages/internal-sdk\n"
     ),
     "constraints.txt": (
         "# Applies to every environment; never install these above the cap.\n"

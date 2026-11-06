@@ -7,57 +7,14 @@ description: Exhaustive specifications for the CLI, configuration, formats, erro
 
 Specification-grade documentation. These pages state what is true, without tutorial framing.
 
-<div class="grid cards" markdown>
-
-- :material-console:{ .lg .middle } **[CLI commands](cli-commands.md)**
-
-    ---
-
-    Every command, argument, flag, default and precedence rule.
-
-- :material-cog:{ .lg .middle } **[Configuration options](configuration-options.md)**
-
-    ---
-
-    Config keys, environment variables, discovery and validation rules.
-
-- :material-exit-run:{ .lg .middle } **[Exit codes](exit-codes.md)**
-
-    ---
-
-    Exit code semantics per command and scripting patterns.
-
-- :material-file-document:{ .lg .middle } **[File formats](file-formats.md)**
-
-    ---
-
-    Accepted requirements-file syntax, encodings and rewrite rules.
-
-- :material-code-json:{ .lg .middle } **[JSON output](json-output.md)**
-
-    ---
-
-    The `--format json` schema, field by field.
-
-- :material-alert-circle:{ .lg .middle } **[Error reference](errors.md)**
-
-    ---
-
-    Exception hierarchy and a catalogue of user-visible messages.
-
-- :material-alert-octagon:{ .lg .middle } **[Known limitations](limitations.md)**
-
-    ---
-
-    Behaviours that are surprising, constrained or not yet implemented.
-
-- :material-api:{ .lg .middle } **[Python API](python-api.md)**
-
-    ---
-
-    Generated API documentation for programmatic use.
-
-</div>
+- **[CLI commands](cli-commands.md)** — Every command, argument, flag, default and precedence rule.
+- **[Configuration options](configuration-options.md)** — Config keys, environment variables, discovery and validation rules.
+- **[Exit codes](exit-codes.md)** — Exit code semantics per command and scripting patterns.
+- **[File formats](file-formats.md)** — Accepted requirements-file syntax, encodings and rewrite rules.
+- **[JSON output](json-output.md)** — The `--format json` schema, field by field.
+- **[Error reference](errors.md)** — Exception hierarchy and a catalogue of user-visible messages.
+- **[Known limitations](limitations.md)** — Behaviours that are surprising, constrained or not yet implemented.
+- **[Python API](python-api.md)** — Generated API documentation for programmatic use.
 
 ---
 

@@ -34,21 +34,21 @@ Exit code `1`. A non-boolean value is rejected the same way:
 
 ## File formats
 
-=== "depkeeper.toml"
+**depkeeper.toml**
 
-    ```toml title="depkeeper.toml"
-    [depkeeper]
-    check_conflicts = true
-    strict_version_matching = false
-    ```
+```toml
+[depkeeper]
+check_conflicts = true
+strict_version_matching = false
+```
 
-=== "pyproject.toml"
+**pyproject.toml**
 
-    ```toml title="pyproject.toml"
-    [tool.depkeeper]
-    check_conflicts = true
-    strict_version_matching = false
-    ```
+```toml
+[tool.depkeeper]
+check_conflicts = true
+strict_version_matching = false
+```
 
 Both are equivalent. Use `pyproject.toml` if the project already has one; use `depkeeper.toml`
 to keep tool configuration separate.
@@ -93,7 +93,7 @@ The flags participating in this chain are `--strict-version-matching` and
 `--check-conflicts/--no-check-conflicts`. Both default to "unset" internally, so passing neither
 means "use the config value"; passing either overrides it for that invocation.
 
-```toml title="depkeeper.toml"
+```toml
 [depkeeper]
 check_conflicts = false
 ```
@@ -103,11 +103,12 @@ depkeeper check                        # conflicts NOT checked  (file)
 depkeeper check --check-conflicts      # conflicts checked      (flag wins)
 ```
 
-!!! note "`--strict-version-matching` is a flag, not a toggle"
-
-    There is no `--no-strict-version-matching`. If the config file sets it to `true`, you cannot
-    turn it off for one invocation from the command line. Point `--config` at a different file, or
-    change the file.
+> [!NOTE]
+> **`--strict-version-matching` is a flag, not a toggle**
+>
+> There is no `--no-strict-version-matching`. If the config file sets it to `true`, you cannot
+> turn it off for one invocation from the command line. Point `--config` at a different file, or
+> change the file.
 
 All other options — `--format`, `--outdated-only`, `--dry-run`, `--backup`, `--pin`,
 `--allow-hash-removal`, `--packages` — are **not** configurable. They must be supplied per run.
@@ -152,49 +153,49 @@ output in machine-readable formats (still on stderr).
 
 ## Recommended configurations
 
-=== "Application repository"
+**Application repository**
 
-    ```toml title="pyproject.toml"
-    [tool.depkeeper]
-    check_conflicts = true
-    strict_version_matching = false
-    ```
+```toml
+[tool.depkeeper]
+check_conflicts = true
+strict_version_matching = false
+```
 
-    Plus the usual invocation:
+Plus the usual invocation:
 
-    ```bash
-    depkeeper update --pin --backup
-    ```
+```bash
+depkeeper update --pin --backup
+```
 
-=== "Library repository"
+**Library repository**
 
-    ```toml title="pyproject.toml"
-    [tool.depkeeper]
-    check_conflicts = true
-    strict_version_matching = false
-    ```
+```toml
+[tool.depkeeper]
+check_conflicts = true
+strict_version_matching = false
+```
 
-    Never use `--pin` here; ranges are part of the library's contract.
+Never use `--pin` here; ranges are part of the library's contract.
 
-=== "CI drift report"
+**CI drift report**
 
-    ```toml title="ci/depkeeper.toml"
-    [depkeeper]
-    check_conflicts = false      # faster, fewer PyPI requests
-    ```
+```toml
+[depkeeper]
+check_conflicts = false      # faster, fewer PyPI requests
+```
 
-    ```bash
-    depkeeper --config ci/depkeeper.toml check --format json
-    ```
+```bash
+depkeeper --config ci/depkeeper.toml check --format json
+```
 
-=== "Lockfile-style file of exact pins"
+**Lockfile-style file of exact pins**
 
-    ```toml title="depkeeper.toml"
-    [depkeeper]
-    strict_version_matching = true
-    ```
+```toml
+[depkeeper]
+strict_version_matching = true
+```
 
-    Only `==` pins are treated as current versions; anything else is reported as `install`.
+Only `==` pins are treated as current versions; anything else is reported as `install`.
 
 ---
 

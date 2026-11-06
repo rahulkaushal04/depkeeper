@@ -4,142 +4,98 @@
 
 | Version | Supported |
 |---|---|
-| `0.1.x` | Yes |
+| `0.1.x` | Yes (latest release only) |
 | `< 0.1` | No |
 
-depkeeper is in early development. Security patches are provided only for the latest `0.1.x`
-release; upgrade rather than expect a backport.
+Fixes ship in the latest `0.1.x` release. We do not backport. Please upgrade.
 
 ---
 
-## Reporting a vulnerability
+## Report a vulnerability
 
 > [!WARNING]
-> **Do not open a public GitHub issue for a security vulnerability.**
+> Do **not** open a public issue for a security problem.
 
-Use a private channel:
+Report it privately: go to the repository **Security** tab and choose **Report a vulnerability**,
+or use
+<https://github.com/rahulkaushal04/depkeeper/security/advisories/new>.
 
-- The repository's **Security** tab → **Report a vulnerability**
-  (<https://github.com/rahulkaushal04/depkeeper/security/advisories/new>)
-- A **private GitHub Discussion** with the maintainers
+Please include:
 
-### What to include
-
-1. **Description** — what the issue is.
-2. **Impact** — what an attacker can achieve.
-3. **Affected versions** — which versions you tested.
-4. **Reproduction steps** — enough for us to verify it.
-5. **Proof of concept** — if available.
-6. **Suggested fix** — if you have one.
-
-```text
-Subject: [SECURITY] Path traversal via -r include directive
-
-Description:
-A requirements file containing `-r ../../../etc/example.txt` causes `depkeeper update`
-to write outside the invocation directory.
-
-Impact:
-Arbitrary file modification with the privileges of the invoking user.
-
-Affected Versions:
-0.1.0
-
-Reproduction:
-1. Create requirements.txt containing the directive above
-2. Run `depkeeper update -y`
-3. Observe the write outside the project directory
-
-Suggested Fix:
-Confine include resolution with utils.filesystem.validate_path.
-```
+1. What the problem is
+2. The impact (what an attacker can do)
+3. Versions you tested
+4. Steps to reproduce, and a proof of concept if you have one
+5. A suggested fix, if you have one
 
 ### What to expect
 
+These are targets, not guarantees. depkeeper is maintained by volunteers.
+
 | Stage | Target |
 |---|---|
-| Initial acknowledgement | 48 hours |
-| Validation decision | 5 business days |
-| Status updates | every 5–7 days |
-| Resolution for critical issues | within 30 days |
+| Acknowledge your report | 3 business days |
+| Confirm or reject it | 10 business days |
+| Fix for a confirmed critical issue | 30 days |
+| Updates while we work | about every 2 weeks |
 
-Our process: acknowledge → investigate and validate → develop and test a fix → coordinate
-disclosure with you → publish a GitHub Security Advisory → credit you, if you wish.
+After a fix we publish a GitHub Security Advisory, release a patched version, add a `Security`
+entry to [CHANGELOG.md](CHANGELOG.md), and credit you if you want.
 
-When a vulnerability is fixed we publish an advisory at
-<https://github.com/rahulkaushal04/depkeeper/security/advisories>, ship a patched release, record
-a `Security` entry in [CHANGELOG.md](CHANGELOG.md), and announce it in the GitHub release notes.
+### Safe harbour
+
+If you act in good faith, test only against your own files and machines, do not harm others, and
+give us reasonable time to fix the issue before disclosing it, we will not take legal action
+against you.
 
 ---
 
 ## Scope
 
-### In scope
+**In scope**
 
-- Parser, checker, resolver and writer logic, including malicious or malformed requirements files
-- Unsafe file operations: path traversal, symlink handling, permission or ownership changes
-- Any code execution triggered by analysed input
-- Transport security: TLS verification, downgrade, SSRF, request handling
-- Integrity controls, in particular the `--hash` handling described below
-- Denial of service reachable with a realistically sized input file
+- Parsing bugs triggered by malicious or malformed dependency files
+- Unsafe file handling: path traversal, symlinks, permissions, partial writes
+- Code execution caused by analysed input
+- Network handling: TLS, redirects, SSRF, response handling
+- Hash handling (`--hash`) that silently weakens integrity
+- Denial of service from a normally sized input file
 
-### Out of scope
+**Out of scope**
 
-- Vulnerabilities in third-party dependencies (report those upstream; tell us if depkeeper's usage
-  makes them exploitable)
-- Denial of service requiring extreme resources or an input beyond the 10 MB file limit
-- Social engineering and physical access attacks
-- Issues affecting unsupported versions
-- Features depkeeper does not implement — for example private-index authentication, which does not
-  exist (see [Limitations](https://rahulkaushal04.github.io/depkeeper/reference/limitations/))
+- Bugs in third-party dependencies (report upstream, but tell us if depkeeper makes them exploitable)
+- Denial of service that needs huge inputs or extreme resources
+- Social engineering and physical access
+- Unsupported versions
+- Features depkeeper does not have, such as private-index authentication
+  ([limitations](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/reference/limitations.md))
 
 ---
 
-## Security model
+## Security design
 
-Context for reviewers assessing depkeeper for use in a controlled environment. Mechanisms are
-documented at <https://rahulkaushal04.github.io/depkeeper/guides/operations/#security-posture>.
+Facts about the current code:
 
 | Property | Behaviour |
 |---|---|
-| Code execution | depkeeper **never** imports, installs, builds or executes the packages it analyses. It reads JSON metadata only. |
-| Network destinations | `https://pypi.org` only, with certificate verification always enabled. There is no flag to disable verification. |
-| Outbound data | Package **names**, as URL path segments. Versions, comments and file contents never leave the machine. |
-| Credentials | None are read, stored or transmitted. depkeeper has no authentication support. |
-| Persisted state | None outside the working directory. No cache directory, no writes to `$HOME`. |
-| File writes | Only the requirements files reached from the file you named, plus optional backups beside them. |
-| Write integrity | Atomic replace with `fsync`, file-mode preservation, and rollback of a partially committed multi-file batch. |
-| Input limits | 10 MB per file. |
-| Parsing safety | No `eval`, no shell invocation, no dynamic import of analysed content. Version and specifier handling is delegated to `packaging`. |
-| Hash integrity | Updates that would strip `--hash` entries are **refused** unless `--allow-hash-removal` is passed explicitly. |
-| Path controls | `utils.filesystem.validate_path` exists to confine a resolved path to a base directory, but it is **not** applied to `-r`/`-c` include resolution or to `update`'s write targets — see the residual risk below. |
+| Writes | Atomic: temp file, then replace. Multi-file updates roll back if a later write fails. |
+| Network | Requests go to `https://pypi.org` only. Redirects must stay on HTTPS and on the same host or a PyPI host. |
+| Response size | Bodies over 20 MB are rejected. |
+| Input size | Dependency files over 10 MB are rejected. |
+| Credentials | URL credentials (`user:pass@`) are redacted in error output and in `--verify` output. |
+| Code execution | depkeeper does not import or run the packages it analyses. The one exception is `update --verify`. |
+| `--verify` | Runs `pip install --dry-run --only-binary=:all:` in a subprocess (no shell). Because only wheels are allowed, pip never builds a source distribution or runs a package's build code. |
+| Hashes | Updates that would remove `--hash` entries are refused unless you pass `--allow-hash-removal`. |
 
-### Known residual risks
+### Known limits
 
-| Risk | Detail | Mitigation |
-|---|---|---|
-| **Write scope via `-r` includes** | Include paths resolve relative to the including file and may contain `../`, so a hostile requirements file can direct `update` writes outside the invocation directory. | Run `--dry-run` first. Run in a container with only the project directory mounted. Never run `update` unattended on untrusted input. |
-| **Partially hashed files** | `--allow-hash-removal` strips digests only from changed lines, producing a file that `pip --require-hashes` rejects. | Regenerate hashes immediately: `pip-compile --generate-hashes`. |
-| **Metadata trust** | Recommendations derive from PyPI metadata; compromised metadata influences which version is proposed. | depkeeper never installs — `pip` and your test suite remain the gate. |
-| **No file locking** | depkeeper reads once and writes once; a concurrent edit between those points is lost. | Do not run depkeeper concurrently with an editor on the same file. |
+- Include paths (`-r`, `-c`) are not confined to the project directory. Run `--dry-run` first on files you do not trust.
+- There is no file locking. Do not edit a file while depkeeper updates it.
+- Recommendations come from PyPI metadata. depkeeper never installs, so keep `pip` and your tests as the gate.
 
----
+### Tips for users
 
-## Guidance for users
-
-- Run the latest release, and pin the version in automation.
-- Treat `depkeeper update` as a code change: review the diff, then `pip install -r` and run tests.
-- Prefer `--dry-run` on any file you did not write.
-- Run inside a virtual environment; do not run as root.
-- Restrict write access in automation to the project directory.
-- Run a vulnerability scanner (`pip-audit`, `safety`) alongside depkeeper — depkeeper reports
-  version drift, not advisories.
-
----
-
-## Recognition
-
-depkeeper has no paid bug bounty programme. We credit reporters in the advisory and the changelog,
-and are glad to provide a written acknowledgement of the contribution on request.
-
-No vulnerabilities have been reported to date.
+- Pin depkeeper in automation and keep it current.
+- Review the diff from `update`, then install and test.
+- Run in a virtual environment, not as root.
+- Use `pip-audit` or `safety` too. depkeeper reports version drift, not advisories.

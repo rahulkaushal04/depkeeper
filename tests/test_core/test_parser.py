@@ -73,7 +73,7 @@ class TestLineClassification:
         self, parser: RequirementsParser
     ) -> None:
         """The update writer rewrites by line number; an off-by-one corrupts
-        an unrelated line, which is regression C1's exact failure mode.
+        an unrelated line, which corrupts the wrong file.
         """
         content = "# header\n\nrequests==2.31.0\n# gap\nurllib3==1.26.18\n"
 
@@ -82,18 +82,14 @@ class TestLineClassification:
         assert parsed["requests"].line_number == 3
         assert parsed["urllib3"].line_number == 5
 
-    def test_raw_line_is_preserved_verbatim(
-        self, parser: RequirementsParser
-    ) -> None:
+    def test_raw_line_is_preserved_verbatim(self, parser: RequirementsParser) -> None:
         """Surrounding whitespace is retained so the writer can reproduce it."""
         req = parser.parse_line("   requests == 2.31.0   ", 1)
 
         assert req is not None
         assert req.raw_line == "   requests == 2.31.0   "
 
-    def test_surrounding_quotes_are_stripped(
-        self, parser: RequirementsParser
-    ) -> None:
+    def test_surrounding_quotes_are_stripped(self, parser: RequirementsParser) -> None:
         """Shell-generated files routinely quote whole specs."""
         req = parser.parse_line('"requests>=2.31.0"', 1)
 
@@ -279,7 +275,10 @@ class TestDirectReferences:
         ("line", "name"),
         [
             ("git+https://github.com/pallets/flask.git@3.0.3#egg=flask", "flask"),
-            ("git+ssh://git@github.com/acme/sdk.git@main#egg=internal-sdk", "internal-sdk"),
+            (
+                "git+ssh://git@github.com/acme/sdk.git@main#egg=internal-sdk",
+                "internal-sdk",
+            ),
             ("hg+https://hg.example.com/proj#egg=proj", "proj"),
             ("svn+https://svn.example.com/trunk#egg=legacy-lib", "legacy-lib"),
             (
@@ -419,9 +418,7 @@ class TestDirectReferences:
         checkout = tmp_path / "vendor" / "acme-sdk-python"
         checkout.mkdir(parents=True)
         req_file = tmp_path / "requirements.txt"
-        req_file.write_text(
-            "-e ./vendor/acme-sdk-python#egg=\n", encoding="utf-8"
-        )
+        req_file.write_text("-e ./vendor/acme-sdk-python#egg=\n", encoding="utf-8")
 
         req = parser.parse_file(req_file)[0]
 
@@ -475,7 +472,7 @@ class TestIncludeDirectives:
     def test_included_requirements_keep_the_included_file_as_provenance(
         self, tmp_path: Path, parser: RequirementsParser
     ) -> None:
-        """Regression C1: the writer rewrites ``source_file``, and an included
+        """The writer rewrites ``source_file``, and an included
         requirement's line number is meaningless in the parent.
         """
         base = tmp_path / "base.txt"
@@ -557,7 +554,9 @@ class TestConstraintDirectives:
             "jinja2<3.2\nwerkzeug<3.0\n", encoding="utf-8"
         )
         root = tmp_path / "requirements.txt"
-        root.write_text(f"{directive} constraints.txt\nflask==2.3.3\n", encoding="utf-8")
+        root.write_text(
+            f"{directive} constraints.txt\nflask==2.3.3\n", encoding="utf-8"
+        )
 
         parsed = parser.parse_file(root)
 
@@ -618,7 +617,13 @@ class TestWholeFileParsing:
         """A pip-compile style file yields exactly its pinned distributions."""
         parsed = _by_name(parser.parse_string(datasets.PINNED_APPLICATION))
 
-        assert set(parsed) == {"certifi", "charset-normalizer", "idna", "requests", "urllib3"}
+        assert set(parsed) == {
+            "certifi",
+            "charset-normalizer",
+            "idna",
+            "requests",
+            "urllib3",
+        }
         assert parsed["requests"].specs == [("==", "2.31.0")]
 
     def test_library_style_ranges_survive_intact(
@@ -700,7 +705,13 @@ class TestFailureModes:
             "requests[unclosed>=2.0",
             "requests @ ",
         ],
-        ids=["empty-triple-eq", "empty-version", "no-name", "unclosed-extras", "empty-url"],
+        ids=[
+            "empty-triple-eq",
+            "empty-version",
+            "no-name",
+            "unclosed-extras",
+            "empty-url",
+        ],
     )
     def test_malformed_specifiers_raise_a_located_parse_error(
         self, parser: RequirementsParser, line: str
@@ -720,18 +731,11 @@ class TestFailureModes:
         with pytest.raises(FileOperationError):
             parser.parse_file(tmp_path / "absent.txt")
 
-    def test_line_continuations_are_not_joined(
-        self, parser: RequirementsParser
-    ) -> None:
-        """Known gap, pinned so it is visible rather than folklore.
-
-        ``pip-compile --generate-hashes`` emits backslash continuations by
-        default, so this is the *standard* lockfile layout. depkeeper parses
-        line-by-line and rejects the trailing backslash, which means such a file
-        cannot be checked at all. The failure is at least loud and located
-        rather than silent, and the shared corpora use the single-line form.
+    def test_line_continuations_are_joined(self, parser: RequirementsParser) -> None:
+        """``pip-compile --generate-hashes`` emits backslash continuations;
+        they must be joined into one logical line.
         """
-        with pytest.raises(ParseError):
-            parser.parse_string(
-                "certifi==2023.7.22 \\\n    --hash=sha256:539cc1d13202e33ca466e88b\n"
-            )
+        (req,) = parser.parse_string(
+            "certifi==2023.7.22 \\\n    --hash=sha256:539cc1d13202e33ca466e88b\n"
+        )
+        assert req.hashes == ["sha256:539cc1d13202e33ca466e88b"]

@@ -26,12 +26,14 @@ release; upgrade rather than backport.
 
 ## Reporting a vulnerability
 
-!!! danger "Do not open a public issue for a security vulnerability"
+> [!CAUTION]
+> **Do not open a public issue for a security vulnerability**
+>
 
 Use a private channel:
 
 - The repository's **Security** tab → **Report a vulnerability**
-- A **private GitHub Discussion** with the maintainers
+- A **private security advisory** on GitHub
 
 ### Include
 

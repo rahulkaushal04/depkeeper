@@ -50,12 +50,13 @@ Reading `>=2.0` as "currently on 2.0" is a deliberate approximation. It is what 
 boundary for ranged requirements, and it is why `django>=3.2,<5.0` is capped at the newest `3.x`
 rather than moving to `4.x`.
 
-!!! warning "Consequence of inference"
-
-    `django>=3.2,<5.0` **will not** be upgraded to `4.2.x`, even though your own range permits it.
-    depkeeper treats the floor as the installed version and the major boundary as absolute. To
-    move across the boundary, edit the floor by hand:
-    `django>=4.2,<5.0`, then re-run depkeeper.
+> [!WARNING]
+> **Consequence of inference**
+>
+> `django>=3.2,<5.0` **will not** be upgraded to `4.2.x`, even though your own range permits it.
+> depkeeper treats the floor as the installed version and the major boundary as absolute. To
+> move across the boundary, edit the floor by hand:
+> `django>=4.2,<5.0`, then re-run depkeeper.
 
 ## Step 2 — Build the candidate list
 
@@ -108,10 +109,9 @@ The rule is purely positional: it compares `release[0]`. For a package versioned
 certifi==2023.7.22  latest 2026.7.22 → recommended 2023.11.17
 ```
 
-This is usually *not* what you want for date-versioned packages such as `certifi`, `pytz` or
-`tzdata`. Handle those by editing the pin manually, or by leaving them unversioned so depkeeper
-picks the newest compatible release. Tracked in
-[Known limitations](../reference/limitations.md#calendar-versioning-hits-the-major-boundary).
+For date-versioned packages such as `certifi`, `pytz` or `tzdata` depkeeper detects calver and
+crosses years (labelled `year`); override with `versioning = "calver"` / `"semver"` per package. See
+[Known limitations](../reference/limitations.md#calendar-versioning-heuristics).
 
 ### Rationale
 
@@ -132,13 +132,14 @@ Each candidate's `requires_python` specifier is evaluated against
 | `requires_python` unparseable | Treated as compatible. Malformed upstream metadata must not exclude an installable release. |
 | Specifier excludes the interpreter | Candidate dropped. |
 
-!!! danger "The interpreter is depkeeper's, not your project's"
-
-    If depkeeper runs on Python 3.8 and your service targets 3.12, every release that dropped 3.8
-    support is invisible to depkeeper, and recommendations will silently lag. Install depkeeper
-    into the environment whose requirements file it manages, or use
-    `pipx install --python python3.12 depkeeper`. There is no flag to override the target
-    interpreter in 0.1.x — see [Limitations](../reference/limitations.md#no-target-python-override).
+> [!CAUTION]
+> **The interpreter is depkeeper's, not your project's**
+>
+> If depkeeper runs on Python 3.8 and your service targets 3.12, every release that dropped 3.8
+> support is invisible to depkeeper, and recommendations will silently lag. Install depkeeper
+> into the environment whose requirements file it manages, or use
+> `pipx install --python python3.12 depkeeper`. There is no flag to override the target
+> interpreter in 0.1.x — see [Limitations](../reference/limitations.md#target-python-defaults-to-the-running-interpreter).
 
 ### Metadata source caveat
 
@@ -240,11 +241,12 @@ does not change depkeeper's behaviour.
 
 Missing components are padded with zeros, so `2` and `2.0.0` compare equal.
 
-!!! note "`major` can appear in output"
-
-    Classification is independent of the boundary rule. A `major` update type appears when a
-    *downgrade* crosses a major, or when a package with no current version gets its first pin.
-    It never appears as an automatically proposed upgrade.
+> [!NOTE]
+> **`major` can appear in output**
+>
+> Classification is independent of the boundary rule. A `major` update type appears when a
+> *downgrade* crosses a major, or when a package with no current version gets its first pin.
+> It never appears as an automatically proposed upgrade.
 
 ---
 

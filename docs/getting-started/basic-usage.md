@@ -93,11 +93,12 @@ The machine formats use a different, finer-grained ladder:
 | `outdated` | Recommended is higher than current. |
 | `latest` | Recommended equals current. |
 
-!!! warning "The two ladders disagree for unversioned requirements"
-
-    `certifi` with no specifier renders as `[OK]` in the table but as `install` in JSON and
-    simple output. The table's up-to-date branch is also its fallback branch. Treat the machine
-    formats as authoritative. Tracked in [Known limitations](../reference/limitations.md#unversioned-requirements-report-as-ok).
+> [!WARNING]
+> **The two ladders disagree for unversioned requirements**
+>
+> `certifi` with no specifier renders as `[OK]` in the table but as `install` in JSON and
+> simple output. The table's up-to-date branch is also its fallback branch. Treat the machine
+> formats as authoritative. Tracked in [Known limitations](../reference/limitations.md#unversioned-requirements-report-as-ok).
 
 ---
 

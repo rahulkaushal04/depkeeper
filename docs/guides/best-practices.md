@@ -78,18 +78,18 @@ with other libraries almost impossible.
 
 ## Split by purpose, compose with `-r`
 
-```text title="requirements/base.txt"
+```text
 django>=4.2,<5.0
 psycopg[binary]>=3.1,<4.0
 ```
 
-```text title="requirements/dev.txt"
+```text
 -r base.txt
 pytest>=8.0,<9.0
 mypy>=1.8,<2.0
 ```
 
-```text title="requirements/prod.txt"
+```text
 -r base.txt
 gunicorn>=21.2,<22.0
 ```

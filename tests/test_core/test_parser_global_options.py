@@ -1,4 +1,4 @@
-"""Regression tests for pip global option parsing in requirements files."""
+"""pip global options in requirements files are parsed or skipped."""
 
 from __future__ import annotations
 
@@ -45,7 +45,9 @@ def test_parse_line_unknown_option_still_raises_parse_error() -> None:
         parser.parse_line("--definitely-not-a-pip-option value", 1, "req.txt")
 
 
-def test_parse_file_with_global_options_returns_only_requirements(tmp_path: Path) -> None:
+def test_parse_file_with_global_options_returns_only_requirements(
+    tmp_path: Path,
+) -> None:
     """Global options should not abort parsing of otherwise valid files."""
     req_file = tmp_path / "requirements.txt"
     req_file.write_text(

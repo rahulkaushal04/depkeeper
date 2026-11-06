@@ -1,16 +1,4 @@
-"""Cross-layer package-name normalisation tests.
-
-Primary purpose: guard against regression M9 — the update set is keyed by
-the parser's PEP 503 name (``zope-interface``) while upstream
-``requires_dist`` metadata spells the same distribution ``zope.interface``.
-Three of the four normalisers folded ``_`` but not ``.``, so
-``_find_cross_conflicts()`` looked up a key that could never exist and the
-tool reported a clean, conflict-free result — a false negative, the worst
-failure mode for a conflict checker.
-
-These tests exercise the real code paths (parser → checker names → analyzer
-lookup → data-store cache keys) rather than the normaliser in isolation.
-"""
+"""Package-name normalisation is consistent across the dotted-name conflict path."""
 
 from __future__ import annotations
 
@@ -119,7 +107,7 @@ class TestParserProducesCanonicalNames:
 
 @pytest.mark.unit
 class TestCrossConflictDetectionForDottedNames:
-    """M9 regression: the conflict must actually be found."""
+    """The conflict must actually be found."""
 
     @staticmethod
     def _analyzer(dotted: str) -> DependencyAnalyzer:
@@ -225,7 +213,7 @@ class TestResolutionEndToEndForDottedNames:
         ).resolve_and_annotate_conflicts(packages)
 
         assert result.converged
-        # The conflict was seen (previously it was invisible) and resolved by
+        # The conflict is seen and resolved by
         # stepping flask back to a release compatible with zope-interface 5.x.
         assert result.resolved_versions["flask"].resolved == "2.2.5"
         assert result.resolved_versions["zope-interface"].resolved == "5.5.2"
@@ -240,9 +228,7 @@ class TestResolutionEndToEndForDottedNames:
             deps={"flask==2.3.3": ["zope.interface>=6.0"]},
         )
         packages = [
-            Package(
-                name="flask", current_version="2.0.0", recommended_version="2.3.3"
-            ),
+            Package(name="flask", current_version="2.0.0", recommended_version="2.3.3"),
             Package(
                 name="zope-interface",
                 current_version="5.4.0",

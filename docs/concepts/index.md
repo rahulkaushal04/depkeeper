@@ -8,39 +8,11 @@ description: The model depkeeper uses — pipeline stages, invariants and design
 These pages describe *how depkeeper thinks*. They are the reference for anyone who needs to
 predict, justify or debug a recommendation, and the prerequisite reading for contributors.
 
-<div class="grid cards" markdown>
-
-- :material-sitemap:{ .lg .middle } **[Architecture](architecture.md)**
-
-    ---
-
-    Module responsibilities, the request pipeline, and the design decisions behind them.
-
-- :material-arrow-up-bold-box:{ .lg .middle } **[Version recommendation](version-recommendation.md)**
-
-    ---
-
-    How a single package's target version is chosen: boundaries, filters and inference.
-
-- :material-vector-triangle:{ .lg .middle } **[Conflict resolution](conflict-resolution.md)**
-
-    ---
-
-    The iterative resolver, its strategies, its guarantees and its failure modes.
-
-- :material-file-code:{ .lg .middle } **[Requirements parsing](requirements-parsing.md)**
-
-    ---
-
-    What the parser accepts, what it ignores, and what it cannot represent.
-
-- :material-content-save-check:{ .lg .middle } **[Write safety](write-safety.md)**
-
-    ---
-
-    Atomic writes, multi-file rollback, encoding and line-ending preservation.
-
-</div>
+- **[Architecture](architecture.md)** — Module responsibilities, the request pipeline, and the design decisions behind them.
+- **[Version recommendation](version-recommendation.md)** — How a single package's target version is chosen: boundaries, filters and inference.
+- **[Conflict resolution](conflict-resolution.md)** — The iterative resolver, its strategies, its guarantees and its failure modes.
+- **[Requirements parsing](requirements-parsing.md)** — What the parser accepts, what it ignores, and what it cannot represent.
+- **[Write safety](write-safety.md)** — Atomic writes, multi-file rollback, encoding and line-ending preservation.
 
 ---
 

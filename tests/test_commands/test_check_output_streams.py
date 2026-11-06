@@ -1,13 +1,8 @@
-"""Stream-separation regression tests for the ``check`` command (M11).
-
-``--format json`` and ``--format simple`` write a machine-consumable payload
-to stdout. Warnings, success messages, errors and the resolution summary are
-diagnostics and must go to stderr, otherwise ``depkeeper -v check -f json | jq``
-receives a corrupted document.
-"""
+"""Stream-separation tests: payload on stdout, diagnostics on stderr."""
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 import inspect
 import json
 from pathlib import Path
@@ -28,9 +23,9 @@ from depkeeper.models import Package
 from depkeeper.utils import console as console_module
 
 # Click < 8.2 defaults CliRunner to mix_stderr=True; only pass it when supported.
-_CLIRUNNER_SUPPORTS_MIX_STDERR = "mix_stderr" in inspect.signature(
-    CliRunner.__init__
-).parameters
+_CLIRUNNER_SUPPORTS_MIX_STDERR = (
+    "mix_stderr" in inspect.signature(CliRunner.__init__).parameters
+)
 
 
 def _make_runner() -> CliRunner:
@@ -69,6 +64,11 @@ def _fake_checker(packages: List[Package]) -> Any:
     class _FakeVersionChecker:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
+
+        @classmethod
+        def from_config(cls, data_store: Any, config: Any, **overrides: Any) -> Any:
+            # Commands build the checker via VersionChecker.from_config.
+            return cls(data_store, config, **overrides)
 
         async def check_packages(self, requirements: Any) -> List[Package]:
             return list(packages)
@@ -127,13 +127,24 @@ def _run_check(
         ]
 
     runner = _make_runner()
-    with mock.patch("depkeeper.commands.check.HTTPClient", _FakeHTTPClient), mock.patch(
-        "depkeeper.commands.check.PyPIDataStore", _FakeDataStore
-    ), mock.patch(
-        "depkeeper.commands.check.VersionChecker", _fake_checker(packages)
-    ), mock.patch(
-        "depkeeper.commands.check.DependencyAnalyzer", _fake_analyzer(resolution)
-    ):
+    with ExitStack() as _stack:
+        _stack.enter_context(
+            mock.patch("depkeeper.commands.check.HTTPClient", _FakeHTTPClient)
+        )
+        _stack.enter_context(
+            mock.patch("depkeeper.commands.check.PyPIDataStore", _FakeDataStore)
+        )
+        _stack.enter_context(
+            mock.patch(
+                "depkeeper.commands.check.VersionChecker", _fake_checker(packages)
+            )
+        )
+        _stack.enter_context(
+            mock.patch(
+                "depkeeper.commands.check.DependencyAnalyzer",
+                _fake_analyzer(resolution),
+            )
+        )
         return runner.invoke(cli, args, catch_exceptions=False)
 
 
@@ -176,15 +187,10 @@ class TestStatusStreamSelection:
         assert _status_stream_is_stderr(fmt) is expected
 
 
-# ---------------------------------------------------------------------------
-# M11 regressions
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.unit
 class TestJsonStreamPurity:
     def test_verbose_json_stdout_is_parseable(self, tmp_path: Path) -> None:
-        """M11: `-v check --format json` must emit only JSON on stdout."""
+        """`-v check --format json` must emit only JSON on stdout."""
         result = _run_check(
             tmp_path,
             ["-v", "check", str(tmp_path / "requirements.txt"), "--format", "json"],

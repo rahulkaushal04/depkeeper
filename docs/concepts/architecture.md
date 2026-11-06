@@ -170,11 +170,12 @@ None of these are user-configurable in 0.1.x; they are module constants. See
 [Operations](../guides/operations.md#tuning-and-limits) for the practical implications and
 [Known limitations](../reference/limitations.md#no-runtime-tuning).
 
-!!! note "`DependencyAnalyzer(concurrent_limit=...)`"
-
-    The analyzer accepts a `concurrent_limit` and constructs a semaphore from it, but currently
-    performs all of its I/O through the data store, which applies its own limit. The analyzer's
-    semaphore is not yet used. Treat the parameter as reserved.
+> [!NOTE]
+> **`DependencyAnalyzer(concurrent_limit=...)`**
+>
+> The analyzer accepts a `concurrent_limit` and constructs a semaphore from it, but currently
+> performs all of its I/O through the data store, which applies its own limit. The analyzer's
+> semaphore is not yet used. Treat the parameter as reserved.
 
 The whole pipeline is single-threaded. `utils.console` and `utils.logger` take locks only to
 protect their memoised singletons against concurrent first use, not because commands are

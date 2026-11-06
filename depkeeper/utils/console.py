@@ -9,8 +9,6 @@ Guidelines:
 - print_table / confirm: structured or interactive CLI output
 - Logging should never go through this module
 
-Stream separation
------------------
 Every helper accepts a ``stderr`` keyword that selects the target stream.
 Commands that emit machine-readable payloads (``--format json`` /
 ``--format simple``) must keep **stdout** reserved for the payload and send
@@ -29,10 +27,6 @@ from rich.table import Table
 from rich.theme import Theme
 from rich.console import Console
 
-# ---------------------------------------------------------------------------
-# Theme configuration
-# ---------------------------------------------------------------------------
-
 DEPKEEPER_THEME = Theme(
     {
         "success": "bold green",
@@ -44,11 +38,7 @@ DEPKEEPER_THEME = Theme(
     }
 )
 
-# ---------------------------------------------------------------------------
-# Console lifecycle management
-# ---------------------------------------------------------------------------
-
-# Keyed by ``stderr`` flag: False -> stdout console, True -> stderr console.
+# Keyed by the ``stderr`` flag: False is the stdout console, True the stderr one.
 _consoles: Dict[bool, Console] = {}
 _console_lock = threading.Lock()
 
@@ -108,14 +98,7 @@ def reconfigure_console() -> None:
         _consoles.clear()
 
 
-# ---------------------------------------------------------------------------
-# Status message helpers
-# ---------------------------------------------------------------------------
-
-
-def print_success(
-    message: str, *, prefix: str = "[OK]", stderr: bool = False
-) -> None:
+def print_success(message: str, *, prefix: str = "[OK]", stderr: bool = False) -> None:
     """Print a success message.
 
     Args:
@@ -152,11 +135,6 @@ def print_warning(
             carries machine-readable output.
     """
     _get_console(stderr=stderr).print(f"{prefix} {message}", style="warning")
-
-
-# ---------------------------------------------------------------------------
-# Structured output
-# ---------------------------------------------------------------------------
 
 
 def print_table(
@@ -205,6 +183,7 @@ def print_table(
             justify=config.get("justify", "default"),
             no_wrap=config.get("no_wrap", False),
             width=config.get("width"),
+            min_width=config.get("min_width"),
             overflow=config.get("overflow", "fold"),
         )
 
@@ -214,11 +193,6 @@ def print_table(
         table.add_row(*values, style=style)
 
     _get_console(stderr=stderr).print(table)
-
-
-# ---------------------------------------------------------------------------
-# User interaction
-# ---------------------------------------------------------------------------
 
 
 def confirm(message: str, *, default: bool = False) -> bool:
@@ -263,11 +237,6 @@ def confirm(message: str, *, default: bool = False) -> bool:
     return default
 
 
-# ---------------------------------------------------------------------------
-# Advanced / internal helpers
-# ---------------------------------------------------------------------------
-
-
 def get_raw_console(*, stderr: bool = False) -> Console:
     """Return the underlying Rich Console instance.
 
@@ -295,6 +264,8 @@ def colorize_update_type(update_type: str) -> str:
         "new": "cyan",
         "downgrade": "red",
         "update": "yellow",
+        "year": "red",
+        "month": "yellow",
     }
 
     color = color_map.get(update_type.lower())

@@ -17,12 +17,56 @@ Sections used: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
 
 ## [Unreleased]
 
-### Planned
+### Added
 
-- Security advisory scanning against a vulnerability database
-- Configurable package index for private repositories
-- A flag to override the target Python version used for compatibility filtering
-- Backslash line-continuation support in the parser
+- **New input formats.** `check` and `update` now read `pyproject.toml` (PEP 621, PEP 735 dependency groups, `build-system.requires`, Poetry) and conda `environment.yml` (`dependencies:` and `pip:` lists). Edits are made in place, so comments and formatting survive. Conda-channel packages are matched on PyPI by name only and are approximate. Pass a directory to check every supported file in one report; reports show a source column when several files are checked.
+- **Calendar versioning.** Packages such as `2024.8.30` are detected automatically (or set with the `versioning` option). Calver has no major boundary. Updates are labelled `year`, `month` or `patch`. For `--fail-on` and `--max-update`, `year` and `month` count as `minor`.
+- **Per-package policy** in config (`[depkeeper.packages.<name>]`): `max_update`, `hold`, `allow_prerelease`, `versioning`, `ignore`. Output marks affected packages `[HELD]` or `[IGNORED]`.
+- `--python-version X.Y` on `check` and `update`. Target Python is taken from the flag, then config `python_version`, then the file's `requires-python` or conda `python=` pin (lowest supported minor), then the running interpreter. The source is logged at `-v`.
+- `--min-age DURATION` on `check` and `update` (config `min_age`): do not recommend versions released more recently than this. The newest older version is used instead, never one below the current version. Output shows release age and any versions withheld.
+- `check --fail-on {none,updates,minor,major}` (config `fail_on`): exit `3` when the threshold is met.
+- `check --ignore PKG` and `update --ignore PKG` (repeatable; config `ignore`).
+- `update --max-update {patch,minor,major}`: skip larger updates and report how many were skipped.
+- `update --refresh-hashes`: rewrite `--hash=sha256:` lines of hashed requirements for the new version from PyPI file digests, keeping the file's layout. Nothing is written if digests are unavailable. Cannot be combined with `--allow-hash-removal` (exit `2`).
+- `update --verify`: ask pip's resolver (dry run, wheels only) whether the proposed set installs together before writing. A conflict exits `1`. A missing or old pip is a warning. The current set is also checked when no updates are found.
+- `--no-strict-version-matching`.
+- **Output formats:** `--format markdown` for `check` and `update` (PR body or CI summary, with changelog and PyPI links) and `--format json-v2` for `check` (versioned envelope with file, line, format, age, held/ignored and links). `--format json` keeps its bare array and gains optional `links` and `ignored` fields.
+- `update` prints backup paths and previews hashed requirements under `--dry-run`.
+- Configuration discovery now walks up from the working directory to the repository root (`.git`). Without a `.git` it stops at `$HOME`.
+
+### Changed
+
+- **Impact (exit codes):** `check` exits `4`, and reports on stderr, when any package lookup failed. It no longer prints "All packages are up to date!" in that case, also under `--outdated-only`. Editable, VCS and URL requirements do not trigger it.
+- **Impact (exit codes):** `update` exits `4` when a package could not be looked up. It exits `1` when the confirmation prompt is declined or `--packages` matches nothing (previously `0`). Scripts that pipe `n` must adapt.
+- **Impact (recommendations):** conflict resolution now follows `min_age`, the pre-release rule and per-package `hold`, `ignore` and `max_update` when it picks or backports a version, so a fresh backport can no longer bypass the cooldown. Plans for conflicting sets may differ when a cooldown or policy is set. `released`, `age_days` and withheld-version output follow the version actually recommended.
+- **Impact (writes):** bare (unpinned) names in `pyproject.toml` and `environment.yml` are no longer pinned by `update` unless `--pin` is given. `requirements.txt` behaviour is unchanged.
+- Conda packages missing from PyPI are a warning, not a lookup failure. `update` no longer lists conda prefix specs (`numpy=1.24`) whose rewrite would change nothing.
+- `update` honours the config `ignore` list. An ignored package never causes exit `4`.
+- An explicit `-c` file without a `[depkeeper]` table is now an error.
+- `Ctrl-D` or an aborted prompt exits `130` with "Aborted."
+- Table output: one short Python requirement per row, no exclusion lists, minimum column widths. The resolution summary is shown only when something changed or conflicted, or with `-v`.
+- `DependencyAnalyzer` accepts `target_python` and `checker`.
+
+### Fixed
+
+- **Parser:** comment lines ending in a backslash no longer swallow the next requirement. Added `-rfile`, `--requirement=file` and `-c=file` forms, backslash continuations (pip-compile `--hash` files) and `name @ url` round-trip. Repeated constraints are merged and no longer leak into rewritten files. Extras order is deterministic. `#egg=` names are validated.
+- **`pyproject.toml` and conda:** a `pyproject.toml` without dependency tables reports "No packages found" (exit 0) instead of "Invalid requirement syntax"; directory mode skips it. A wrong-typed `dependencies = "x"` is a clear parse error. Malformed or non-string entries are skipped with a `file:line` warning. Conda `pip:` items keep marker spacing. `python=3` and `>=3.8.5` give sensible target Pythons.
+- **PyPI data:** yanked-only releases are never recommended. Failed dependency lookups are not cached. Dependencies whose environment markers do not apply are ignored. Malformed payloads raise `PyPIError`. A release with no upload date still passes the cooldown, with a warning logged once per package.
+- **Resolution:** a package PyPI could not serve no longer reports a recommendation. Conflict searches honour Python compatibility and the requirement's own bounds. The revert fallback rescans for conflicts. `--python-version` and `requires-python` now reach conflict resolution. `--format json-v2` counts and flags (`conflict_held`) packages held back by conflict resolution.
+- **Write safety:** `update` aborts if a file changed on disk since it was read, and `pyproject.toml` and conda edits refuse to apply when the text at a span changed since parsing. A Ctrl-C between files of a multi-file commit rolls back, and backups are never restored over rolled-back files. Atomic writes clean up temp files on Ctrl-C and refuse read-only targets. The second file read honours the 10 MB cap. `update --allow-hash-removal` removes `--hash` continuation lines together with the pin. `--refresh-hashes` keeps an own-line comment after a trailing `\`, and warns when non-sha256 hashes are replaced.
+- `update` without a terminal and without `--yes` gives a clear message instead of a traceback.
+- **HTTP client:** the failure memo expires after 30 s and is keyed on query parameters. Failed requests are not retried again within a run.
+- **`min_age`:** overflowing values (`inf`, `1e30`, `99999999999d`) and non-ASCII digits are a usage or config error, not a traceback. Units are case-insensitive (`7D`).
+- `NO_COLOR` set by the user is no longer deleted when `--color` is left at its default.
+- Configuration discovery without a `.git` no longer walks above `$HOME`.
+- `--format markdown` summary line no longer loses its package count.
+- `update --verify`: reports a missing or source-only distribution as a failure instead of a network skip, keeps pip index and credential settings (only variables that would change resolution are removed), and accepts constraints.
+
+### Security
+
+- HTTP client: responses are capped at 20 MB, each request has a total deadline, and redirects are followed only over https to PyPI hosts.
+- `update --verify` never builds source distributions (`--only-binary=:all:`), so no build hook of a new release runs.
+- Credentials in index URLs are redacted from parse errors and from `--verify` output, including passwords containing `/`.
 
 ---
 
@@ -174,7 +218,7 @@ Initial public release.
 ### Known limitations
 
 Documented in full at
-<https://rahulkaushal04.github.io/depkeeper/reference/limitations/>. Most significant:
+<https://github.com/rahulkaushal04/depkeeper/blob/main/docs/reference/limitations.md>. Most significant:
 
 - Not a substitute for pip's resolver — the transitive dependency graph is not expanded.
 - Only `pypi.org` is queried; `--index-url` directives are parsed and ignored.

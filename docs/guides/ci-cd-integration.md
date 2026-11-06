@@ -74,7 +74,7 @@ requests. Use it for pure drift reports; keep it enabled when the pipeline appli
 
 ### Scheduled drift report
 
-```yaml title=".github/workflows/dependency-report.yml"
+```yaml
 name: Dependency drift
 
 on:
@@ -124,7 +124,7 @@ jobs:
 
 ### Gate a pull request on drift policy
 
-```yaml title=".github/workflows/dependency-gate.yml"
+```yaml
 name: Dependency gate
 
 on: [pull_request]
@@ -163,7 +163,7 @@ jobs:
 
 ### Automated update pull request
 
-```yaml title=".github/workflows/dependency-update.yml"
+```yaml
 name: Dependency update
 
 on:
@@ -205,17 +205,18 @@ jobs:
           delete-branch: true
 ```
 
-!!! danger "Never skip the verification step"
-
-    depkeeper does not resolve the transitive graph. An update plan that looks clean can still
-    fail `pip install`. The `pip install` + test step is what makes an automated pull request
-    trustworthy. See [Conflict resolution → What is not checked](../concepts/conflict-resolution.md#what-is-not-checked).
+> [!CAUTION]
+> **Never skip the verification step**
+>
+> depkeeper does not resolve the transitive graph. An update plan that looks clean can still
+> fail `pip install`. The `pip install` + test step is what makes an automated pull request
+> trustworthy. See [Conflict resolution → What is not checked](../concepts/conflict-resolution.md#what-is-not-checked).
 
 ---
 
 ## GitLab CI
 
-```yaml title=".gitlab-ci.yml"
+```yaml
 variables:
   NO_COLOR: "1"
 
@@ -239,7 +240,7 @@ dependency-report:
 
 ## Jenkins
 
-```groovy title="Jenkinsfile"
+```groovy
 pipeline {
   agent any
   environment { NO_COLOR = '1' }
@@ -274,7 +275,7 @@ pipeline {
 Run `check` locally before a commit lands. Keep it non-blocking; a failing network should not
 block a commit.
 
-```yaml title=".pre-commit-config.yaml"
+```yaml
 - repo: local
   hooks:
     - id: depkeeper-check

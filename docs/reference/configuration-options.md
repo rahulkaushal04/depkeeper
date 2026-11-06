@@ -47,6 +47,21 @@ changes the reported status to `install`.
 strict_version_matching = false
 ```
 
+### `fail_on`
+
+`"none"` (default), `"updates"`, `"minor"` or `"major"`. Equivalent of `check --fail-on`.
+
+### `ignore`
+
+List of package names `check` and `update` skip, e.g. `ignore = ["django"]`. `--ignore` adds to it.
+
+### `python_version` and `min_age`
+
+`python_version = "3.9"` and `min_age = "7d"` are the config equivalents of `--python-version` and
+`--min-age`; the flags win. Without either, the target Python comes from the file's own `requires-python` /
+conda pin (lowest supported minor), then the running interpreter. See
+[`check`](cli-commands.md#target-python).
+
 ### Unknown keys
 
 Any other key is a hard error:
@@ -55,8 +70,20 @@ Any other key is a hard error:
 [ERROR] Unknown configuration keys: check_conflict (config_path=/path/depkeeper.toml)
 ```
 
-Exit code `1`. Keys are validated against the exact set `{check_conflicts,
-strict_version_matching}`. Nested tables are not supported.
+Exit code `1`. Keys are validated against the set `{check_conflicts, strict_version_matching,
+fail_on, ignore, python_version, min_age, versioning, packages}`. `packages` is the only nested
+table (`[depkeeper.packages.<name>]`, see below).
+
+### `versioning` and `[packages.<name>]`
+
+`versioning` is `"auto"` (default), `"semver"` or `"calver"`: how version change types are
+classified. Per-package policy lives in `[depkeeper.packages.<name>]` (`[tool.depkeeper.packages.<name>]`
+in `pyproject.toml`) with `hold`, `ignore`, `max_update` (`patch`/`minor`/`major`) and `versioning`.
+A top-level `[packages.x]` outside the `depkeeper` table is ignored.
+
+For calver packages the change labels are `year`, `month` and `patch`. **By design** a calver
+`year` change counts as `minor` for `--fail-on`, `--max-update` and `fail_on`, so `--fail-on major`
+never trips on a year-only bump (use `minor` or `updates`).
 
 ### Type validation
 
@@ -70,21 +97,21 @@ TOML booleans only: `true` / `false`, unquoted.
 
 ## File formats
 
-=== "depkeeper.toml"
+**depkeeper.toml**
 
-    ```toml
-    [depkeeper]
-    check_conflicts = true
-    strict_version_matching = false
-    ```
+```toml
+[depkeeper]
+check_conflicts = true
+strict_version_matching = false
+```
 
-=== "pyproject.toml"
+**pyproject.toml**
 
-    ```toml
-    [tool.depkeeper]
-    check_conflicts = true
-    strict_version_matching = false
-    ```
+```toml
+[tool.depkeeper]
+check_conflicts = true
+strict_version_matching = false
+```
 
 ---
 
@@ -93,17 +120,17 @@ TOML booleans only: `true` / `false`, unquoted.
 | Order | Source | Condition |
 |---|---|---|
 | 1 | `--config` / `-c`, or `DEPKEEPER_CONFIG` | Must exist and be a file, otherwise `ConfigError`. |
-| 2 | `./depkeeper.toml` | Must exist in the **current working directory**. |
-| 3 | `./pyproject.toml` | Adopted **only if** it contains a `[tool.depkeeper]` table. |
+| 2 | `depkeeper.toml` | Current directory, then each parent up to the repository root (a directory containing `.git`) or the filesystem root. |
+| 3 | `pyproject.toml` | Same search; adopted **only if** it contains a `[tool.depkeeper]` table. |
 | 4 | Built-in defaults | Always. |
 
 Notes:
 
-- Discovery is not recursive; parent directories are not searched.
+- An explicit `--config` file lacking its `[depkeeper]` / `[tool.depkeeper]` table is an error.
 - A `pyproject.toml` whose parse fails during the `[tool.depkeeper]` probe is treated as "no
   depkeeper section" and skipped silently, so a malformed unrelated `pyproject.toml` cannot break
   a depkeeper run.
-- A discovered file with an empty or absent depkeeper section is valid and yields the defaults,
+- A discovered file with an empty depkeeper section is valid and yields the defaults,
   with `source_path` recorded.
 
 ### Encoding
