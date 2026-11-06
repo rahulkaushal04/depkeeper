@@ -86,14 +86,14 @@ in `jq` and `.get()` in Python.
 | `source_version` | string \| null | The version of the source package that declares it. |
 | `target_package` | string | The constrained package (the object this conflict is attached to). |
 | `required_spec` | string | The specifier the source requires, e.g. `">=2.3.7"`. |
-| `conflicting_version` | string | The version of the target that violated the specifier when the conflict was recorded. |
+| `conflicting_version` | string | The version of the target that violates the specifier (its final recommended version). |
 
-> [!WARNING]
-> **Conflicts are cumulative**
+> [!NOTE]
+> **Only live conflicts are listed**
 >
-> The array holds every conflict recorded during resolution, **including ones a later pass
-> resolved**. It is an audit trail, not a list of live problems. The value in
-> `versions.recommended` is always the final, applied decision.
+> The array holds the conflicts still violated by the final update set, each requirement once,
+> in a stable order. `conflicting_version` is the final `versions.recommended` of this package.
+> Conflicts that an earlier pass resolved are not included.
 
 ---
 

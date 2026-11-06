@@ -64,6 +64,7 @@ from depkeeper.utils import (
 from depkeeper.utils.version_utils import (
     UPDATE_RANK,
     gating_type,
+    parse_version_lenient,
     retained_specs,
     rewrite_version_specs,
     specs_allow_version,
@@ -410,11 +411,13 @@ async def _update_async(
     logger.info("Found %d package(s)", len(requirements))
 
     async with HTTPClient() as http:
-        data_store = PyPIDataStore(http)
+        data_store = PyPIDataStore(http, target_python=python[0])
 
         # Failed lookups are remembered by HTTPClient, so later checks do not
         # re-wait the retry backoff for them.
-        await data_store.prefetch_packages([req.name for req in requirements])
+        await data_store.prefetch_packages(
+            [req.name for req in requirements if not (req.url or req.editable)]
+        )
 
         checker = VersionChecker.from_config(
             data_store,
@@ -434,7 +437,7 @@ async def _update_async(
             analyzer = DependencyAnalyzer(
                 data_store=data_store, target_python=python[0], checker=checker
             )
-            resolution_result = await analyzer.resolve_and_annotate_conflicts(packages)
+            resolution_result = await resolve_conflicts_by_name(analyzer, packages)
 
             if ctx.verbose > 0 and resolution_result:
                 _report.display_resolution_summary(resolution_result, stderr=markdown)
@@ -688,6 +691,47 @@ async def _update_async(
     return exit_code
 
 
+async def resolve_conflicts_by_name(
+    analyzer: DependencyAnalyzer, packages: List[Package]
+) -> ResolutionResult:
+    """Cross-validate *packages* with one entry per distinct name.
+
+    The analyzer keys everything by name, so a package declared in several
+    places (directory mode, ``-r`` includes) is validated through its
+    highest-proposal declaration only. Other declarations keep their own,
+    major-bounded recommendation, and only adopt the analyzer's outcome (and
+    its conflicts) when their proposal was identical to the validated one.
+    """
+    best: Dict[str, Package] = {}
+    for pkg in packages:
+        proposal = parse_version_lenient(pkg.recommended_version or pkg.current_version)
+        held = best.get(pkg.name)
+        held_v = held and parse_version_lenient(
+            held.recommended_version or held.current_version
+        )
+        if held is None or (
+            proposal is not None and (held_v is None or proposal > held_v)
+        ):
+            best[pkg.name] = pkg
+    if len(best) == len(packages):
+        return await analyzer.resolve_and_annotate_conflicts(packages)
+
+    seeds = {name: pkg.recommended_version for name, pkg in best.items()}
+    result = await analyzer.resolve_and_annotate_conflicts(list(best.values()))
+    for pkg in packages:
+        rep = best[pkg.name]
+        if pkg is rep or pkg.recommended_version != seeds[pkg.name]:
+            continue
+        pkg.recommended_version = rep.recommended_version
+        pkg.set_conflicts(rep.conflicts)
+        pkg.conflict_held = rep.conflict_held
+        pkg.recommended_released = rep.recommended_released
+        pkg.cooldown_skipped = rep.cooldown_skipped
+        if "recommended_metadata" in rep.metadata:
+            pkg.metadata["recommended_metadata"] = rep.metadata["recommended_metadata"]
+    return result
+
+
 def _find_updates(
     packages: List[Package],
     requirements: List[Requirement],
@@ -824,6 +868,21 @@ def _find_updates(
                     specs_to_string(req.specs),
                 )
                 continue
+
+        if pin and pkg.current_version and _is_exact_pin(req, target_version):
+            continue
+
+        if pin and pkg.current_version and not pkg.requires_downgrade:
+            # --pin rewrites the specifier even when the version stays put;
+            # a lower target would be a downgrade nobody asked for.
+            cur, tgt = (
+                parse_version_lenient(pkg.current_version),
+                parse_version_lenient(target_version),
+            )
+            if cur is not None and tgt is not None and tgt < cur:
+                continue
+            updates.append((req, pkg, target_version))
+            continue
 
         if not pkg.current_version:
             # Bare names outside requirements files keep "only version bytes
@@ -963,6 +1022,16 @@ def _run_verify(
     return verify_plan(
         requirements, constraints=constraints, python_version=python_version
     )
+
+
+def _is_exact_pin(req: Requirement, target: str) -> bool:
+    """Return whether *req* already is exactly ``==<target>`` (conda ``=`` is a series, not a pin)."""
+    if len(req.specs) != 1 or req.specs[0][0] != "==":
+        return False
+    if req.approximate and "==" not in (req.raw_line or ""):
+        return False
+    have, want = parse_version_lenient(req.specs[0][1]), parse_version_lenient(target)
+    return have is not None and have == want
 
 
 def _fuzzy_noop(req: Requirement, target: str) -> bool:
@@ -1200,6 +1269,13 @@ def _commit_pending_writes(pending: List[_PendingWrite]) -> None:
                 encoding=write.encoding,
             )
         except BaseException as exc:
+            # An interrupt can land after the rename but before this file is
+            # recorded as committed; it must be rolled back with the others.
+            try:
+                if _read_exact(write.path) == write.updated != write.original:
+                    committed.append(write)
+            except Exception:  # noqa: BLE001 -- best effort; the file is unreadable
+                pass
             if committed:
                 logger.error(
                     "Write failed for %s; rolling back %d file(s)",

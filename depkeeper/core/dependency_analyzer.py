@@ -27,7 +27,8 @@ Typical usage::
 from __future__ import annotations
 
 from enum import Enum
-from dataclasses import dataclass
+from functools import lru_cache
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Set, Tuple
 
 from packaging.version import parse, InvalidVersion
@@ -313,7 +314,8 @@ def _live_conflicts(
     Recorded conflicts accumulate across iterations, including ones a later
     iteration resolved. A conflict is live only while the source is still
     proposed at ``source_version`` and the target's version still fails
-    ``required_spec``.
+    ``required_spec``. Each live requirement appears once, reported against
+    *target_version*, in a deterministic order.
 
     Args:
         update_set: Final name -> proposed-version mapping.
@@ -321,14 +323,23 @@ def _live_conflicts(
         target_version: *target_name*'s entry in *update_set*.
         conflicts: Conflicts accumulated for *target_name*.
     """
-    live: List[Conflict] = []
+    by_key: Dict[Tuple[str, Optional[str], str, str], Conflict] = {}
 
     for conflict in conflicts:
         if update_set.get(conflict.source_package) != conflict.source_version:
             continue
         if _satisfies(target_version, conflict.required_spec):
             continue
-        live.append(conflict)
+        # The same requirement may be recorded against several earlier target
+        # versions; report it once, against the version the update set holds.
+        by_key.setdefault(
+            _violation_key(conflict),
+            replace(conflict, conflicting_version=target_version)
+            if target_version
+            else conflict,
+        )
+
+    live = [by_key[k] for k in sorted(by_key, key=lambda k: tuple(x or "" for x in k))]
 
     if live:
         logger.debug(
@@ -340,6 +351,39 @@ def _live_conflicts(
         )
 
     return live
+
+
+@lru_cache(maxsize=65536)
+def _parse_dependency(dep: str) -> Optional[PkgRequirement]:
+    """Parse a PEP 508 string once; ``None`` when it is malformed.
+
+    The same strings are re-read on every pass and for every candidate, and
+    parsing dominates the cost of large runs.
+    """
+    try:
+        return PkgRequirement(dep)
+    except (InvalidVersion, InvalidRequirement):
+        return None
+
+
+def _violation_key(conflict: Conflict) -> Tuple[str, Optional[str], str, str]:
+    """Identify a violated requirement independently of the target's version."""
+    return (
+        conflict.source_package,
+        conflict.source_version,
+        conflict.target_package,
+        conflict.required_spec,
+    )
+
+
+def _record_conflicts(
+    tracking: Dict[str, List[Conflict]], conflicts: Sequence[Conflict]
+) -> None:
+    """Add *conflicts* to *tracking* (keyed by target), skipping known signatures."""
+    for conflict in conflicts:
+        recorded = tracking.setdefault(conflict.target_package, [])
+        if conflict not in recorded:
+            recorded.append(conflict)
 
 
 class DependencyAnalyzer:
@@ -411,6 +455,31 @@ class DependencyAnalyzer:
             )
             return None
 
+    async def _get_dependencies(self, name: str, version: str) -> List[str]:
+        """Return the dependencies of ``name==version``; ``[]`` if the lookup fails."""
+        try:
+            return await self.data_store.get_version_dependencies(name, version)
+        except NetworkError as exc:
+            logger.debug("Dependencies of %s==%s unavailable: %s", name, version, exc)
+            return []
+
+    async def _requirements_of(
+        self,
+        name: str,
+        version: str,
+        memo: Dict[Tuple[str, str], Dict[str, SpecifierSet]],
+    ) -> Dict[str, SpecifierSet]:
+        """Map each package ``name==version`` requires to its specifier (memoised)."""
+        key = (name, version)
+        if key not in memo:
+            found: Dict[str, SpecifierSet] = {}
+            for dep in await self._get_dependencies(name, version):
+                req = _parse_dependency(dep)
+                if req is not None:
+                    found.setdefault(_normalize(req.name), req.specifier)
+            memo[key] = found
+        return memo[key]
+
     def _refresh_recommended_metadata(self, pkg: Package, resolved: str) -> None:
         """Recompute recommendation metadata for *resolved* from cached data only."""
         cached = self.data_store.get_cached_package(pkg.name)
@@ -476,6 +545,7 @@ class DependencyAnalyzer:
             A `ResolutionResult` with the final version per package, conflict
             details and resolution statistics.
         """
+        packages = [pkg for pkg in packages if not pkg.direct]
         pkg_lookup: Dict[str, Package] = {pkg.name: pkg for pkg in packages}
         update_set: Dict[str, Optional[str]] = {}
         conflict_tracking: Dict[str, List[Conflict]] = {}
@@ -502,6 +572,10 @@ class DependencyAnalyzer:
         iterations_used = 0
         converged = False
 
+        # Two proposals can keep undoing each other; a repeated state means
+        # more passes would only replay the same moves.
+        seen_states = {tuple(sorted(update_set.items()))}
+
         for iteration in range(_MAX_RESOLUTION_ITERATIONS):
             iterations_used = iteration + 1
             cross_conflicts = await self._find_cross_conflicts(packages, update_set)
@@ -514,28 +588,7 @@ class DependencyAnalyzer:
                 break
 
             # The same conflict is re-detected each pass; dedupe by signature.
-            for conflict in cross_conflicts:
-                conflicts_list = conflict_tracking.setdefault(
-                    conflict.target_package, []
-                )
-
-                conflict_key = (
-                    conflict.source_package,
-                    conflict.source_version,
-                    conflict.required_spec,
-                    conflict.conflicting_version,
-                )
-                existing_keys = {
-                    (
-                        c.source_package,
-                        c.source_version,
-                        c.required_spec,
-                        c.conflicting_version,
-                    )
-                    for c in conflicts_list
-                }
-                if conflict_key not in existing_keys:
-                    conflicts_list.append(conflict)
+            _record_conflicts(conflict_tracking, cross_conflicts)
 
             resolved_any = await self._resolve_conflicts_within_major(
                 pkg_lookup, update_set, cross_conflicts
@@ -548,12 +601,28 @@ class DependencyAnalyzer:
                     iteration + 1,
                 )
                 break
+
+            state = tuple(sorted(update_set.items()))
+            if state in seen_states:
+                logger.warning(
+                    "Conflict resolution is cycling between the same versions "
+                    "after %d iteration(s)",
+                    iteration + 1,
+                )
+                break
+            seen_states.add(state)
         else:
             # Loop exhausted without breaking.
             logger.warning(
                 "Conflict resolution did not converge within %d iterations",
                 _MAX_RESOLUTION_ITERATIONS,
             )
+
+        # The last move of an exhausted loop was never scanned.
+        remaining: List[Conflict] = []
+        if not converged:
+            remaining = await self._find_cross_conflicts(packages, update_set)
+            _record_conflicts(conflict_tracking, remaining)
 
         # Advisory alternatives from one stable snapshot. Tracked conflicts
         # include ones the loop resolved, so an alternative must not override
@@ -573,23 +642,52 @@ class DependencyAnalyzer:
                 pkg, live_conflicts[pkg.name] or conflicts
             )
 
-        # Adopt only where the decision is still broken, judged against one
-        # snapshot so package order does not matter.
+        # Adopt only where the decision is still broken and the alternative
+        # introduces no new violation, judged against one snapshot so package
+        # order does not matter.
+        snapshot = dict(update_set)
+        known = {
+            _violation_key(c)
+            for c in await self._find_cross_conflicts(packages, snapshot)
+        }
+        adopted: Dict[str, str] = {}
         for name, live in live_conflicts.items():
             alternative = alternatives.get(name)
-            if not live or not alternative or alternative == update_set.get(name):
+            if not live or not alternative or alternative == snapshot.get(name):
                 continue
             if not _satisfies_all(alternative, live):
+                continue
+            trial = {**snapshot, name: alternative}
+            introduced = {
+                _violation_key(c)
+                for c in await self._find_cross_conflicts(packages, trial)
+            } - known
+            if introduced:
+                logger.debug(
+                    "Not adopting %s==%s: it would introduce %d new conflict(s)",
+                    name,
+                    alternative,
+                    len(introduced),
+                )
                 continue
             logger.info(
                 "Adopting compatible alternative for %s: %s → %s "
                 "(%d conflict(s) unresolved by the resolution loop)",
                 name,
-                update_set.get(name),
+                snapshot.get(name),
                 alternative,
                 len(live),
             )
-            update_set[name] = alternative
+            adopted[name] = alternative
+        update_set.update(adopted)
+
+        # Adoptions can interact; record whatever the final set still violates.
+        if adopted:
+            remaining = await self._find_cross_conflicts(packages, update_set)
+            _record_conflicts(conflict_tracking, remaining)
+
+        # A stalled or cycling loop can still end on a consistent set.
+        converged = not remaining
 
         resolved_versions: Dict[str, PackageResolution] = {}
         packages_with_conflicts = 0
@@ -739,7 +837,7 @@ class DependencyAnalyzer:
         *P*'s requirement specifier. If not, emit a `Conflict`.
 
         Args:
-            packages: Full package list (provides iteration order).
+            packages: Full package list.
             update_set: Current name → proposed-version mapping.
 
         Returns:
@@ -747,19 +845,18 @@ class DependencyAnalyzer:
         """
         cross_conflicts: List[Conflict] = []
 
-        for pkg in packages:
+        # Resolution consumes conflicts in order; sorting keeps the outcome
+        # independent of how the files happened to list the packages.
+        for pkg in sorted(packages, key=lambda p: p.name):
             proposed_version = update_set.get(pkg.name)
             if not proposed_version:
                 continue
 
-            deps = await self.data_store.get_version_dependencies(
-                pkg.name, proposed_version
-            )
+            deps = await self._get_dependencies(pkg.name, proposed_version)
 
             for dep_spec in deps:
-                try:
-                    req = PkgRequirement(dep_spec)
-                except (InvalidVersion, InvalidRequirement):
+                req = _parse_dependency(dep_spec)
+                if req is None:
                     logger.debug(
                         "Unparseable requirement %r in %s==%s",
                         dep_spec,
@@ -769,6 +866,11 @@ class DependencyAnalyzer:
                     continue
 
                 req_name: str = _normalize(req.name)
+
+                # A package's requirement on itself (e.g. a self-referencing
+                # extra) is not a cross-package conflict and no move can fix it.
+                if req_name == pkg.name:
+                    continue
 
                 # Dependencies outside the update set cannot be adjusted.
                 target_version = update_set.get(req_name)
@@ -820,6 +922,8 @@ class DependencyAnalyzer:
         resolved_any: bool = False
 
         processed_sources: Set[str] = set()
+        # Per-pass memo: a pass reads every proposal's requirements once.
+        requirements_memo: Dict[Tuple[str, str], Dict[str, SpecifierSet]] = {}
 
         for conflict in cross_conflicts:
             source_name: str = conflict.source_package
@@ -850,6 +954,7 @@ class DependencyAnalyzer:
                 source_major=source_major,
                 target_name=target_name,
                 target_proposed_version=target_proposed,
+                update_set=update_set,
             )
 
             if compatible_source and compatible_source != update_set.get(source_name):
@@ -867,14 +972,22 @@ class DependencyAnalyzer:
                 processed_sources.add(source_name)
                 continue
 
-            constrained_target = await self._find_constrained_target_within_major(
-                target_name=target_name,
-                target_major=target_major,
-                required_spec=conflict.required_spec,
-                retained=target_pkg.retained_specs,
-                current_version=target_pkg.current_version,
-                scheme=target_pkg.versioning,
-            )
+            # A held or ignored target must stay put: lowering it would rewrite
+            # a requirement the user told depkeeper not to touch.
+            if target_pkg.held or target_pkg.ignored:
+                constrained_target: Optional[str] = None
+            else:
+                constrained_target = await self._find_constrained_target_within_major(
+                    target_name=target_name,
+                    target_major=target_major,
+                    required_spec=conflict.required_spec,
+                    retained=target_pkg.retained_specs,
+                    current_version=target_pkg.current_version,
+                    scheme=target_pkg.versioning,
+                    update_set=update_set,
+                    source_name=source_name,
+                    requirements_memo=requirements_memo,
+                )
 
             if constrained_target and constrained_target != target_proposed:
                 logger.info(
@@ -915,12 +1028,15 @@ class DependencyAnalyzer:
         source_major: Optional[int],
         target_name: str,
         target_proposed_version: Optional[str],
+        update_set: Optional[Dict[str, Optional[str]]] = None,
     ) -> Optional[str]:
         """Find a source version, within its major, compatible with the target.
 
         Walks the source's versions newest first. A candidate is compatible
         when it has no dependency on *target_name*, or its specifier is
-        satisfied by *target_proposed_version*. At most
+        satisfied by *target_proposed_version*; given *update_set*, its
+        requirements on every other proposed package must hold too, so a
+        step back cannot trade one conflict for another. At most
         `_MAX_SOURCE_CANDIDATES` candidates are evaluated, and the search
         stops below the installed version.
 
@@ -930,6 +1046,8 @@ class DependencyAnalyzer:
                 if it cannot be determined.
             target_name: Normalized name of the conflicting dependency.
             target_proposed_version: The target's entry in the update set.
+            update_set: Current proposals; when given, requirements on
+                packages other than the target are enforced as well.
 
         Returns:
             The highest compatible source version, or ``None`` when none
@@ -971,13 +1089,16 @@ class DependencyAnalyzer:
 
             candidates_checked += 1
 
-            deps = await self.data_store.get_version_dependencies(
-                source_name, version_str
-            )
+            deps = await self._get_dependencies(source_name, version_str)
 
             target_spec: Optional[SpecifierSet] = _extract_specifier_for(
                 deps, target_name
             )
+
+            if update_set is not None and _violates_update_set(
+                deps, {**update_set, target_name: None}, source_name
+            ):
+                continue
 
             if target_spec is None:
                 logger.debug(
@@ -1012,8 +1133,18 @@ class DependencyAnalyzer:
         retained: Sequence[Tuple[str, str]] = (),
         current_version: Optional[str] = None,
         scheme: str = "semver",
+        update_set: Optional[Dict[str, Optional[str]]] = None,
+        source_name: Optional[str] = None,
+        requirements_memo: Optional[
+            Dict[Tuple[str, str], Dict[str, SpecifierSet]]
+        ] = None,
     ) -> Optional[str]:
         """Find the highest target version within its major satisfying *required_spec*.
+
+        Given *update_set*, a candidate must also satisfy what every other
+        proposed package (not *source_name*, which is being reverted) requires
+        of the target, and its own requirements on the proposals, so
+        satisfying one dependent cannot break another.
 
         Args:
             target_name: Package whose versions are scanned.
@@ -1022,6 +1153,9 @@ class DependencyAnalyzer:
             retained: Bounds from the target's own requirement.
             current_version: The target's installed version.
             scheme: Versioning scheme of the target.
+            update_set: Current proposals, enabling the extra checks above.
+            source_name: Dependent exempt from them.
+            requirements_memo: Shared cache of per-version requirements.
 
         Returns:
             A version string, or ``None`` when the specifier is unparseable,
@@ -1041,6 +1175,17 @@ class DependencyAnalyzer:
         if target_data is None:
             return None
 
+        memo = requirements_memo if requirements_memo is not None else {}
+        others: List[SpecifierSet] = []
+        for name, proposed in (update_set or {}).items():
+            if name in (target_name, source_name) or not proposed:
+                continue
+            required = (await self._requirements_of(name, proposed, memo)).get(
+                target_name
+            )
+            if required:
+                others.append(required)
+
         for version_str in _compatible_versions(
             target_data,
             target_major,
@@ -1050,8 +1195,17 @@ class DependencyAnalyzer:
             current_version,
             scheme,
         ):
-            if _specifier_allows(version_str, spec):
-                return version_str  # descending, so the first match is highest
+            if not _specifier_allows(version_str, spec):
+                continue
+            if any(not _specifier_allows(version_str, o) for o in others):
+                continue
+            if update_set is not None and _violates_update_set(
+                await self._get_dependencies(target_name, version_str),
+                update_set,
+                target_name,
+            ):
+                continue
+            return version_str  # descending, so the first match is highest
 
         return None
 
@@ -1094,6 +1248,30 @@ class DependencyAnalyzer:
         return compatible
 
 
+def _violates_update_set(
+    deps: List[str], update_set: Dict[str, Optional[str]], skip: str
+) -> bool:
+    """Return ``True`` when any of *deps* is violated by the proposals in *update_set*.
+
+    *skip* names the package the deps belong to (a self-requirement is not a
+    cross-package conflict) so the check matches `_find_cross_conflicts`.
+    """
+    for dep in deps:
+        req = _parse_dependency(dep)
+        if req is None:
+            continue
+        name = _normalize(req.name)
+        proposed = update_set.get(name)
+        if (
+            name != skip
+            and proposed
+            and req.specifier
+            and not _specifier_allows(proposed, req.specifier)
+        ):
+            return True
+    return False
+
+
 def _extract_specifier_for(deps: List[str], target_name: str) -> Optional[SpecifierSet]:
     """Return the specifier *deps* places on *target_name*.
 
@@ -1110,9 +1288,8 @@ def _extract_specifier_for(deps: List[str], target_name: str) -> Optional[Specif
     normalized_target: str = _normalize(target_name)
 
     for dep in deps:
-        try:
-            req = PkgRequirement(dep)
-        except (InvalidVersion, InvalidRequirement):
+        req = _parse_dependency(dep)
+        if req is None:
             logger.debug("Skipping unparseable dependency: %r", dep)
             continue
 

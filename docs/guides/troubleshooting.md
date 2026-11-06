@@ -256,11 +256,13 @@ No version of either package, within their current majors, satisfies the other. 
 their current versions — no change is proposed. Fixing this requires a major upgrade, which
 depkeeper will not perform.
 
-### A conflict is shown that no longer applies
+### Which conflicts are listed
 
-Conflict lists are cumulative across resolution passes by design: they are the audit trail of
-everything considered, not the set of live problems. `packages_with_conflicts` counts the same
-way. The **applied** version is always correct; only the conflict annotation is historical.
+A package's `conflicts` list (table, markdown and JSON output) holds only the conflicts that
+are still live in the final update set, each requirement once, reported against the final
+`versions.recommended`. Conflicts that an earlier pass hit and a later pass resolved are not
+shown. The Resolution Summary's `packages_with_conflicts` is different: it counts every package
+that had a conflict at any point during resolution.
 
 ### Conflicts are not detected at all
 

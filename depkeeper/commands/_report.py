@@ -11,9 +11,11 @@ import re
 from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import urlsplit
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import click
+from rich.markup import escape
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
 from depkeeper.config import DepKeeperConfig, parse_duration
@@ -29,7 +31,7 @@ logger = get_logger("commands.report")
 #: ``schema_version`` of the ``--format json-v2`` envelope.
 ENVELOPE_SCHEMA_VERSION = 2
 
-_PY_RE = re.compile(r"^\d+\.\d+$")
+_PY_RE = re.compile(r"\A[0-9]+\.[0-9]+\Z")
 
 
 def python_version_option(
@@ -77,7 +79,9 @@ def minimum_python(spec: str) -> Optional[str]:
         return None
     for major, top in ((2, 8), (3, 40)):
         for minor in range(0, top):
-            if sset.contains(f"{major}.{minor}.0", prereleases=True):
+            if sset.contains(f"{major}.{minor}.0", prereleases=True) or (
+                sset.contains(f"{major}.{minor}.999", prereleases=True)
+            ):
                 # ``>=3.8.5`` still allows some 3.8.x, so step back one minor
                 if (
                     ">=" in spec
@@ -291,9 +295,48 @@ def unknown_allow_major_note(
     )
 
 
+def clean_specifier(spec: Optional[str]) -> Optional[str]:
+    """Drop empty clauses (``>=3.7,`` -> ``>=3.7``) from a specifier string."""
+    if not spec:
+        return spec
+    return ",".join(c.strip() for c in spec.split(",") if c.strip()) or None
+
+
+def attention_note(packages: Sequence[Package], failed: Sequence[str] = ()) -> str:
+    """Return what still needs attention even though nothing is outdated.
+
+    Empty when the packages are genuinely up to date, i.e. there are no
+    unresolved conflicts, no package held back by a conflict and no failed
+    lookups.
+    """
+    conflicted = [p.name for p in packages if p.has_conflicts()]
+    held = [
+        p.name for p in packages if p.conflict_held and p.name not in set(conflicted)
+    ]
+    parts = []
+    if conflicted:
+        parts.append(f"unresolved conflicts: {', '.join(conflicted)}")
+    if held:
+        parts.append(f"held back by conflicts: {', '.join(held)}")
+    if failed:
+        parts.append(f"could not be checked: {', '.join(failed)}")
+    return "No updates available, but there are " + "; ".join(parts) if parts else ""
+
+
 def package_json(row: Row) -> Dict[str, Any]:
-    """Return ``Package.to_json()`` plus links/ignored (and file info)."""
+    """Return ``Package.to_json()`` plus links/ignored (and file info).
+
+    A package frozen by policy reports status ``held`` / ``ignored`` rather
+    than ``latest``: it may well have a newer release.
+    """
     entry = row.pkg.to_json()
+    if entry["status"] == "latest" and (row.pkg.held or row.pkg.ignored):
+        entry["status"] = "held" if row.pkg.held else "ignored"
+    reqs = entry.get("python_requirements")
+    if reqs:
+        entry["python_requirements"] = {
+            k: clean_specifier(v) or v for k, v in reqs.items()
+        }
     if row.pkg.ignored:
         entry["ignored"] = True
     if row.links:
@@ -337,7 +380,9 @@ def build_envelope(
                     "package": pkg.name,
                     "file": entry["file"],
                     "line": entry["line"],
-                    "message": "not found on PyPI or network error",
+                    "message": pkg.metadata.get(
+                        "lookup_error", "not found on PyPI or network error"
+                    ),
                 }
             )
         if entry["status"] in ("outdated", "install", "downgrade"):
@@ -379,7 +424,24 @@ _GROUP_TITLES = {
 
 def _cell(text: str) -> str:
     """Escape *text* for a Markdown table cell."""
-    return text.replace("|", "\\|").replace("\n", " ")
+    return text.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
+
+_UNSAFE_URL_CHARS = re.compile(r"[\x00-\x20\x7f()<>\[\]|`\\\"]")
+
+
+def _safe_url(url: str) -> Optional[str]:
+    """Return *url* made safe for a Markdown link target, or ``None``.
+
+    Only ``http(s)`` URLs survive (``javascript:`` / ``data:`` links would be
+    clickable in a PR body); characters that could end the link or inject
+    markup or HTML are percent-encoded.
+    """
+    url = url.strip()
+    parts = urlsplit(url)
+    if parts.scheme.lower() not in ("http", "https") or not parts.netloc:
+        return None
+    return _UNSAFE_URL_CHARS.sub(lambda m: f"%{ord(m.group()):02X}", url)
 
 
 def _links_cell(row: Row) -> str:
@@ -388,11 +450,11 @@ def _links_cell(row: Row) -> str:
         "release_notes": "release notes",
         "homepage": "homepage",
     }
-    parts = [
-        f"[{names[k]}]({row.links[k].replace(')', '%29').replace(' ', '%20')})"
-        for k in names
-        if k in row.links
-    ]
+    parts = []
+    for k in names:
+        url = _safe_url(row.links[k]) if k in row.links else None
+        if url:
+            parts.append(f"[{names[k]}]({url})")
     parts.append(f"[PyPI](https://pypi.org/project/{row.pkg.name}/)")
     return " · ".join(parts)
 
@@ -531,7 +593,7 @@ def render_markdown(
     )
     if (
         not changes
-        and not any(p.held or p.ignored or p.conflicts for p in pkgs)
+        and not any(p.held or p.ignored or p.conflicts or p.conflict_held for p in pkgs)
         and not any(r.failed for r in rows)
     ):
         out.extend(["All packages are up to date.", ""])
@@ -575,14 +637,18 @@ def display_resolution_summary(
         if result.converged
         else f"No (stopped after {result.iterations_used} iterations)"
     )
+    if result.converged and result.packages_with_conflicts:
+        convergence_status += f"; {result.packages_with_conflicts} still in conflict"
     console.print(f"Converged: {convergence_status}")
 
     if changed:
         console.print("\n[bold]Version changes:[/bold]")
         for pkg_resolution in changed:
             console.print(
-                f"  • {pkg_resolution.name}: {pkg_resolution.original} → "
-                f"{pkg_resolution.resolved} ({pkg_resolution.status.value})"
+                f"  • {escape(str(pkg_resolution.name))}: "
+                f"{escape(str(pkg_resolution.original))} → "
+                f"{escape(str(pkg_resolution.resolved))} "
+                f"({pkg_resolution.status.value})"
             )
 
     console.print("")

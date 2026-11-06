@@ -113,11 +113,12 @@ carried one. The signature survives even when line 1 is the line being rewritten
 `--backup` copies every file that will be modified (including `-r` includes), with `shutil.copy2`, before the first write:
 
 ```text
-requirements.20261106_191359_861179_35e36bf1.backup.txt
+requirements.txt.20261106_191359_861179_35e36bf1.backup
 ```
 
-The layout is `<stem>.<timestamp>_<uuid8>.backup<suffix>`. The original suffix is kept last so the
-backup remains recognisable by extension; the random component makes concurrent backups of the
+The layout is `<name>.<timestamp>_<uuid8>.backup`. The name ends in `.backup` so that no
+`requirements*.txt` or `*.txt` glob (depkeeper's directory discovery, `pip install -r`) picks the
+copy up as a live requirements file; the random component makes concurrent backups of the
 same file collision-free even within the same microsecond.
 
 Each backup is announced as `[OK] Backup saved: <path>`. Backups are a safety copy, not the
@@ -132,7 +133,7 @@ an edit made by someone else. If the update fails after backups were taken, it p
 > [!NOTE]
 > **Backups are never cleaned up**
 >
-> depkeeper does not delete old backups. In a repository, add `*.backup.*` to `.gitignore`, or
+> depkeeper does not delete old backups. In a repository, add `*.backup` to `.gitignore`, or
 > prefer version control over `--backup` entirely — `git diff` is a better review tool and
 > `git checkout` a better restore.
 

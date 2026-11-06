@@ -52,9 +52,10 @@ from typing import (
     Tuple,
     Union,
 )
-from packaging.version import InvalidVersion
+from packaging.version import InvalidVersion, Version
 
 from depkeeper.exceptions import NetworkError
+from depkeeper.utils.http import ResponseTooLargeError
 from depkeeper.models.package import Package
 from depkeeper.utils.logger import get_logger
 from depkeeper.config import DepKeeperConfig, PackagePolicy
@@ -85,7 +86,14 @@ def _newer_series(candidates: List[str], current: str, series: int) -> List[str]
         return (tuple(r) + (0,) * series)[:series]
 
     base = key(current)
-    return [v for v in candidates if parse_version_lenient(v) and key(v) > base]
+    floor = parse_version_lenient(current)
+    return [
+        v
+        for v in candidates
+        if (p := parse_version_lenient(v)) is not None
+        and key(v) > base
+        and (floor is None or p > floor)
+    ]
 
 
 class VersionChecker:
@@ -210,6 +218,7 @@ class VersionChecker:
         current_version: Optional[str] = None,
         constraints: Optional[Sequence[Tuple[str, str]]] = None,
         series: Optional[int] = None,
+        floor_inferred: bool = False,
     ) -> Package:
         """Fetch metadata and compute a recommended version for *name*.
 
@@ -243,12 +252,22 @@ class VersionChecker:
         """
         try:
             pkg_data = await self.data_store.get_package_data(name)
-        except NetworkError:
+        except NetworkError as exc:
             # PyPIError is a NetworkError: a stub keeps one bad package from
             # failing the whole run.
             logger.warning("Package '%s' unavailable; creating stub", name)
-            return self.create_unavailable_package(name, current_version)
+            stub = self.create_unavailable_package(name, current_version)
+            if isinstance(exc, ResponseTooLargeError):
+                mb = 1024 * 1024
+                size = f"{exc.size / mb:.0f} MB" if exc.size else "too large"
+                stub.metadata["lookup_error"] = (
+                    f"PyPI metadata for {name} is {size}, above the "
+                    f"{exc.limit // mb} MB limit"
+                )
+            return stub
 
+        if floor_inferred and current_version:
+            current_version = self._snap_floor(pkg_data, current_version)
         package = self._build_package_from_data(
             pkg_data, current_version, constraints, series
         )
@@ -342,11 +361,33 @@ class VersionChecker:
             metadata={},
         )
 
+    @staticmethod
+    def _snap_floor(pkg_data: PyPIPackageData, floor: str) -> str:
+        """Return the lowest real stable release >= *floor* (else *floor*)."""
+        if floor in pkg_data.all_versions:
+            return floor
+        try:
+            low = Version(floor)
+        except InvalidVersion:
+            return floor
+        above = [v for v in pkg_data.all_versions if Version(v) >= low]
+        if not above:
+            return floor
+        snapped = min(above, key=Version)
+        logger.debug("%s: %s is not a release, using %s", pkg_data.name, floor, snapped)
+        return snapped
+
+    async def _direct_package(self, requirement: Requirement) -> Package:
+        """Return a ``direct`` package: URL/VCS/path sources are never queried."""
+        return Package(name=requirement.name, direct=True)
+
     def _create_package_check_task(
         self,
         requirement: Requirement,
     ) -> asyncio.Task[Package]:
         """Spawn a task that checks *requirement*, honouring its declared range."""
+        if requirement.url or requirement.editable:
+            return asyncio.create_task(self._direct_package(requirement))
         current_version = self.extract_current_version(requirement)
         return asyncio.create_task(
             self.get_package_info(
@@ -357,6 +398,9 @@ class VersionChecker:
                 + implied_major_bounds(requirement.specs)
                 + list(requirement.constraint_specs),
                 requirement.series,
+                floor_inferred=not any(
+                    op in ("==", "===") for op, _ in requirement.specs
+                ),
             )
         )
 
@@ -606,7 +650,9 @@ class VersionChecker:
             if current is None or parsed is None or parsed <= current:
                 kept.append(v)
             elif (
-                update_rank(gating_type(get_update_type(current_version, v, scheme)))
+                update_rank(
+                    gating_type(get_update_type(str(current), str(parsed), scheme))
+                )
                 <= cap
             ):
                 kept.append(v)
@@ -678,6 +724,7 @@ class VersionChecker:
 
         now = self._clock()
         current = parse_version_lenient(current_version)
+        withheld: Optional[str] = None
         for version in candidates:
             parsed = parse_version_lenient(version)
             if current is not None and parsed is not None and parsed <= current:
@@ -694,8 +741,10 @@ class VersionChecker:
                         version,
                     )
             elif now - uploaded < self.min_age:
+                withheld = withheld or version
                 continue
-            skipped = candidates[0] if version != candidates[0] else None
+            top = parse_version_lenient(candidates[0])
+            skipped = candidates[0] if parsed != top else None
             if skipped:
                 logger.debug(
                     "%s: %s withheld by min_age cooldown, using %s",
@@ -704,7 +753,7 @@ class VersionChecker:
                     version,
                 )
             return version, skipped
-        return None, candidates[0]
+        return None, withheld
 
     @staticmethod
     def _major_from_version(version: str) -> Optional[int]:

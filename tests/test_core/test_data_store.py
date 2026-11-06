@@ -866,8 +866,10 @@ class TestFetchEdgeCases:
         assert await store.get_version_dependencies("pkg", "1.0") == []
         assert mock_http_client.get.call_count == 1
 
-    def test_markers_evaluated_against_environment(self) -> None:
-        deps = PyPIDataStore._extract_dependencies(
+    def test_markers_evaluated_against_environment(
+        self, mock_http_client: MagicMock
+    ) -> None:
+        deps = PyPIDataStore(mock_http_client)._extract_dependencies(
             {
                 "requires_dist": [
                     "always>=1",

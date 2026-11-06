@@ -178,13 +178,27 @@ def test_nonexistent_version_fails_with_clear_message() -> None:
 
 
 @needs_pip
-def test_timeout_is_skipped_and_leaves_no_orphan_pip() -> None:
+def test_timeout_is_skipped_and_leaves_no_orphan_pip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from depkeeper.core import verify as verify_mod
+
+    real_run = verify_mod._run
+    req_files = []
+
+    def spy(args: Any, timeout: float) -> Any:
+        if "-r" in args:  # tell our pip apart from other processes on the machine
+            req_files.append(args[args.index("-r") + 1])
+        return real_run(args, timeout)
+
+    monkeypatch.setattr(verify_mod, "_run", spy)
     r = verify_plan(["django==4.2.30", "flask==3.1.0", "pandas==2.2.3"], timeout=0.01)
     assert r.skipped and "timed out" in r.message
+    assert len(req_files) == 1
     ps = subprocess.run(
         ["ps", "-axo", "command"], capture_output=True, text=True, check=False
     ).stdout
-    assert "depkeeper-req-" not in ps
+    assert req_files[0] not in ps
 
 
 @needs_pip

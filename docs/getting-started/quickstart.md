@@ -128,7 +128,7 @@ urllib3==1.26.20
 ```
 
 `--backup` wrote a sibling copy named
-`requirements.20261106_191359_861179_35e36bf1.backup.txt` before touching the original
+`requirements.txt.20261106_191359_861179_35e36bf1.backup` before touching the original
 (`[OK] Backup saved: <path>`).
 
 ---

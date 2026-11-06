@@ -27,11 +27,11 @@ Spec = Tuple[str, str]
 
 
 def _warn_escaped(text: str, node: "_Str", path: Path) -> None:
-    # shortcut: backslash-escaped strings are not edited (spans would not map
+    # shortcut: escapes before the marker are not edited (spans would not map
     # to decoded text); loud skip until someone needs them.
     logger.warning(
-        "%s:%d: skipping dependency string with backslash escapes "
-        "(not checked or updated)",
+        "%s:%d: skipping dependency string with backslash escapes in its "
+        "name or version (not checked or updated)",
         path,
         _line_of(text, node.start),
     )
@@ -269,8 +269,7 @@ class PyprojectTomlAdapter(SourceAdapter):
         try:
             tomllib.loads(text)
         except tomllib.TOMLDecodeError:
-            # broken file: still ours when it looks like one, so parse() reports it
-            return bool(_LOOSE_SECTION.search(text))
+            return True  # broken file: parse() reports it, not the requirements parser
         return True  # any valid pyproject.toml is ours, even without dependencies
 
     def has_dependencies(self, path: Path) -> bool:
@@ -296,6 +295,7 @@ class PyprojectTomlAdapter(SourceAdapter):
                 "dependencies" in poetry,
                 "dev-dependencies" in poetry,
                 "group" in poetry,
+                bool(PyprojectTomlAdapter._tool_lists(data)),
             )
         )
 
@@ -312,12 +312,24 @@ class PyprojectTomlAdapter(SourceAdapter):
             ) from exc
 
     def requires_python(self, path: Path) -> Optional[str]:
-        """Return ``project.requires-python``, or None when absent or unreadable."""
+        """Return the declared Python range as a PEP 440 specifier, or None.
+
+        ``project.requires-python`` wins; otherwise Poetry's
+        ``tool.poetry.dependencies.python`` (caret/tilde translated).
+        """
         try:
-            value = self._load(path)[1].get("project", {}).get("requires-python")
+            data = self._load(path)[1]
         except (ParseError, DepKeeperError):
             return None
-        return value if isinstance(value, str) else None
+        value = data.get("project", {}).get("requires-python")
+        if isinstance(value, str):
+            return value
+        py = data.get("tool", {}).get("poetry", {}).get("dependencies", {})
+        py = py.get("python") if isinstance(py, dict) else None
+        if isinstance(py, dict):
+            py = py.get("version")
+        specs = _poetry_specs(py) if isinstance(py, str) else None
+        return ",".join(op + v for op, v in specs) if specs else None
 
     def parse(self, path: Path) -> List[Requirement]:
         """Parse PEP 508 and Poetry dependencies with their text spans.
@@ -336,7 +348,7 @@ class PyprojectTomlAdapter(SourceAdapter):
             req = self._pep508(text, node, path)
             if req:
                 reqs.append(req)
-            elif not node.escaped:  # escaped ones already warned
+            elif not node.escaped and not text[node.start : node.end].startswith("-"):
                 logger.warning(
                     "%s:%d: skipping invalid requirement %r",
                     path,
@@ -372,6 +384,7 @@ class PyprojectTomlAdapter(SourceAdapter):
         ):
             if isinstance(tbl, dict):
                 lists.extend(tbl.values())
+        lists.extend(self._tool_lists(tree))
         for lst in lists:
             if isinstance(lst, (_Str, _Other, dict)):
                 raise ParseError(
@@ -391,6 +404,18 @@ class PyprojectTomlAdapter(SourceAdapter):
                         _line_of(text, n.start),
                     )
 
+    @classmethod
+    def _tool_lists(cls, root: Dict[str, Any]) -> List[Node]:
+        """PEP 508 lists of uv, PDM and Hatch (``root`` is a node tree or tomli data)."""
+        out: List[Node] = [cls._table(root, "tool", "uv", "dev-dependencies")]
+        pdm = cls._table(root, "tool", "pdm", "dev-dependencies")
+        if isinstance(pdm, dict):
+            out.extend(pdm.values())
+        envs = cls._table(root, "tool", "hatch", "envs")
+        for env in envs.values() if isinstance(envs, dict) else ():
+            out += [cls._table(env, k) for k in ("dependencies", "extra-dependencies")]
+        return [lst for lst in out if lst is not None]
+
     def _poetry_nodes(self, tree: Dict[str, Node]) -> Iterator[Tuple[str, Node]]:
         poetry = self._table(tree, "tool", "poetry")
         tables: List[Node] = [
@@ -405,10 +430,20 @@ class PyprojectTomlAdapter(SourceAdapter):
                 yield from tbl.items()
 
     def _pep508(self, text: str, node: _Str, path: Path) -> Optional[Requirement]:
-        if node.escaped:
-            _warn_escaped(text, node, path)
-            return None
         s = text[node.start : node.end]
+        decoded = None
+        if node.escaped:
+            # Escapes after the ';' (typically \" in markers) leave the name and
+            # specifier text identical to the source, so those stay editable.
+            cut = s.find(";")
+            if cut < 0 or "\\" in s[:cut]:
+                _warn_escaped(text, node, path)
+                return None
+            quote = 3 if text.startswith('"""', node.start - 3) else 1
+            decoded = tomllib.loads(
+                "v = " + text[node.start - quote : node.end + quote]
+            )["v"]
+            s = s[:cut]
         head = _HEAD.match(s)
         if not head:
             return None
@@ -419,12 +454,15 @@ class PyprojectTomlAdapter(SourceAdapter):
         rest, rest_at = s[head.end() :], node.start + head.end()
         line = _line_of(text, node.start)
         req = Requirement(
-            name=head.group("name"), extras=extras, line_number=line, raw_line=s.strip()
+            name=head.group("name"),
+            extras=extras,
+            line_number=line,
+            raw_line=(decoded or s).strip(),
         )
         if rest.startswith("@"):
             url, _, marker = rest[1:].strip().partition(" ;")
             req.url, req.direct_reference = url.strip(), True
-            req.markers = marker.strip() or None
+            req.markers = req.markers or marker.strip() or None
             return req
         body, _, marker = rest.partition(";")
         req.markers = marker.strip() or None
@@ -434,6 +472,8 @@ class PyprojectTomlAdapter(SourceAdapter):
             if stripped.startswith("(") and stripped.endswith(")")
             else stripped
         )
+        if decoded is not None:
+            req.markers = decoded.partition(";")[2].strip() or None
         specs = _parse_specs(inner)
         if specs is None:
             logger.debug("Skipping unparsable requirement %r at line %d", s, line)

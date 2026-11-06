@@ -473,11 +473,12 @@ def validate_path(
 
 
 def create_timestamped_backup(file_path: PathLike) -> Path:
-    """Create a backup named ``<stem>.<timestamp>_<uuid>.backup<suffix>``.
+    """Create a backup named ``<name>.<timestamp>_<uuid>.backup``.
 
-    Unlike `create_backup`, the original suffix is kept last so the
-    backup remains recognizable by extension (``requirements.txt`` backs up to
-    ``requirements.<timestamp>_<uuid>.backup.txt``).
+    The name ends in ``.backup`` so no ``*.txt`` / ``requirements*.txt`` glob
+    (depkeeper's own discovery, ``pip install -r *.txt``) mistakes the copy for
+    a live requirements file (``requirements.txt`` backs up to
+    ``requirements.txt.<timestamp>_<uuid>.backup``).
 
     Args:
         file_path: File to copy.
@@ -500,7 +501,7 @@ def create_timestamped_backup(file_path: PathLike) -> Path:
 
     unique = uuid4().hex[:8]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    backup_name = f"{path.stem}.{timestamp}_{unique}.backup{path.suffix}"
+    backup_name = f"{path.name}.{timestamp}_{unique}.backup"
     backup_path = path.with_name(backup_name)
 
     try:

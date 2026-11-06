@@ -9,6 +9,7 @@ policy is defined in exactly one place.
 from __future__ import annotations
 
 import time
+import logging
 import httpx
 import random
 import asyncio
@@ -18,6 +19,7 @@ from typing import Any, Optional, Dict, Iterable, Callable, Tuple, cast
 from urllib.parse import urljoin, urlsplit
 
 from depkeeper.utils.logger import get_logger
+from depkeeper.utils.redact import redact
 from depkeeper.__version__ import __version__
 from depkeeper.exceptions import NetworkError, PyPIError
 from depkeeper.constants import (
@@ -29,8 +31,21 @@ from depkeeper.constants import (
 
 logger = get_logger("http")
 
-#: Largest response body accepted; PyPI JSON for the biggest projects is a few MB.
-MAX_RESPONSE_BYTES = 20 * 1024 * 1024
+
+class _RedactFilter(logging.Filter):
+    """Mask URL credentials in httpx/httpcore's own request log lines."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg, record.args = redact(record.getMessage()), None
+        return True
+
+
+for _name in ("httpx", "httpcore"):
+    logging.getLogger(_name).addFilter(_RedactFilter())
+
+#: Largest response body accepted. PyPI JSON is 1-4 MB for typical large
+#: projects (boto3, tensorflow) but 41 MB for ddtrace.
+MAX_RESPONSE_BYTES = 64 * 1024 * 1024
 #: Wall-clock cap for one logical request including retries and backoff.
 DEFAULT_TOTAL_TIMEOUT = 180.0
 #: Maximum redirect hops followed for one request.
@@ -38,8 +53,28 @@ MAX_REDIRECTS = 5
 #: Hosts a redirect may land on (besides the request's own host).
 _REDIRECT_HOSTS = frozenset({"pypi.org", "files.pythonhosted.org"})
 
+#: Consecutive connection-level failures (refused, DNS, proxy) that open the
+#: circuit; while open, requests fail at once instead of each waiting out retries.
+BREAKER_THRESHOLD = 3
+#: Seconds the circuit stays open before one probe request is allowed.
+BREAKER_TTL = 30.0
+
 #: Seconds a request that exhausted its retries is remembered as failed.
 FAILURE_TTL = 30.0
+
+
+class ResponseTooLargeError(NetworkError):
+    """A response body exceeded the client's size cap."""
+
+    def __init__(self, url: str, limit: int, size: Optional[int] = None) -> None:
+        mb = 1024 * 1024
+        what = f"{size / mb:.0f} MB" if size else f"more than {limit / mb:.0f} MB"
+        super().__init__(
+            f"Response too large ({what}, limit {limit / mb:.0f} MB): {url}",
+            url=url,
+        )
+        self.size = size
+        self.limit = limit
 
 
 def _failure_key(url: str, params: Any) -> Tuple[str, str]:
@@ -68,18 +103,22 @@ def _parse_retry_after(header_value: Optional[str]) -> float:
     header_value = header_value.strip()
 
     try:
-        delay = float(int(header_value))
+        # Compared as an int: float(int) overflows for absurdly long digit strings.
+        delay = float(min(int(header_value), MAX_RETRY_AFTER_SECONDS))
     except ValueError:
         try:
             target = parsedate_to_datetime(header_value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return 1.0
 
         if target.tzinfo is None:
             # Obsolete RFC 850 dates are assumed GMT, per RFC 7231 section 7.1.1.1.
             target = target.replace(tzinfo=timezone.utc)
 
-        delay = (target - datetime.now(timezone.utc)).total_seconds()
+        try:
+            delay = (target - datetime.now(timezone.utc)).total_seconds()
+        except OverflowError:
+            return 1.0
 
     return max(0.0, min(delay, float(MAX_RETRY_AFTER_SECONDS)))
 
@@ -121,6 +160,8 @@ class HTTPClient:
         # one within FAILURE_TTL (prefetch then check) would re-wait the
         # backoff; the TTL stops one outage poisoning a long-lived client.
         self._failed: Dict[Any, Tuple[float, NetworkError]] = {}
+        self._conn_failures = 0
+        self._breaker_open_until = 0.0
         self.timeout = timeout
         self.max_retries = max_retries
         self.rate_limit_delay = rate_limit_delay
@@ -184,6 +225,15 @@ class HTTPClient:
             else:
                 self._last_request_time = now
 
+    def _note_connect_failure(self) -> bool:
+        """Count a connection-level failure; return True when it opens the circuit."""
+        self._conn_failures += 1
+        if self._conn_failures < BREAKER_THRESHOLD:
+            return False
+        self._breaker_open_until = time.monotonic() + BREAKER_TTL
+        logger.warning("Network unreachable; failing fast")
+        return True
+
     async def _send_once(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         """Send one request, following only safe redirects and capping the body.
 
@@ -204,26 +254,29 @@ class HTTPClient:
                         _REDIRECT_HOSTS | {origin_host}
                     ):
                         raise NetworkError(
-                            f"Refusing unsafe redirect to {target}",
-                            url=url,
+                            f"Refusing unsafe redirect to {redact(target)}",
+                            url=redact(url),
                             status_code=response.status_code,
                         )
                     url = target
                     continue
 
                 declared = response.headers.get("content-length", "")
-                if declared.isdigit() and int(declared) > self.max_response_bytes:
-                    raise NetworkError(
-                        f"Response too large ({declared} bytes): {url}", url=url
+                if (
+                    declared.isascii()
+                    and declared.isdigit()
+                    and int(declared) > self.max_response_bytes
+                ):
+                    raise ResponseTooLargeError(
+                        redact(url), self.max_response_bytes, int(declared)
                     )
                 chunks = []
                 size = 0
                 async for chunk in response.aiter_bytes():
                     size += len(chunk)
                     if size > self.max_response_bytes:
-                        raise NetworkError(
-                            f"Response exceeds {self.max_response_bytes} bytes: {url}",
-                            url=url,
+                        raise ResponseTooLargeError(
+                            redact(url), self.max_response_bytes
                         )
                     chunks.append(chunk)
                 headers = httpx.Headers(response.headers)
@@ -238,7 +291,7 @@ class HTTPClient:
                 )
             finally:
                 await response.aclose()
-        raise NetworkError(f"Too many redirects: {url}", url=url)
+        raise NetworkError(f"Too many redirects: {redact(url)}", url=redact(url))
 
     async def _request_with_retry(
         self,
@@ -248,12 +301,17 @@ class HTTPClient:
     ) -> httpx.Response:
         """Run `_request_attempts` under the total wall-clock deadline."""
         clean_url = url.strip().strip("\"'")
+        if urlsplit(clean_url).scheme not in ("http", "https"):
+            raise NetworkError(
+                f"Unsupported URL (expected http or https): {redact(clean_url)}",
+                url=redact(clean_url),
+            )
         key = _failure_key(clean_url, kwargs.get("params"))
         entry = self._failed.get(key) if method == "GET" else None
         if entry is not None:
             if time.monotonic() - entry[0] < FAILURE_TTL:
                 # Fresh instance: re-raising one object grows its traceback.
-                raise NetworkError(entry[1].message, url=clean_url) from entry[
+                raise NetworkError(entry[1].message, url=redact(clean_url)) from entry[
                     1
                 ].__cause__
             del self._failed[key]
@@ -263,8 +321,8 @@ class HTTPClient:
             )
         except asyncio.TimeoutError as exc:
             raise NetworkError(
-                f"Request timed out after {self.total_timeout:.0f}s: {clean_url}",
-                url=clean_url,
+                f"Request timed out after {self.total_timeout:.0f}s: {redact(clean_url)}",
+                url=redact(clean_url),
             ) from exc
 
     async def _request_attempts(
@@ -310,17 +368,24 @@ class HTTPClient:
 
         for attempt in range(self.max_retries + 1):
             try:
+                if time.monotonic() < self._breaker_open_until:
+                    raise NetworkError(
+                        "Network unreachable (too many consecutive connection "
+                        f"failures): {redact(clean_url)}",
+                        url=redact(clean_url),
+                    )
                 await self._rate_limit()
 
                 async with self._semaphore:
                     response = await self._send_once(method, clean_url, **kwargs)
+                self._conn_failures = 0
 
                 if response.status_code == 429:
                     retry_429_count += 1
                     if retry_429_count > self._max_429_retries:
                         raise NetworkError(
                             f"Rate limit exceeded after {self._max_429_retries} retries",
-                            url=clean_url,
+                            url=redact(clean_url),
                             status_code=429,
                         )
                     retry_after = _parse_retry_after(
@@ -337,8 +402,8 @@ class HTTPClient:
 
                 if response.status_code == 404:
                     raise PyPIError(
-                        f"Resource not found: {clean_url}",
-                        url=clean_url,
+                        f"Resource not found: {redact(clean_url)}",
+                        url=redact(clean_url),
                         status_code=404,
                     )
 
@@ -349,27 +414,39 @@ class HTTPClient:
 
             except httpx.TimeoutException as exc:
                 last_exc = exc
+                if isinstance(exc, httpx.ConnectTimeout) and self._note_connect_failure():
+                    break
                 logger.warning(
                     "Request timeout (%d/%d): %s",
                     attempt + 1,
                     self.max_retries + 1,
-                    clean_url,
+                    redact(clean_url),
                 )
 
-            except httpx.NetworkError as exc:
+            except httpx.InvalidURL as exc:
+                raise NetworkError(
+                    f"Invalid URL: {redact(clean_url)}", url=redact(clean_url)
+                ) from exc
+
+            except (httpx.TransportError, httpx.DecodingError) as exc:
                 last_exc = exc
+                if isinstance(exc, (httpx.ConnectError, httpx.ProxyError)):
+                    if self._note_connect_failure():
+                        break
+                else:
+                    self._conn_failures = 0
                 logger.warning(
                     "Network error (%d/%d): %s",
                     attempt + 1,
                     self.max_retries + 1,
-                    exc,
+                    redact(str(exc)),
                 )
 
             except httpx.HTTPStatusError as exc:
                 if 400 <= exc.response.status_code < 500:
                     raise NetworkError(
-                        f"HTTP {exc.response.status_code} error for {clean_url}",
-                        url=clean_url,
+                        f"HTTP {exc.response.status_code} error for {redact(clean_url)}",
+                        url=redact(clean_url),
                         status_code=exc.response.status_code,
                         response_body=exc.response.text,
                     ) from exc
@@ -379,7 +456,7 @@ class HTTPClient:
                     exc.response.status_code,
                     attempt + 1,
                     self.max_retries + 1,
-                    clean_url,
+                    redact(clean_url),
                 )
 
             if attempt < self.max_retries:
@@ -388,8 +465,8 @@ class HTTPClient:
                 await asyncio.sleep(delay)
 
         failure = NetworkError(
-            f"Request failed after {self.max_retries + 1} attempts: {clean_url}",
-            url=clean_url,
+            f"Request failed after {attempt + 1} attempts: {redact(clean_url)}",
+            url=redact(clean_url),
         )
         failure.__cause__ = last_exc
         if method == "GET":
@@ -449,15 +526,15 @@ class HTTPClient:
             data = response.json()
         except Exception as exc:
             raise NetworkError(
-                f"Invalid JSON response from {url}",
-                url=url,
+                f"Invalid JSON response from {redact(url)}",
+                url=redact(url),
                 response_body=response.text,
             ) from exc
 
         if not isinstance(data, dict):
             raise NetworkError(
-                f"Expected JSON object from {url}",
-                url=url,
+                f"Expected JSON object from {redact(url)}",
+                url=redact(url),
                 response_body=response.text,
             )
 

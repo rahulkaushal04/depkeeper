@@ -57,19 +57,28 @@ class ColoredFormatter(logging.Formatter):
         if self.use_color and self._should_use_color():
             color = self.COLORS.get(record.levelname)
             if color:
-                record.levelname = f"{color}{record.levelname}{self.RESET}"
+                # Restored afterwards: other handlers share this record.
+                original = record.levelname
+                record.levelname = f"{color}{original}{self.RESET}"
+                try:
+                    return super().format(record)
+                finally:
+                    record.levelname = original
         return super().format(record)
 
     @staticmethod
     def _should_use_color() -> bool:
         """Return whether ANSI colors are appropriate for ``sys.stderr``.
 
-        ``NO_COLOR`` is honored per the no-color.org convention, and ``CI``
+        ``NO_COLOR`` is honored per the no-color.org convention and beats
+        ``FORCE_COLOR``, which otherwise forces color; ``CI``
         is treated as a non-interactive environment because build log viewers
         render raw escape sequences.
         """
         if os.environ.get("NO_COLOR"):
             return False
+        if os.environ.get("FORCE_COLOR"):
+            return True
         if os.environ.get("CI"):
             return False
         try:

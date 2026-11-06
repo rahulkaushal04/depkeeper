@@ -6,20 +6,31 @@ loading, and subcommand registration.
 
 from __future__ import annotations
 
-import os
 import sys
-import logging
-from pathlib import Path
-from typing import Optional
 
-import click
+# Imports run inside the guard so Ctrl-C while the interpreter is still
+# loading depkeeper exits 130 instead of printing a traceback.
+try:
+    import os
+    import logging
+    from pathlib import Path
+    from typing import Optional
 
-from depkeeper.config import load_config
-from depkeeper.__version__ import __version__
-from depkeeper.context import DepKeeperContext
-from depkeeper.exceptions import ConfigError, DepKeeperError
-from depkeeper.utils.logger import get_logger, setup_logging
-from depkeeper.utils.console import print_error, print_warning
+    import click
+
+    from depkeeper.config import load_config
+    from depkeeper.__version__ import __version__
+    from depkeeper.context import DepKeeperContext
+    from depkeeper.exceptions import ConfigError, DepKeeperError
+    from depkeeper.utils.logger import get_logger, setup_logging
+    from depkeeper.utils.console import (
+        print_error,
+        print_warning,
+        reconfigure_console,
+    )
+except KeyboardInterrupt:
+    sys.stderr.write("\n[WARNING] Operation cancelled by user\n")
+    raise SystemExit(130) from None
 
 logger = get_logger("cli")
 
@@ -95,6 +106,7 @@ def cli(
         os.environ["NO_COLOR"] = "1"
     elif color is True:
         os.environ.pop("NO_COLOR", None)
+    reconfigure_console()
 
     logger.debug("depkeeper v%s", __version__)
     logger.debug("Config path: %s", depkeeper_ctx.config_path)
@@ -133,6 +145,9 @@ try:
 except ImportError as exc:
     sys.stderr.write(f"FATAL: Failed to import CLI commands: {exc}\n")
     sys.exit(1)
+except KeyboardInterrupt:
+    sys.stderr.write("\n[WARNING] Operation cancelled by user\n")
+    sys.exit(130)
 
 
 def main() -> int:
@@ -151,10 +166,22 @@ def main() -> int:
         cli(standalone_mode=False)
         return 0
 
-    except click.Abort:
-        # Ctrl-D / EOF at a prompt, or a declined confirmation.
-        print_warning("Aborted.", stderr=True)
+    except click.Abort as exc:
+        # Click turns Ctrl-C into Abort; only EOF / a declined prompt is "Aborted".
+        if isinstance(exc.__cause__, KeyboardInterrupt):
+            print_warning("\nOperation cancelled by user", stderr=True)
+        else:
+            print_warning("Aborted.", stderr=True)
         return 130
+
+    except BrokenPipeError:
+        # Downstream closed the pipe (e.g. ``| head -1``): stay quiet. Point
+        # stdout at devnull so the interpreter's exit flush cannot complain.
+        try:
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        except (OSError, ValueError):
+            pass
+        return 141
 
     except click.ClickException as exc:
         exc.show()

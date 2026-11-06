@@ -23,6 +23,9 @@ def main() -> int:
     except ImportError as exc:
         _print_startup_error(exc)
         return 1
+    except KeyboardInterrupt:
+        sys.stderr.write("\n[WARNING] Operation cancelled by user\n")
+        return 130
 
     return cli_main()
 

@@ -55,6 +55,8 @@ class Package:
         cooldown_skipped: Newest version withheld by the ``min_age`` cooldown
             (the recommendation fell back to an older eligible one).
         retained_specs: The requirement's own upper bounds and exclusions.
+        direct: URL, VCS, editable or local-path requirement; it is not on PyPI
+            so it is reported as ``direct`` and never checked.
         major_available: Newest eligible version in a higher major than the
             recommendation that was *not* applied (no ``--allow-major`` opt-in,
             or capped by ``max_update``). Informational only.
@@ -87,6 +89,8 @@ class Package:
     major_available: Optional[str] = field(default=None, compare=False)
     # The major is blocked by a max_update cap, not by lack of opt-in.
     major_capped: bool = field(default=False, compare=False)
+    # URL/VCS/editable/path requirement: never looked up on PyPI.
+    direct: bool = field(default=False, compare=False)
 
     _parsed_versions: Dict[str, Optional[Version]] = field(
         default_factory=dict,
@@ -227,14 +231,16 @@ class Package:
 
         Returns:
             Tuple of ``(status, installed, latest, recommended)``, where
-            *status* is one of ``no-update``, ``install``, ``downgrade``,
+            *status* is one of ``direct``, ``no-update``, ``install``, ``downgrade``,
             ``outdated`` or ``latest``.
         """
         installed = self.current_version or "none"
         latest = self.latest_version or "error"
         recommended = self.recommended_version
 
-        if not self.recommended_version:
+        if self.direct:
+            status = "direct"
+        elif not self.recommended_version:
             status = "no-update"
         elif not self.current_version:
             status = "install"
@@ -259,7 +265,9 @@ class Package:
             JSON-safe package representation.
         """
         # Mirrors the status ladder in get_status_summary(); keep both in sync.
-        if not self.recommended_version:
+        if self.direct:
+            status = "direct"
+        elif not self.recommended_version:
             status = "no-update"
         elif not self.current_version:
             status = "install"
@@ -316,7 +324,9 @@ class Package:
             entry["conflicts"] = [c.to_json() for c in self.conflicts]
 
         if status == "no-update":
-            entry["error"] = "Package information unavailable"
+            entry["error"] = self.metadata.get(
+                "lookup_error", "Package information unavailable"
+            )
 
         return entry
 

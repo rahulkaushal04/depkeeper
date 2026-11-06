@@ -50,13 +50,19 @@ _NON_PYPI = {
 }  # fmt: skip
 
 
+# PyPI projects the ``lib*`` rule below would otherwise swallow.
+_LIB_PYPI = {
+    "librosa", "libsass", "libclang", "libcst", "libusb1", "libarchive-c",
+    "libtmux", "libhoney", "libnacl", "libpysal", "libzim", "libsixel",
+}  # fmt: skip
+
+
 def _is_non_pypi(name: str) -> bool:
     """Whether *name* is a conda-only package that has no PyPI counterpart."""
     n = name.lower()
-    return (
-        n in _NON_PYPI
-        or n.startswith(("lib", "_", "r-", "mkl", "cuda"))
-        or n.endswith("-ng")
+    return n in _NON_PYPI or (
+        n not in _LIB_PYPI
+        and (n.startswith(("lib", "_", "r-", "mkl", "cuda")) or n.endswith("-ng"))
     )
 
 
@@ -213,7 +219,7 @@ def _pip_minimal(
     None when the item has an unusual shape; the caller then re-renders it.
     """
     head = _PIP_HEAD.match(old)
-    if not head or not req.specs or req.url or req.hashes or "@" in old:
+    if not head or req.url or req.hashes or "@" in old:
         return None
     body, sep, marker = old[head.end() :].partition(";")
     specs = (
@@ -347,6 +353,8 @@ class CondaYamlAdapter(SourceAdapter):
         for req, new_version in updates:
             if req.span is None:
                 raise DepKeeperError(f"No source span for '{req.name}' in {label}")
+            if req.url or req.direct_reference:
+                continue  # direct references carry no version to rewrite
             start, end = req.span
             old = original_text[start:end]
             where = f"{label}:{req.line_number}"

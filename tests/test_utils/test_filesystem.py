@@ -1208,7 +1208,7 @@ class TestCreateTimestampedBackup:
     def test_backup_name_format(self, temp_file: Path) -> None:
         """Test backup follows naming convention.
 
-        Format should be: {stem}.{timestamp}.backup{suffix}
+        Format should be: {name}.{timestamp}_{uuid}.backup
         """
         backup = create_timestamped_backup(temp_file)
 
@@ -1218,8 +1218,9 @@ class TestCreateTimestampedBackup:
         # Should have .backup in name
         assert ".backup" in backup.name
 
-        # Should end with original suffix
-        assert backup.suffix == temp_file.suffix
+        # Ends in .backup so *.txt globs never mistake it for a live file
+        assert backup.name.startswith(temp_file.name + ".")
+        assert backup.suffix == ".backup"
 
     def test_backup_preserves_content(self, temp_file: Path) -> None:
         """Test backup contains original content.

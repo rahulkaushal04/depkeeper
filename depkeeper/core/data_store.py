@@ -179,11 +179,13 @@ class PyPIPackageData:
         """
         requires_python = self.python_requirements.get(version)
 
-        if not requires_python:
+        if not requires_python or not isinstance(requires_python, str):
             return True
 
         try:
-            return python_version in SpecifierSet(requires_python)
+            return SpecifierSet(requires_python).contains(
+                python_version, prereleases=True
+            )
         except InvalidSpecifier:
             # Malformed upstream metadata must not exclude a release.
             return True
@@ -254,6 +256,11 @@ class PyPIDataStore:
             connection pool / session).
         concurrent_limit: Maximum number of PyPI fetches that may be
             in-flight at once.  Defaults to ``10``.
+        target_python: ``"X.Y"`` Python the dependency environment markers
+            (``python_version`` / ``python_full_version``) are evaluated
+            for.  ``None`` (or an unusable value) means the running
+            interpreter.  It is fixed for the store's lifetime, so the
+            per-store dependency caches never mix targets.
 
     Raises:
         ValueError: *concurrent_limit* is less than ``1`` (a limit of zero
@@ -274,9 +281,18 @@ class PyPIDataStore:
         self,
         http_client: HTTPClient,
         concurrent_limit: int = 10,
+        target_python: Optional[str] = None,
     ) -> None:
         if concurrent_limit < 1:
             raise ValueError(f"concurrent_limit must be >= 1, got {concurrent_limit}")
+
+        # Only Python-version markers change; platform markers stay the host's.
+        self._marker_env: Dict[str, str] = {"extra": ""}
+        match = re.match(r"\s*(\d+)\.(\d+)", target_python or "")
+        if match:
+            xy = f"{match.group(1)}.{match.group(2)}"
+            self._marker_env["python_version"] = xy
+            self._marker_env["python_full_version"] = f"{xy}.0"
 
         self.http_client = http_client
         self._semaphore = asyncio.Semaphore(concurrent_limit)
@@ -711,8 +727,8 @@ class PyPIDataStore:
                 package_name=name,
             )
 
-        latest_version: Optional[str] = info.get("version")
-        latest_requires_python: Optional[str] = info.get("requires_python")
+        latest_version = _text(info.get("version"))
+        latest_requires_python = _text(info.get("requires_python"))
         latest_deps: List[str] = self._extract_dependencies(info)
         project_urls = _http_urls(info.get("project_urls"), info.get("home_page"))
 
@@ -721,7 +737,7 @@ class PyPIDataStore:
         upload_times: Dict[str, Optional[datetime]] = {}
 
         for version_str, files in releases.items():
-            if not files:
+            if not files or not isinstance(files, list):
                 continue
 
             # pip ignores yanked releases; skip one only if every file is yanked
@@ -739,7 +755,9 @@ class PyPIDataStore:
 
             # Files of a release agree on requires_python; take the first.
             for file_info in files:
-                if isinstance(file_info, dict) and file_info.get("requires_python"):
+                if isinstance(file_info, dict) and _text(
+                    file_info.get("requires_python")
+                ):
                     python_requirements[version_str] = file_info["requires_python"]
                     break
             else:
@@ -765,13 +783,12 @@ class PyPIDataStore:
             ),
         )
 
-    @staticmethod
-    def _extract_dependencies(info: Dict[str, Any]) -> List[str]:
+    def _extract_dependencies(self, info: Dict[str, Any]) -> List[str]:
         """Return base (non-extra) dependency specifiers from ``info``.
 
-        Environment markers are evaluated against the running interpreter
-        (with ``extra`` empty, so extra-only deps drop out); deps whose
-        marker is false are skipped.  The marker is then removed so callers
+        Environment markers are evaluated for the store's target Python
+        (the running interpreter when none was given) with ``extra`` empty,
+        so extra-only deps drop out; deps whose marker is false are skipped.  The marker is then removed so callers
         get clean PEP-508 name+version specs.
 
         Args:
@@ -780,13 +797,15 @@ class PyPIDataStore:
         Returns:
             List of strings like ``["requests>=2.25", "click"]``.
         """
-        requires_dist: List[str] = info.get("requires_dist") or []
+        requires_dist = info.get("requires_dist")
         deps: List[str] = []
 
-        for dep in requires_dist:
+        for dep in requires_dist if isinstance(requires_dist, list) else ():
+            if not isinstance(dep, str):
+                continue
             try:
                 marker = Requirement(dep).marker
-                if marker is not None and not marker.evaluate({"extra": ""}):
+                if marker is not None and not marker.evaluate(self._marker_env):
                     continue
             except InvalidRequirement:
                 pass  # keep unparseable lines as-is; the analyzer skips them
@@ -840,6 +859,11 @@ def _sha256_digests(files: Any) -> List[str]:
         if isinstance(d, str) and re.fullmatch(r"[0-9a-fA-F]{64}", d):
             found.add(d.lower())
     return sorted(found)
+
+
+def _text(value: Any) -> Optional[str]:
+    """Return *value* when it is a non-empty string, else ``None``."""
+    return value if isinstance(value, str) and value else None
 
 
 def _normalize(name: str) -> str:

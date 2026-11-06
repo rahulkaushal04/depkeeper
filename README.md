@@ -172,7 +172,7 @@ Dry run mode - no changes applied
 
 ```console
 $ depkeeper update --backup --yes
-[OK] Backup saved: requirements.20261106_182111_458701_7f45f023.backup.txt
+[OK] Backup saved: requirements.txt.20261106_182111_458701_7f45f023.backup
 [OK] Successfully updated 4 package(s)
 ```
 

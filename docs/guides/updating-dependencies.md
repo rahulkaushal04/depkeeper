@@ -345,21 +345,21 @@ include graph is unfamiliar.
 depkeeper update --backup
 ```
 
-Creates `requirements.<timestamp>_<uuid>.backup.txt` next to each affected file *before* any
+Creates `requirements.txt.<timestamp>_<uuid>.backup` next to each affected file *before* any
 write:
 
 ```text
-[OK] Backup saved: /path/to/requirements.20261106_191436_642846_64aff599.backup.txt
+[OK] Backup saved: /path/to/requirements.txt.20261106_191436_642846_64aff599.backup
 ```
 
 If a write fails, files already written are restored from the content depkeeper read (not from the
 backups) and depkeeper prints `Original file(s) are saved at: <backup paths>`. Backups are never cleaned up automatically. In a git repository, `git diff` and `git checkout` are
-usually better tools; add `*.backup.*` to `.gitignore` if you use `--backup` anyway.
+usually better tools; add `*.backup` to `.gitignore` if you use `--backup` anyway.
 
 Restoring manually:
 
 ```bash
-cp requirements.20261106_191436_642846_64aff599.backup.txt requirements.txt
+cp requirements.txt.20261106_191436_642846_64aff599.backup requirements.txt
 ```
 
 ---

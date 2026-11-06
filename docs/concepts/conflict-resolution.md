@@ -17,7 +17,7 @@ Enabled by default. Disable with `--no-check-conflicts` or `check_conflicts = fa
 
 For every package *P* at its proposed version *V*, depkeeper fetches *V*'s `requires_dist` and,
 for each dependency *D* **that also appears in your requirements file**, verifies that *D*'s
-proposed version satisfies *P*'s specifier.
+proposed version satisfies *P*'s specifier. A package's requirement on itself is ignored.
 
 ## What is not checked
 
@@ -26,7 +26,7 @@ proposed version satisfies *P*'s specifier.
 | Dependencies absent from your file | depkeeper cannot adjust what you did not declare, so it cannot be a resolvable conflict. |
 | Transitive dependencies | Only direct `requires_dist` of the proposed versions is read; the graph is not expanded. |
 | Extra-conditional dependencies | Entries carrying a `; extra == "..."` marker evaluate false with `extra` empty and are skipped. |
-| Environment-marker-conditional dependencies | Markers are evaluated against the **running interpreter** (with `extra` empty); a dependency whose marker is false there is skipped, so a Windows-only dependency is ignored on Linux. The marker is then stripped. |
+| Environment-marker-conditional dependencies | Markers are evaluated with `python_version` / `python_full_version` set to the **target Python** (`X.Y` and `X.Y.0`) and every other marker (platform, etc.) taken from the host, with `extra` empty; a dependency whose marker is false there is skipped, so a Windows-only dependency is ignored on Linux. The marker is then stripped. |
 | Build-time requirements | `requires_dist` only. |
 
 **depkeeper is not a substitute for `pip`'s resolver.** Always install and test the result.
@@ -61,17 +61,21 @@ dotted-name conflicts are detected at all.
 ### Phase 3 — Resolve, within boundaries
 
 For each unique **source** package in the conflict list, two strategies are tried in order.
-Only one conflict per source package is processed per pass.
+Only one conflict per source package is processed per pass, and sources are visited in name order, so the
+result does not depend on the order of the files.
 
 **Strategy 1 — step the source back.** Walk the source's releases newest-first, within its
 boundary, and stop at the first version whose requirement on the target is satisfied by the
 target's proposed version (or which does not depend on the target at all). The walk honours the
 source's own retained specs, the target Python, and the checker's policy (hold, `max_update`,
-`min_age`, pre-release rule), stops below the installed version, and evaluates at most 50 candidates.
+`min_age`, pre-release rule), stops below the installed version, and evaluates at most 50 candidates. A candidate must also satisfy its
+requirements on every *other* proposed package, so a step back cannot trade one conflict for another.
 
 **Strategy 2 — constrain the target.** Find the highest release of the target, within the
 target's boundary and under the same retained-spec and policy filters, that satisfies the source's
-specifier, and revert the source to its current version.
+specifier, and revert the source to its current version. The candidate must also satisfy what
+every other proposed package requires of the target, and the target's own requirements on the proposals.
+A package that is **held** or **ignored** is never lowered this way.
 
 The *boundary* is the current major for semver packages, and unbounded for calver packages and
 for packages opted in with `--allow-major`.
@@ -90,15 +94,21 @@ Reverting is the safe outcome: it produces no change rather than a change that m
 | Condition | Outcome |
 |---|---|
 | No conflicts detected in a pass | `converged = True` |
+| A pass moves the update set back to a state already seen | Loop stops early (`cycling`) with a `WARNING`. |
 | A pass changes nothing | Loop stops early (`stalled`) with a `WARNING`; `converged = False`, since conflicts remained. |
-| 100 passes elapse | `converged = False`; a `WARNING` is logged. |
+| 100 passes elapse | A `WARNING` is logged. |
+
+`converged` is decided on the **final** set: it is `True` exactly when no package in it violates a
+requirement of another, even if the loop stalled, cycled or ran out of passes and an advisory
+alternative (below) repaired the rest.
 
 `iterations_used` and `converged` are reported in the Resolution Summary.
 
 ### Phase 5 — Advisory alternatives
 
-`conflict_tracking` is **cumulative**: it holds every conflict seen in any pass, including ones a
-later pass resolved. For each package with recorded conflicts, depkeeper computes the highest
+`conflict_tracking` is **cumulative** and internal: it holds every conflict seen in any pass,
+including ones a later pass resolved. (The conflicts shown to you per package are the live subset
+for the final update set, each listed once.) For each package with recorded conflicts, depkeeper computes the highest
 version — within its major, not below its current version — that satisfies *all* recorded
 specifiers intersected together. This is `compatible_alternative`.
 
@@ -106,7 +116,8 @@ It is **advisory**. It is adopted into the applied version only when:
 
 1. the package still has a **live** conflict, and
 2. the alternative satisfies every live conflict, and
-3. it differs from the currently proposed version.
+3. it differs from the currently proposed version, and
+4. adopting it introduces no conflict the current set does not already have.
 
 A conflict is *live* when the source package is still headed for the recorded `source_version`
 **and** the target's final version still fails the required specifier. Conflicts a later pass
@@ -229,7 +240,7 @@ plan's `Change` column. They **are** applied by `update`. If you do not want tha
 | Malformed `requires_dist` entry | Logged at DEBUG, skipped. |
 | Unparseable required specifier | Treated as satisfied. Malformed upstream metadata can never veto a version on its own. |
 | Source package has several conflicts | Only one is processed per pass. A source whose first conflict is unresolvable can hide a second, satisfiable one. |
-| Resolution does not converge in 100 passes | `converged: No` in the summary; the current update set is applied as-is. |
+| Resolution does not converge in 100 passes | The final set is rescanned; remaining conflicts are reported and `converged: No` is shown. The update set is applied as-is. |
 | A package has no current version | It has no major anchor, so both boundary-aware searches return nothing for it; it keeps the checker's recommendation. |
 
 The negative cache exists to prevent a retry storm: without it, an unreachable package would be

@@ -9,7 +9,7 @@ depkeeper reads and writes **pip requirements files** (`requirements*.txt`), **`
 (`[project]` / optional / PEP 735 dependency groups and Poetry tables) and conda **`environment.yml`**
 (including its `pip:` list). It does not read `Pipfile`, `poetry.lock`, `setup.py` or `setup.cfg`.
 The rest of this page describes requirements-file syntax. In `pyproject.toml`, dependency strings
-containing backslash escapes are skipped with a warning naming `file:line`; see [pyproject.toml](#pyprojecttoml) below. In `environment.yml`,
+containing backslash escapes before the environment marker are skipped with a warning naming `file:line`; see [pyproject.toml](#pyprojecttoml) below. In `environment.yml`,
 fuzzy specs such as `numpy=1.24` pin a series and update only to a newer series (`numpy=1.26`).
 
 Behavioural background: [Requirements parsing](../concepts/requirements-parsing.md).
@@ -267,12 +267,15 @@ comments, quoting, layout and line endings survive (the result is re-validated a
 | `[project].dependencies`, `[project.optional-dependencies].*` | Yes (PEP 508 strings) |
 | `[dependency-groups].*` (PEP 735) | Yes; `{include-group = ...}` entries are skipped with a warning |
 | `[build-system].requires` | Yes |
+| `[tool.uv].dev-dependencies`, `[tool.pdm.dev-dependencies].*`, `[tool.hatch.envs.*]` `dependencies`/`extra-dependencies` | Yes (PEP 508 strings) |
 | `[tool.poetry.dependencies]`, `dev-dependencies`, `group.*.dependencies` | Yes: `"1.2.3"`, `"==1.2.3"`, `">=1,<2"`, `"^1.2"`, `"~1.2"`, `{version = "..."}` |
-| Poetry `python`, `*`, `||` constraints, git/path/url/file tables, list-of-table values | Skipped |
+| Poetry `*`, `||` constraints, git/path/url/file tables, list-of-table values | Skipped |
 | `[project].requires-python` | Used as the target Python (lowest minor), never updated |
+| `[tool.poetry.dependencies].python` | Same, translated to a PEP 440 range (`^3.9` is `>=3.9,<4`, `~3.9` is `>=3.9,<3.10`); used only when `[project].requires-python` is absent; never updated; a `python` key in a group is ignored |
 
 Poetry `^` / `~` keep their style (`^1.2` → `^1.5.0`); `--pin` writes `==`. A bare name (no specifier) is
-only pinned with `--pin`. Dependency strings with backslash escapes are skipped with a warning.
+only pinned with `--pin`. Dependency strings with backslash escapes in the name or version part are skipped with a warning;
+escapes in the marker (for example `\"` in `python_version < \"3.9\"`) are fine.
 
 ---
 
@@ -296,7 +299,7 @@ dependency) that supports block-style `dependencies:` lists and a nested `- pip:
 | `conda-forge::numpy=1.24` | Channel prefix kept |
 | `numpy=1.24=py311_0` (build string), `a=1\|2`, `a=*` | Skipped, left untouched |
 | `python=3.11` | Never updated; used as the file's Python constraint |
-| `pip`, `mkl`, `libgcc-ng`, `openssl`, `cuda*`, `lib*`, `r-*` and similar | Skipped quietly (not PyPI packages) |
+| `pip`, `mkl`, `libgcc-ng`, `openssl`, `cuda*`, `lib*`, `r-*` and similar | Skipped quietly (not PyPI packages); well-known PyPI projects such as `librosa` and `libsass` are still checked |
 
 Flow-style lists (`dependencies: [a, b]`) are rejected with a parse error. Edits are in place;
 comments, quoting, indentation and line endings are preserved.
@@ -308,11 +311,11 @@ comments, quoting, indentation and line endings are preserved.
 `--backup` writes `<stem>.<timestamp>_<uuid8>.backup<suffix>` beside each affected file:
 
 ```text
-requirements.20260815_144129_853745_d54d785d.backup.txt
+requirements.txt.20260815_144129_853745_d54d785d.backup
 ```
 
 The original suffix stays last so the file remains recognisable by extension. depkeeper never
-deletes backups. Add `*.backup.*` to `.gitignore` if you use the flag in a repository.
+deletes backups. Add `*.backup` to `.gitignore` if you use the flag in a repository.
 
 > [!NOTE]
 > **A second, different backup layout exists**

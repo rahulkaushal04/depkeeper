@@ -41,6 +41,7 @@ import re
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple, Union
 
+from packaging.markers import InvalidMarker, Marker
 from packaging.requirements import Requirement as PkgRequirement, InvalidRequirement
 from packaging.specifiers import Specifier
 
@@ -78,6 +79,12 @@ URL_SCHEMES = (
     "https://",
     "http://",
     "file://",
+    "ftp://",
+    "git+file://",
+    "hg+file://",
+    "bzr+file://",
+    "svn+file://",
+    "svn+svn://",
 )
 
 # Accepts ``--hash=sha256:...`` and ``--hash sha256:...``. The same pattern both
@@ -89,8 +96,30 @@ _HASH_DIRECTIVE_PATTERN = re.compile(r"--hash[=\s]+(\S+)")
 _INCLUDE_PATTERN = re.compile(r"(?:--requirement(?:\s*=\s*|\s+|$)|-r\s*=?\s*)(.*)$")
 _CONSTRAINT_PATTERN = re.compile(r"(?:--constraint(?:\s*=\s*|\s+|$)|-c\s*=?\s*)(.*)$")
 
-# Credentials embedded in URLs (``://user:pass@host``) must not reach errors.
-_URL_CREDENTIALS_PATTERN = re.compile(r"(://)[^/@\s]+@")
+# Credentials embedded in URLs (``://user:pass@host``) must not reach errors or
+# logs. Greedy up to the last ``@`` of the authority, so a password that itself
+# contains ``@`` is masked completely.
+_URL_CREDENTIALS_PATTERN = re.compile(r"(://)[^/\s]*@")
+
+_URL_PREFIX_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
+
+# pip starts a comment at ``#`` only at the start of a line or after whitespace
+# (``COMMENT_RE``); a ``#`` inside a token is part of it (URL fragments, markers).
+_COMMENT_PATTERN = re.compile(r"(?:^|\s+)#")
+
+# ``-e path``, ``-epath``, ``-e=path``, ``--editable path``, ``--editable=path``.
+_EDITABLE_PATTERN = re.compile(r"(?:--editable(?:\s*=\s*|\s+|$)|-e\s*=?\s*)(.*)$")
+
+# Per-requirement pip options that carry no information depkeeper uses.
+_REQUIREMENT_OPTION_PATTERN = re.compile(
+    r"\s+--(?:global-option|install-option|config-settings)(?:\s*=\s*|\s+)"
+    r"(?:\"[^\"]*\"|'[^']*'|\S+)"
+)
+
+# Standalone option lines pip accepts that the shared constants do not list.
+_EXTRA_NO_VALUE_OPTIONS = ("--no-index", "--require-hashes", "--always-unzip", "-Z")
+
+_LINE_BREAK_PATTERN = re.compile(r"\r\n|\r|\n")
 
 # A ``#egg=`` value is a project name, never a path.
 _EGG_NAME_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?")
@@ -106,12 +135,14 @@ def _join_continuations(content: str) -> List[Tuple[int, str]]:
     joined: List[Tuple[int, str]] = []
     pending: List[str] = []
     start = 0
-    for number, line in enumerate(content.splitlines(), start=1):
+    # Only \n, \r\n and \r end a line (as in pip and the update writer);
+    # str.splitlines() would also split on \f, \v, U+2028 and friends.
+    for number, line in enumerate(_LINE_BREAK_PATTERN.split(content), start=1):
         if not pending:
             start = number
         trailing = len(line) - len(line.rstrip("\\"))
         # pip never continues a comment line (COMMENT_RE).
-        if trailing % 2 == 1 and not (not pending and line.lstrip().startswith("#")):
+        if trailing % 2 == 1 and not line.lstrip().startswith("#"):
             pending.append(line[:-1].strip())
             continue
         pending.append(line.strip() if pending else line)
@@ -387,7 +418,7 @@ class RequirementsParser:
             self.logger.debug(
                 "Line %d: Skipping supported pip global option: %s",
                 line_number,
-                requirement_spec,
+                _redact(requirement_spec),
             )
             return None
 
@@ -397,14 +428,30 @@ class RequirementsParser:
             (EDITABLE_DIRECTIVE, EDITABLE_DIRECTIVE_LONG)
         )
         if is_editable:
-            requirement_spec = (
-                requirement_spec.split(None, 1)[1] if " " in requirement_spec else ""
+            match = _EDITABLE_PATTERN.match(requirement_spec)
+            requirement_spec = self._remove_surrounding_quotes(
+                match.group(1).strip() if match else ""
             )
+            if not requirement_spec:
+                raise ParseError(
+                    "Editable directive requires a path or URL.",
+                    line_number=line_number,
+                    line_content=_redact(line_text),
+                    file_path=source_file_path,
+                )
+
+        requirement_spec = _REQUIREMENT_OPTION_PATTERN.sub("", requirement_spec)
 
         hash_values: List[str] = _HASH_DIRECTIVE_PATTERN.findall(requirement_spec)
         if hash_values:
             requirement_spec = _HASH_DIRECTIVE_PATTERN.sub(" ", requirement_spec)
             requirement_spec = " ".join(requirement_spec.split())
+
+        url_marker: Optional[str] = None
+        if self._is_url_or_path_line(requirement_spec):
+            requirement_spec, url_marker = self._split_url_marker(
+                requirement_spec, line_number, source_file_path
+            )
 
         url_components = self._parse_direct_url(requirement_spec)
         if url_components:
@@ -440,7 +487,37 @@ class RequirementsParser:
                 source_file_path=source_file_path,
             )
 
+        if url_marker:
+            parsed_requirement.markers = url_marker
+
         return self._apply_constraint_to_requirement(parsed_requirement)
+
+    def _is_url_or_path_line(self, requirement_spec: str) -> bool:
+        """Whether *requirement_spec* is a bare URL or local path (not ``name @ url``)."""
+        return bool(
+            self._parse_direct_url(requirement_spec)
+            or self._parse_local_file_path(requirement_spec)
+        )
+
+    @staticmethod
+    def _split_url_marker(
+        requirement_spec: str, line_number: int, source_file_path: Optional[str]
+    ) -> Tuple[str, Optional[str]]:
+        """Split ``<url-or-path> ; <marker>`` as pip does (``;`` after whitespace)."""
+        match = re.search(r"\s;", requirement_spec)
+        if not match:
+            return requirement_spec, None
+        marker_text = requirement_spec[match.end() :].strip()
+        try:
+            marker = str(Marker(marker_text))
+        except InvalidMarker as exc:
+            raise ParseError(
+                f"Invalid environment marker: {_redact(str(exc))}",
+                line_number=line_number,
+                line_content=_redact(requirement_spec),
+                file_path=source_file_path,
+            ) from exc
+        return requirement_spec[: match.start()].strip(), marker
 
     def get_constraints(self) -> Dict[str, Requirement]:
         """Return a copy of all constraint requirements loaded via ``-c``.
@@ -488,12 +565,16 @@ class RequirementsParser:
                 circular reference.
         """
         match = _INCLUDE_PATTERN.match(directive_line)
-        included_file_path = match.group(1).strip() if match else ""
+        included_file_path = self._remove_surrounding_quotes(
+            match.group(1).strip() if match else ""
+        )
         if not included_file_path:
             self.logger.warning(
                 "Line %d: Include directive missing file path", line_number
             )
             return None
+
+        self._reject_remote_path(included_file_path, line_number, source_file_path)
 
         if not current_directory:
             self.logger.warning(
@@ -509,9 +590,9 @@ class RequirementsParser:
             )
         except (FileOperationError, ParseError) as exc:
             raise ParseError(
-                f"Failed to process include directive: {exc}",
+                f"Failed to process include directive: {_redact(str(exc))}",
                 line_number=line_number,
-                line_content=directive_line,
+                line_content=_redact(directive_line),
                 file_path=source_file_path,
             ) from exc
 
@@ -538,12 +619,16 @@ class RequirementsParser:
             ParseError: The constraint file cannot be read or is malformed.
         """
         match = _CONSTRAINT_PATTERN.match(directive_line)
-        constraint_file_path = match.group(1).strip() if match else ""
+        constraint_file_path = self._remove_surrounding_quotes(
+            match.group(1).strip() if match else ""
+        )
         if not constraint_file_path:
             self.logger.warning(
                 "Line %d: Constraint directive missing file path", line_number
             )
             return
+
+        self._reject_remote_path(constraint_file_path, line_number, source_file_path)
 
         if not current_directory:
             self.logger.warning(
@@ -560,11 +645,24 @@ class RequirementsParser:
             )
         except (FileOperationError, ParseError) as exc:
             raise ParseError(
-                f"Failed to process constraint directive: {exc}",
+                f"Failed to process constraint directive: {_redact(str(exc))}",
                 line_number=line_number,
-                line_content=directive_line,
+                line_content=_redact(directive_line),
                 file_path=source_file_path,
             ) from exc
+
+    @staticmethod
+    def _reject_remote_path(
+        path: str, line_number: int, source_file_path: Optional[str]
+    ) -> None:
+        """Fail on ``-r``/``-c`` URLs: depkeeper reads local files only."""
+        if _URL_PREFIX_PATTERN.match(path):
+            raise ParseError(
+                "Remote requirements/constraints files are not supported.",
+                line_number=line_number,
+                line_content=_redact(path),
+                file_path=source_file_path,
+            )
 
     def _build_standard_pep508_requirement(
         self,
@@ -806,8 +904,9 @@ class RequirementsParser:
             A dict with ``"scheme"``, ``"path"``, and ``"egg"`` keys, or
             ``None`` if the line is not a URL.
         """
+        lowered = requirement_line.lower()
         for scheme in URL_SCHEMES:
-            if requirement_line.startswith(scheme):
+            if lowered.startswith(scheme):
                 egg_name: Optional[str] = None
 
                 if "#egg=" in requirement_line:
@@ -962,21 +1061,15 @@ class RequirementsParser:
         return (
             option_name in PIP_GLOBAL_OPTIONS_WITH_VALUES
             or option_name in PIP_GLOBAL_OPTIONS_NO_VALUES
+            or option_name in _EXTRA_NO_VALUE_OPTIONS
         )
 
     def _extract_inline_comment(self, line: str) -> Tuple[str, Optional[str]]:
         """Extract an inline comment from a requirement line.
 
-        Scans the line for ``#`` characters.  A ``#`` is considered the
-        start of a comment when:
-
-        1. It is **not** part of a URL fragment (e.g., ``#egg=``,
-           ``#subdirectory=``).
-        2. It does **not** appear immediately after ``://`` within the same
-           token (which would make it part of a URL).
-
-        This heuristic handles most real-world cases, including URLs with
-        fragments and inline comments after the requirement spec.
+        As in pip, a ``#`` starts a comment only at the start of the line or
+        after whitespace, so URL fragments (``#egg=``) and ``#`` inside a
+        token or a quoted marker value are never mistaken for one.
 
         Args:
             line: Full requirement line (may contain ``#`` in multiple
@@ -986,29 +1079,10 @@ class RequirementsParser:
             A tuple ``(requirement_text, comment_text)``.  *comment_text*
             is ``None`` when no comment is found.
         """
-        for char_index, char in enumerate(line):
-            if char != "#":
-                continue
-
-            text_before_hash = line[:char_index]
-            text_after_hash = line[char_index + 1 :]
-
-            # Known URL fragment keys are never comment delimiters.
-            if text_after_hash.startswith(
-                ("egg=", "subdirectory=", "sha1=", "sha256=")
-            ):
-                continue
-
-            # Otherwise the '#' belongs to a URL only if a scheme precedes it
-            # with no intervening whitespace.
-            url_scheme_position = text_before_hash.rfind("://")
-            if (
-                url_scheme_position == -1
-                or " " in text_before_hash[url_scheme_position:]
-            ):
-                return text_before_hash.strip(), text_after_hash.strip()
-
-        return line, None
+        match = _COMMENT_PATTERN.search(line)
+        if match is None:
+            return line, None
+        return line[: match.start()].strip(), line[match.end() :].strip()
 
     def _apply_constraint_to_requirement(self, requirement: Requirement) -> Requirement:
         """Apply stored constraints to a requirement if a match exists.
@@ -1045,6 +1119,9 @@ def _normalize_package_name(package_name: str) -> str:
     return normalize_package_name(package_name)
 
 
+_SPEC_TOKEN_PATTERN = re.compile(r"(===|==|!=|<=|>=|~=|<|>)\s*([^\s,;()]+)")
+
+
 def _ordered_specs(
     specifier_set: Iterable[Specifier],
     requirement_spec: str,
@@ -1055,8 +1132,7 @@ def _ordered_specs(
     order varies between processes (PEP 456 string hash randomization). The
     update command rewrites requirement lines from these pairs, so an unstable
     order would produce spurious, non-reproducible diffs. Specifiers that
-    cannot be located verbatim (e.g. written with internal whitespace) sort
-    last in a stable, deterministic order.
+    cannot be located sort last in a stable, deterministic order.
 
     Args:
         specifier_set: Parsed specifiers for one requirement.
@@ -1073,10 +1149,15 @@ def _ordered_specs(
     """
     specs = [(spec.operator, spec.version) for spec in specifier_set]
 
-    def sort_key(spec: Tuple[str, str]) -> Tuple[int, str, str]:
-        index = requirement_spec.find(f"{spec[0]}{spec[1]}")
-        if index < 0:
-            index = len(requirement_spec)
-        return index, spec[0], spec[1]
-
-    return sorted(specs, key=sort_key)
+    # Source order from the specifier text itself; marker operators come after ';'.
+    tokens = [
+        (match.group(1), match.group(2))
+        for match in _SPEC_TOKEN_PATTERN.finditer(requirement_spec.split(";", 1)[0])
+    ]
+    remaining = list(specs)
+    ordered: List[Tuple[str, str]] = []
+    for token in tokens:
+        if token in remaining:
+            remaining.remove(token)
+            ordered.append(token)
+    return ordered + sorted(remaining)

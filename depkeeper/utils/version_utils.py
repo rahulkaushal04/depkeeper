@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import datetime as _dt
 from typing import Iterable, List, Optional, Sequence, Set, Tuple
-from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.specifiers import InvalidSpecifier, Specifier
 from packaging.version import InvalidVersion, Version, parse
 
 #: Operators that describe the *floor* of an accepted version range. These are
@@ -357,9 +357,12 @@ def implied_major_bounds(specs: Iterable[Spec]) -> List[Spec]:
         if operator != "~=":
             continue
         try:
-            bounds.append(("<", str(Version(version).major + 1)))
+            parsed = Version(version)
         except InvalidVersion:
             continue
+        # The epoch is part of the bound: ``<3`` alone sorts below every ``1!`` version.
+        epoch = f"{parsed.epoch}!" if parsed.epoch else ""
+        bounds.append(("<", f"{epoch}{parsed.major + 1}"))
     return bounds
 
 
@@ -388,15 +391,6 @@ def specs_allow_version(specs: Iterable[Spec], version: str) -> bool:
         >>> specs_allow_version([], "1.0.0")
         True
     """
-    specifier_string = specs_to_string(specs)
-    if not specifier_string:
-        return True
-
-    try:
-        specifier_set = SpecifierSet(specifier_string)
-    except InvalidSpecifier:
-        return True
-
     # Parsed explicitly rather than passed as a string: packaging 26.0
     # changed contains() to return False for a bad version instead of
     # raising, which would silently veto it instead of permitting it.
@@ -405,7 +399,16 @@ def specs_allow_version(specs: Iterable[Spec], version: str) -> bool:
     except InvalidVersion:
         return True
 
-    return specifier_set.contains(parsed_version, prereleases=True)
+    # Each specifier is judged on its own so one malformed entry cannot
+    # switch off the valid bounds next to it.
+    for operator, spec_version in specs:
+        try:
+            specifier = Specifier(f"{operator}{spec_version}")
+        except InvalidSpecifier:
+            continue
+        if not specifier.contains(parsed_version, prereleases=True):
+            return False
+    return True
 
 
 def rewrite_version_specs(specs: Sequence[Spec], new_version: str) -> List[Spec]:

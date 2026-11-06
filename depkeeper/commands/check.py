@@ -16,6 +16,7 @@ from datetime import timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from packaging.utils import canonicalize_name
+from rich.markup import escape
 
 from depkeeper.models import Package
 from depkeeper.exceptions import DepKeeperError
@@ -248,6 +249,8 @@ def check(
     except DepKeeperError as e:
         print_error(e.message)
         sys.exit(1)
+    except BrokenPipeError:
+        raise
     except Exception as e:
         print_error(f"Unexpected error: {e}")
         logger.exception("Error in check command")
@@ -321,9 +324,11 @@ async def _check_async(
     logger.info("Found %d package(s)", len(requirements))
 
     async with HTTPClient() as http:
-        data_store = PyPIDataStore(http)
+        data_store = PyPIDataStore(http, target_python=python[0])
 
-        await data_store.prefetch_packages([req.name for req in requirements])
+        await data_store.prefetch_packages(
+            [req.name for req in requirements if not (req.url or req.editable)]
+        )
 
         checker = VersionChecker.from_config(
             data_store,
@@ -377,6 +382,7 @@ async def _check_async(
             for p in packages
             if p.has_update()
             or p.has_conflicts()
+            or p.conflict_held
             or (not p.latest_version and id(p) not in direct)
         ]
         shown = {id(p) for p in packages}
@@ -414,12 +420,17 @@ async def _check_async(
     else:  # json
         _display_json(packages, rows)
 
+    # Always shown (on stderr for machine formats): a typo'd name silently
+    # applies nothing otherwise.
+    unknown_note = _report.unknown_allow_major_note(allow_major, requirements)
+    if unknown_note:
+        print_warning(unknown_note, stderr=status_to_stderr)
+
     if show_progress:
         for note in (
             _report.policy_note(packages),
             _report.cooldown_note(packages),
             _report.major_note(packages),
-            _report.unknown_allow_major_note(allow_major, requirements),
         ):
             if note:
                 print_warning(note, stderr=status_to_stderr)
@@ -434,8 +445,12 @@ async def _check_async(
                     "unresolved conflicts — see 'Conflicts' column",
                     stderr=status_to_stderr,
                 )
-        elif not failed:
-            print_success("\nAll packages are up to date!", stderr=status_to_stderr)
+        else:
+            remaining = _report.attention_note(packages, failed)
+            if remaining:
+                print_warning(f"\n{remaining}", stderr=status_to_stderr)
+            else:
+                print_success("\nAll packages are up to date!", stderr=status_to_stderr)
 
     # Failures are reported regardless of format or verbosity: a CI log must
     # never look clean when PyPI could not be queried.
@@ -445,6 +460,9 @@ async def _check_async(
             f"(not found on PyPI or network error): {', '.join(failed)}",
             stderr=True,
         )
+    for p in packages:
+        if not p.latest_version and p.metadata.get("lookup_error"):
+            print_error(p.metadata["lookup_error"], stderr=True)
     if unmatched:
         print_warning(
             f"{len(unmatched)} conda package(s) not found on PyPI (may be "
@@ -517,11 +535,11 @@ def _display_table(
             r = by_id.get(id(pkg))
             if r and r.req:
                 fmt = (
-                    f"\n[dim]({r.req.source_format})[/dim]"
+                    f"\n[dim]({escape(r.req.source_format)})[/dim]"
                     if r.req.source_format
                     else ""
                 )
-                row["Source"] = f"{_report.source_cell(r)}{fmt}"
+                row["Source"] = f"{escape(_report.source_cell(r))}{fmt}"
             else:
                 row["Source"] = "[dim]-[/dim]"
 
@@ -557,8 +575,8 @@ def _python_cell(pkg: Package) -> str:
     if not req:
         return "[dim]-[/dim]"
     # Exclusion clauses (!=3.0.*) make the cell unreadable; keep the bounds.
-    parts = [x for x in req.replace(" ", "").split(",") if not x.startswith("!=")]
-    return ",".join(parts)
+    parts = [x for x in req.replace(" ", "").split(",") if x and not x.startswith("!=")]
+    return escape(",".join(parts))
 
 
 def _create_table_row(pkg: Package) -> Dict[str, str]:
@@ -569,7 +587,7 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
         row["Status"] = f"[cyan][{marker}][/cyan]"
         row["Update Type"] = f"[cyan]{marker.lower()} by policy[/cyan]"
     if pkg.cooldown_skipped:
-        row["Recommended"] += f"\n[dim]{pkg.cooldown_skipped} held (age)[/dim]"
+        row["Recommended"] += f"\n[dim]{escape(pkg.cooldown_skipped)} held (age)[/dim]"
     return row
 
 
@@ -578,13 +596,25 @@ def _base_table_row(pkg: Package) -> Dict[str, str]:
     python_support = _python_cell(pkg)
     dash = "[dim]-[/dim]"
 
+    if pkg.direct:
+        return {
+            "Status": "[dim][DIRECT][/dim]",
+            "Package": escape(pkg.name),
+            "Current": dash,
+            "Latest": dash,
+            "Recommended": "[dim]direct reference, not checked[/dim]",
+            "Update Type": dash,
+            "Conflicts": dash,
+            "Python Support": dash,
+        }
+
     # A missing latest_version means the PyPI lookup failed, which is a
     # different state from "no update available".
     if not pkg.latest_version:
         return {
             "Status": "[red][ERROR][/red]",
-            "Package": pkg.name,
-            "Current": pkg.current_version or dash,
+            "Package": escape(pkg.name),
+            "Current": escape(pkg.current_version) if pkg.current_version else dash,
             "Latest": "[red]error[/red]",
             "Recommended": dash,
             "Update Type": dash,
@@ -599,22 +629,22 @@ def _base_table_row(pkg: Package) -> Dict[str, str]:
     if pkg.recommended_version:
         if pkg.current_version and pkg.recommended_version != pkg.current_version:
             recommended_display = (
-                f"[bright_cyan]{pkg.recommended_version}[/bright_cyan]"
+                f"[bright_cyan]{escape(pkg.recommended_version)}[/bright_cyan]"
             )
 
     conflicts_display = dash
     if display["has_conflicts"]:
         conflicts_display = "\n".join(
-            f"[red]⚠[/red] {c.source_package} needs {c.required_spec}"
+            f"[red]⚠[/red] {escape(c.source_package)} needs {escape(c.required_spec)}"
             for c in pkg.conflicts
         )
 
     def build(status: str, update_type: str) -> Dict[str, str]:
         return {
             "Status": status,
-            "Package": pkg.name,
-            "Current": pkg.current_version or dash,
-            "Latest": pkg.latest_version or dash,
+            "Package": escape(pkg.name),
+            "Current": escape(pkg.current_version) if pkg.current_version else dash,
+            "Latest": escape(pkg.latest_version) if pkg.latest_version else dash,
             "Recommended": recommended_display,
             "Update Type": update_type,
             "Conflicts": conflicts_display,
@@ -663,6 +693,14 @@ def _display_simple(
             status = "held" if pkg.held else "ignored"
         status_label = f"[{status.upper()}]"
 
+        if pkg.direct:
+            console.print(
+                f"{status_label:12} {pkg.name:20} direct reference, not checked",
+                markup=False,
+                soft_wrap=True,
+            )
+            continue
+
         if recommended and recommended != latest:
             # A recommendation below latest means conflict resolution or a
             # major boundary capped the upgrade.
@@ -670,26 +708,31 @@ def _display_simple(
                 f"{status_label:12} {pkg.name:20} {installed:10} → {latest:10} "
                 f"(recommended: {recommended})",
                 markup=False,
+                soft_wrap=True,
             )
         else:
             console.print(
                 f"{status_label:12} {pkg.name:20} {installed:10} → {latest:10}",
                 markup=False,
+                soft_wrap=True,
             )
 
         age = _report.age_text(pkg) if pkg.has_update() else None
         if age:
-            console.print(f"       {age}", markup=False)
+            console.print(f"       {age}", markup=False, soft_wrap=True)
         if pkg.cooldown_skipped:
             console.print(
                 f"       cooldown: {pkg.cooldown_skipped} withheld (min_age)",
                 markup=False,
+                soft_wrap=True,
             )
         row = by_id.get(id(pkg))
         if show_source and row and row.req:
             fmt = f" ({row.req.source_format})" if row.req.source_format else ""
             console.print(
-                f"       Source: {_report.source_cell(row)}{fmt}", markup=False
+                f"       Source: {_report.source_cell(row)}{fmt}",
+                markup=False,
+                soft_wrap=True,
             )
 
         if pkg.has_conflicts():
@@ -698,10 +741,11 @@ def _display_simple(
                     f"       ⚠ Conflict: {conflict.to_display_string()}",
                     style="red",
                     markup=False,
+                    soft_wrap=True,
                 )
 
-        current_req = pkg.get_version_python_req("current")
-        latest_req = pkg.get_version_python_req("latest")
+        current_req = _report.clean_specifier(pkg.get_version_python_req("current"))
+        latest_req = _report.clean_specifier(pkg.get_version_python_req("latest"))
         if current_req or latest_req:
             req_parts = []
             if current_req:
@@ -709,11 +753,17 @@ def _display_simple(
             if latest_req:
                 req_parts.append(f"latest: {latest_req}")
             if pkg.has_update():
-                recommended_req = pkg.get_version_python_req("recommended")
+                recommended_req = _report.clean_specifier(
+                    pkg.get_version_python_req("recommended")
+                )
                 if recommended_req:
                     req_parts.append(f"recommended: {recommended_req}")
             if req_parts:
-                console.print(f"       Python: {', '.join(req_parts)}", markup=False)
+                console.print(
+                    f"       Python: {', '.join(req_parts)}",
+                    markup=False,
+                    soft_wrap=True,
+                )
 
 
 def _display_json(

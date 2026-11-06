@@ -23,7 +23,9 @@ import sys
 import threading
 from typing import IO, Any, Callable, Dict, List, Optional
 
+from rich import box
 from rich.markup import escape
+from rich.measure import Measurement
 from rich.table import Table
 from rich.theme import Theme
 from rich.console import Console
@@ -52,6 +54,9 @@ def _target_stream(stderr: bool) -> IO[str]:
 def _should_use_color(*, stderr: bool = False) -> bool:
     """Return True if colored output should be enabled for the given stream.
 
+    ``NO_COLOR`` beats ``FORCE_COLOR``; otherwise ``FORCE_COLOR`` forces color
+    on a non-TTY and a TTY is colored by default.
+
     Args:
         stderr: Check ``sys.stderr`` instead of ``sys.stdout``. Each stream is
             evaluated independently because one may be a TTY while the other
@@ -59,6 +64,8 @@ def _should_use_color(*, stderr: bool = False) -> bool:
     """
     if os.environ.get("NO_COLOR"):
         return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
     try:
         return _target_stream(stderr).isatty()
     except (AttributeError, OSError):
@@ -81,7 +88,9 @@ def _get_console(*, stderr: bool = False) -> Console:
                 console = Console(
                     theme=DEPKEEPER_THEME,
                     stderr=stderr,
-                    no_color=not use_color,
+                    # color_system=None drops every SGR code (bold/dim too);
+                    # no_color would only drop the colors.
+                    color_system="auto" if use_color else None,
                     highlight=use_color,
                 )
                 _consoles[stderr] = console
@@ -167,33 +176,49 @@ def print_table(
     if headers is None:
         headers = list(data[0].keys())
 
-    table = Table(
-        title=title,
-        caption=caption,
-        show_header=True,
-        header_style="bold",
-        show_lines=show_row_lines,
-    )
-
     column_styles = column_styles or {}
-    for header in headers:
-        config = column_styles.get(header, {})
-        table.add_column(
-            header,
-            style=config.get("style"),
-            justify=config.get("justify", "default"),
-            no_wrap=config.get("no_wrap", False),
-            width=config.get("width"),
-            min_width=config.get("min_width"),
-            overflow=config.get("overflow", "fold"),
+    rows = [
+        (
+            tuple(str(row.get(h, "")) for h in headers),
+            row_styler(row) if row_styler else None,
         )
+        for row in data
+    ]
 
-    for row in data:
-        values = [str(row.get(h, "")) for h in headers]
-        style = row_styler(row) if row_styler else None
-        table.add_row(*values, style=style)
+    def build(compact: bool) -> Table:
+        table = Table(
+            title=title,
+            caption=caption,
+            show_header=True,
+            header_style="bold",
+            show_lines=show_row_lines,
+            box=box.SIMPLE_HEAD if compact else box.HEAVY_HEAD,
+            pad_edge=not compact,
+        )
+        for header in headers:
+            config = column_styles.get(header, {})
+            table.add_column(
+                header,
+                style=config.get("style"),
+                justify=config.get("justify", "default"),
+                # Compact layout lets every column shrink; fixed columns would
+                # otherwise be cropped or squeezed to nothing.
+                no_wrap=False if compact else config.get("no_wrap", False),
+                width=None if compact else config.get("width"),
+                min_width=None if compact else config.get("min_width"),
+                overflow="fold" if compact else config.get("overflow", "fold"),
+            )
+        for values, style in rows:
+            table.add_row(*values, style=style)
+        return table
 
-    _get_console(stderr=stderr).print(table)
+    console = _get_console(stderr=stderr)
+    table = build(False)
+    # The regular layout is kept whenever it can fit; only a table whose
+    # fixed-width columns cannot shrink to the terminal switches to compact.
+    if Measurement.get(console, console.options, table).minimum > console.width:
+        table = build(True)
+    console.print(table)
 
 
 def confirm(message: str, *, default: bool = False) -> bool:

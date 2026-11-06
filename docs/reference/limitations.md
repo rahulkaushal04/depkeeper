@@ -18,6 +18,11 @@ It cross-validates the packages **you declared** against each other, using the d
 `requires_dist` of the proposed versions. It does not expand the transitive graph. A plan that
 looks clean can still fail `pip install`. `update --verify` asks pip's resolver about the final plan (including transitive dependencies) before anything is written, but it is skipped with a warning when pip is missing/older than 22.2, offline, or the release is source-only, and it never builds sdists.
 
+Transitive conflicts and conflicts through extras are therefore **not detected** by `check` or by
+the update plan. For example, `celery[redis]` 5.7.0 together with `redis==4.6.0` passes `check`,
+but `update --verify` aborts because `kombu[redis]` (pulled in by the extra) is incompatible with
+that `redis`. `update --verify` is the safeguard.
+
 **Workaround:** use `update --verify`, and always run `pip install -r requirements.txt` and your test suite after an update.
 In automated pipelines this step is mandatory.
 

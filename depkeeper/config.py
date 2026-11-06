@@ -58,7 +58,7 @@ MAX_UPDATE_CHOICES = ("patch", "minor", "major")
 
 _DURATION_RE = re.compile(r"^\s*([0-9]+(?:\.[0-9]+)?)\s*([smhdw]?)\s*$", re.I)
 _DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800, "": 86400}
-_PYTHON_VERSION_RE = re.compile(r"^\d+\.\d+(\.\d+)?$")
+_PYTHON_VERSION_RE = re.compile(r"\A[0-9]+\.[0-9]+(\.[0-9]+)?\Z")
 
 
 def parse_duration(value: Union[str, int, float]) -> timedelta:
@@ -240,8 +240,8 @@ def discover_config_file(explicit_path: Optional[Path] = None) -> Optional[Path]
 def _pyproject_has_depkeeper_section(path: Path) -> bool:
     """Return True if *path* has a ``[tool.depkeeper]`` table (False on any error)."""
     try:
-        raw = _read_toml(path)
-        return "depkeeper" in raw.get("tool", {})
+        tool = _read_toml(path).get("tool", {})
+        return isinstance(tool, dict) and "depkeeper" in tool
     except Exception:
         return False
 
@@ -275,7 +275,8 @@ def load_config(config_path: Optional[Path] = None) -> DepKeeperConfig:
 
     # The two supported files nest the settings differently.
     if resolved.name == "pyproject.toml":
-        section = raw.get("tool", {}).get("depkeeper")
+        tool = raw.get("tool", {})
+        section = tool.get("depkeeper") if isinstance(tool, dict) else None
         table_name = "[tool.depkeeper]"
     else:
         section = raw.get("depkeeper")
@@ -286,6 +287,12 @@ def load_config(config_path: Optional[Path] = None) -> DepKeeperConfig:
     if section is None and config_path is not None:
         raise ConfigError(
             f"Configuration file {resolved.name} has no {table_name} table",
+            config_path=str(resolved),
+        )
+    if section is not None and not isinstance(section, dict):
+        raise ConfigError(
+            f"{table_name} in {resolved.name} must be a table, "
+            f"got {type(section).__name__}",
             config_path=str(resolved),
         )
 

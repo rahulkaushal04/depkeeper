@@ -43,10 +43,11 @@ from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
 
+from depkeeper.utils.redact import redact
+
 _MIN_PIP = (22, 2)
 #: First pip that accepts ``--python-version`` together with ``--dry-run``.
 _MIN_PIP_TARGET = (23, 3)
-_CRED_RE = re.compile(r"(://)[^/\s:@]+(?::\S*)?@")
 #: pip env vars that would defeat a dry-run resolution of our plan.
 _STRIP_ENV = frozenset(
     {
@@ -74,17 +75,12 @@ _NET_RE = re.compile(
 _CONFLICT_RE = re.compile(r"Cannot install (.+?) because these package versions", re.S)
 _DETAIL_RE = re.compile(r"^\s+(\S.*?)\s+depends on\s+(.+?)\s*$")
 _VER_RE = re.compile(r"pip (\d+)\.(\d+)(?:\.\d+)?")
-_PIP_PY_RE = re.compile(r"\(python (\d+\.\d+)\)")
-_PY_RE = re.compile(r"^\s*(\d+)\.(\d+)(?:\.\d+)*\s*$")
+_PIP_PY_RE = re.compile(r"\(python ([0-9]+\.[0-9]+)\)")
+_PY_RE = re.compile(r"\A\s*([0-9]+)\.([0-9]+)(?:\.[0-9]+)*\s*\Z")
 _NO_DIST_RE = re.compile(r"No matching distribution found for (\S+)")
 _AVAILABLE_RE = re.compile(r"Available versions:\s*(.+)")
 _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*")
 _IGNORED_RE = re.compile(r"(\S+) Requires-Python")
-#: Query-string values that commonly carry credentials.
-_QUERY_SECRET_RE = re.compile(
-    r"([?&][^=&\s]*(?:token|key|secret|passw|auth|sig|credential)[^=&\s]*=)[^&\s]+",
-    re.I,
-)
 
 
 @dataclass(frozen=True)
@@ -151,11 +147,6 @@ class VerifyResult:
                 f"{'s' * (excluded != 1)} not checked"
             )
         return text
-
-
-def redact(text: str) -> str:
-    """Hide ``user[:pass]@`` URL credentials and token-like query values."""
-    return _QUERY_SECRET_RE.sub(r"\1***", _CRED_RE.sub(r"\1***@", text))
 
 
 def _kill_tree(p: "subprocess.Popen[str]") -> None:
@@ -374,6 +365,16 @@ def verify_plan(
 
     def skip(msg: str) -> VerifyResult:
         return VerifyResult(False, True, redact(msg), [])
+
+    for line in (*requirements, *constraints):
+        # Each line must be a plain PEP 508 requirement: pip reads the file as
+        # a requirements file, where options (--index-url, -r, -e) are commands.
+        try:
+            if not line.strip() or len(line.splitlines()) != 1:
+                raise InvalidRequirement("empty or multi-line")
+            Requirement(line)
+        except InvalidRequirement:
+            return skip(f"cannot verify: not a plain requirement: {line[:80]!r}")
 
     py = python_executable or sys.executable
     path = report = cpath = ""
