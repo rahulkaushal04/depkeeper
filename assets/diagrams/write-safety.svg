@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" role="img">
+<title>update renders every file in memory first, then commits one file at a time with a re-read check and an atomic replace; any failure or Ctrl-C rolls back what was committed</title>
+<desc>After the hash-refusal, --verify and confirm gates and optional timestamped backups, _apply_updates renders every affected file in memory into _PendingWrite objects; a rejected requirement writes nothing. _commit_pending_writes then walks the files in sorted order: it re-reads each file and refuses if it differs from the rendered original, otherwise safe_write_file writes a temp file in the same directory, fsyncs it, copies the file mode and os.replace()s it over the target. A write error or Ctrl-C rewrites already committed files from their captured original content in reverse order, then re-raises; Ctrl-C exits 130 and backup copies are kept.</desc>
+<defs>
+<marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2563EB"/></marker>
+<marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#16A34A"/></marker>
+<marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#DC2626"/></marker>
+<marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+</defs>
+<rect x="0.5" y="0.5" width="999" height="639" rx="12" fill="#FFFFFF" stroke="#CBD5E1"/>
+<g font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#0F172A" text-anchor="middle">
+<rect x="90" y="40" width="340" height="52" rx="8" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1"/>
+<text x="260.0" y="62" font-weight="700" fill="#0F172A" font-size="12.5">Gates before any write</text>
+<text x="260.0" y="80" font-size="11" fill="#475569">hash refusal, --verify, confirm</text>
+<path d="M260,92 V126" fill="none" stroke="#2563EB" stroke-width="1.5" marker-end="url(#ab)"/>
+<text x="270" y="113" font-size="11" fill="#475569" text-anchor="start">approved plan</text>
+<rect x="90" y="126" width="340" height="52" rx="8" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1"/>
+<text x="260.0" y="148" font-weight="700" fill="#0F172A" font-size="12.5">Back up (--backup)</text>
+<text x="260.0" y="166" font-size="11" fill="#475569">timestamped copy of each affected file</text>
+<path d="M260,178 V212" fill="none" stroke="#2563EB" stroke-width="1.5" marker-end="url(#ab)"/>
+<text x="270" y="199" font-size="11" fill="#475569" text-anchor="start">files to change</text>
+<rect x="90" y="212" width="340" height="60" rx="8" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1"/>
+<text x="260.0" y="231" font-weight="700" fill="#0F172A" font-size="12.5">Render every file in memory</text>
+<text x="260.0" y="249" font-size="11" fill="#475569">adapter.apply_updates per file, sorted</text>
+<text x="260.0" y="264" font-size="11" fill="#475569">original + updated text kept</text>
+<path d="M260,272 V330" fill="none" stroke="#2563EB" stroke-width="1.5" marker-end="url(#ab)"/>
+<text x="270" y="296" font-size="11" fill="#475569" text-anchor="start">_PendingWrite list</text>
+<rect x="14" y="300" width="452" height="226" rx="10" fill="none" stroke="#94A3B8" stroke-dasharray="3 4"/>
+<text x="26" y="316" font-size="11" font-weight="600" fill="#475569" text-anchor="start">for each file, in sorted order</text>
+<polygon points="260,330 390,366 260,402 130,366" fill="#FFFFFF" stroke="#475569" stroke-width="1.2"/>
+<text x="260" y="364" font-weight="700">disk == original?</text><text x="260" y="379" font-size="11" fill="#475569">re-read, newline=""</text>
+<path d="M260,402 V436" fill="none" stroke="#2563EB" stroke-width="1.5" marker-end="url(#ab)"/>
+<text x="270" y="424" font-size="11" fill="#475569" text-anchor="start">yes</text>
+<rect x="90" y="436" width="340" height="70" rx="8" fill="#FFFBEB" stroke="#F59E0B" stroke-width="1.5"/>
+<text x="260.0" y="460" font-weight="700" fill="#0F172A" font-size="12.5">safe_write_file (atomic)</text>
+<text x="260.0" y="478" font-size="11" fill="#475569">temp file in same dir, flush + fsync</text>
+<text x="260.0" y="493" font-size="11" fill="#475569">copymode, os.replace, fsync dir</text>
+<path d="M90,471 H56 V366 H132" fill="none" stroke="#2563EB" stroke-width="1.5" marker-end="url(#ab)"/>
+<text x="44" y="420" font-size="11" fill="#475569" text-anchor="middle" transform="rotate(-90 44 420)">next file</text>
+<path d="M260,506 V560" fill="none" stroke="#2563EB" stroke-width="1.5" marker-end="url(#ab)"/>
+<text x="270" y="540" font-size="11" fill="#475569" text-anchor="start">all committed</text>
+<rect x="90" y="560" width="340" height="44" rx="8" fill="#F0FDF4" stroke="#16A34A" stroke-width="1"/>
+<text x="260.0" y="578" font-weight="700" fill="#0F172A" font-size="12.5">Done</text>
+<text x="260.0" y="596" font-size="11" fill="#475569">Successfully updated N package(s)</text>
+<rect x="600" y="40" width="360" height="52" rx="8" fill="#FFFFFF" stroke="#DC2626" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="780.0" y="62" font-weight="700" fill="#0F172A" font-size="12.5">Stop: nothing written</text>
+<text x="780.0" y="80" font-size="11" fill="#475569">hashed line refused, verify conflict, declined</text>
+<path d="M430,66 H598" fill="none" stroke="#DC2626" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="515.0" y="58" font-size="11" fill="#475569" text-anchor="middle">refused</text>
+<rect x="600" y="204" width="360" height="76" rx="8" fill="#FFFFFF" stroke="#DC2626" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="780.0" y="231" font-weight="700" fill="#0F172A" font-size="12.5">Render rejected: nothing written</text>
+<text x="780.0" y="249" font-size="11" fill="#475569">hash line without flag, excluded target,</text>
+<text x="780.0" y="264" font-size="11" fill="#475569">text at a recorded position changed</text>
+<path d="M430,242 H598" fill="none" stroke="#DC2626" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="515.0" y="234" font-size="11" fill="#475569" text-anchor="middle">rejected</text>
+<rect x="600" y="334" width="360" height="64" rx="8" fill="#FFFFFF" stroke="#DC2626" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="780.0" y="355" font-weight="700" fill="#0F172A" font-size="12.5">Abort batch</text>
+<text x="780.0" y="373" font-size="11" fill="#475569">&lt;path&gt; was modified while</text>
+<text x="780.0" y="388" font-size="11" fill="#475569">depkeeper was running</text>
+<path d="M390,366 H598" fill="none" stroke="#DC2626" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="495" y="358" font-size="11" fill="#475569" text-anchor="middle">no: edited</text>
+<rect x="600" y="440" width="360" height="84" rx="8" fill="#FFFFFF" stroke="#DC2626" stroke-width="1"/>
+<text x="780.0" y="464" font-weight="700" fill="#0F172A" font-size="12.5">Rollback</text>
+<text x="780.0" y="482" font-size="11" fill="#475569">rewrite committed files from captured</text>
+<text x="780.0" y="496" font-size="11" fill="#475569">original text, reverse order;</text>
+<text x="780.0" y="512" font-size="11" fill="#475569">restore failures reported, not masked</text>
+<path d="M780,398 V438" fill="none" stroke="#DC2626" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="790" y="424" font-size="11" fill="#475569" text-anchor="start">raise</text>
+<path d="M430,471 H598" fill="none" stroke="#DC2626" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="515.0" y="463" font-size="11" fill="#475569" text-anchor="middle">write error / Ctrl-C</text>
+<rect x="600" y="560" width="360" height="60" rx="8" fill="#FFFFFF" stroke="#DC2626" stroke-width="1"/>
+<text x="780.0" y="579" font-weight="700" fill="#0F172A" font-size="12.5">Error re-raised</text>
+<text x="780.0" y="597" font-size="11" fill="#475569">Ctrl-C exits 130; originals intact;</text>
+<text x="780.0" y="612" font-size="11" fill="#475569">--backup copies kept, paths shown</text>
+<path d="M780,524 V558" fill="none" stroke="#DC2626" stroke-width="1.5" marker-end="url(#ar)"/>
+<text x="790" y="545" font-size="11" fill="#475569" text-anchor="start">re-raise</text>
+</g>
+</svg>

@@ -197,9 +197,15 @@ def _get_major_version(version: Optional[str]) -> Optional[int]:
 _UNBOUNDED = -1
 
 
-def _boundary(pkg: Package) -> Optional[int]:
-    """Scheme-aware search boundary: major for semver, unbounded for calver."""
-    if pkg.versioning == "calver":
+def _boundary(
+    pkg: Package, checker: Optional["VersionChecker"] = None
+) -> Optional[int]:
+    """Scheme-aware search boundary: major for semver, unbounded for calver.
+
+    A package the user opted into major upgrades for is unbounded too, so the
+    conflict search can reach the same versions the checker may recommend.
+    """
+    if pkg.versioning == "calver" or (checker and checker.allows_major(pkg.name)):
         return _UNBOUNDED
     return _get_major_version(pkg.current_version)
 
@@ -664,7 +670,7 @@ class DependencyAnalyzer:
             A version string, or ``None`` when the major version cannot be
             determined or no candidate satisfies every conflict.
         """
-        current_major = _boundary(pkg)
+        current_major = _boundary(pkg, self.checker)
         if current_major is None:
             return None
 
@@ -828,8 +834,8 @@ class DependencyAnalyzer:
             if not source_pkg or not target_pkg:
                 continue
 
-            source_major = _boundary(source_pkg)
-            target_major = _boundary(target_pkg)
+            source_major = _boundary(source_pkg, self.checker)
+            target_major = _boundary(target_pkg, self.checker)
             target_proposed = update_set.get(target_name)
             logger.debug(
                 "Resolving conflict: %s (major %s) vs %s (major %s)",

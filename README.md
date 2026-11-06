@@ -56,7 +56,7 @@ depkeeper does not replace a resolver. Run `pip install` and your tests after ev
 - Stays inside the current major version (`1.x` is never moved to `2.x`).
 - Skips releases whose `requires_python` excludes your target Python.
 - Keeps upper bounds, exclusions and `~=` ranges. Only the lower bound moves.
-- Never recommends pre-releases or yanked releases.
+- Never recommends yanked releases. Pre-releases are excluded unless a package sets `allow_prerelease = true` in config.
 - Calendar-versioned packages (such as `certifi`) are detected and labelled `year`, `month` or `patch`.
 - Cross-checks the recommended versions against each other and backs off on conflicts.
 
@@ -67,8 +67,9 @@ depkeeper does not replace a resolver. Run `pip install` and your tests after ev
 
 **Policy and cooldown**
 - `--min-age 7d` skips versions released too recently.
-- `hold`, `ignore` and `max_update` per package, in config.
+- `hold`, `ignore`, `max_update`, `allow_major`, `allow_prerelease` and `versioning` per package, in config.
 - `--ignore PKG` and `--max-update {patch,minor,major}` on the command line.
+- `--allow-major PKG` opts a package into a major upgrade (default: never crosses a major; newer majors are reported).
 
 **CI gating**
 - `check --fail-on {none,updates,minor,major}` exits `3` when updates at that level exist.
@@ -81,7 +82,7 @@ depkeeper does not replace a resolver. Run `pip install` and your tests after ev
 - Aborts if a file changed on disk since it was read.
 
 **Verify before writing**
-- `update --verify` asks pip's resolver whether the new set resolves. On a conflict, nothing is written.
+- `update --verify` asks pip's resolver whether the new set resolves for your target Python (wheels only, nothing is built). On a conflict, nothing is written, and success states what was checked.
 
 **Output formats** (`check --format`)
 
@@ -138,7 +139,7 @@ $ depkeeper check --format simple
        released 1283 days ago
        Python: latest: >=3.9, recommended: >=3.7
 [OUTDATED]   click                8.0        → 8.5.0
-       released 71 days ago
+       released 72 days ago
        Python: latest: >=3.10, recommended: >=3.10
 [OUTDATED]   urllib3              1.26.0     → 2.8.0      (recommended: 1.26.20)
        released 798 days ago
@@ -152,6 +153,7 @@ Read `recommended` as "what depkeeper will write". `flask` stays on 2.2.5 becaus
 
 ```console
 $ depkeeper update --dry-run
+[WARNING] major available: urllib3 2.8.0 (use --allow-major urllib3)
                                        Update Plan (Dry Run)
 ┏━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ Package  ┃ Current ┃ New Version ┃ Change ┃ Python Requires                                      ┃
@@ -217,6 +219,7 @@ Global options go before the command: `depkeeper -v check`. `FILE` defaults to `
 | `depkeeper check --min-age 7d` | Ignore versions released in the last 7 days. |
 | `depkeeper check --python-version 3.12` | Pick versions that support Python 3.12. |
 | `depkeeper check --ignore PKG` | Skip a package (repeatable). |
+| `depkeeper update --allow-major django` | Let `django` cross its major, within your declared bounds. |
 | `depkeeper update --dry-run` | Show the plan. Write nothing. |
 | `depkeeper update -y` | Apply without the confirmation prompt. |
 | `depkeeper update --backup` | Save a timestamped backup of every file first. |
@@ -319,7 +322,7 @@ More patterns: [CI/CD integration](https://github.com/rahulkaushal04/depkeeper/b
 
 ## How it works
 
-<p align="center"><img src="assets/diagrams/how-it-works.svg" alt="depkeeper parses your dependency file, fetches PyPI metadata, filters each package down to one safe version, cross-checks the picks, then reports or writes." width="900"></p>
+<p align="center"><img src="assets/diagrams/how-it-works.svg" alt="depkeeper parses your dependency file, fetches PyPI metadata, filters each package down to one safe version (staying within its major unless --allow-major), cross-checks the picks, then reports or writes." width="900"></p>
 
 <p align="center"><em>Candidate versions pass through six named rules to one pick; only the write branch touches your files.</em></p>
 
@@ -333,11 +336,11 @@ Design notes: [ARCHITECTURE.md](ARCHITECTURE.md).
   real test.
 - **PyPI only.** `--index-url`, `--extra-index-url` and `--find-links` are parsed and ignored.
   Packages that exist only on a private index show up as errors.
-- **Major upgrades are manual.** A floor of `django>=3.2,<5.0` caps at the newest `3.x`. Raise the floor
-  yourself, then let depkeeper continue.
+- **Major upgrades are opt-in.** A floor of `django>=3.2,<5.0` stays on the newest `3.x` and reports the
+  newer major. Use `--allow-major django` to move to the newest `4.x` (your `<5.0` is still respected).
 - **conda is approximate.** Conda-channel packages are matched to PyPI by name. A missing match is a
   warning, not a failure.
-- **No pre-releases.** There is no `--pre` flag.
+- **Pre-releases are off by default.** There is no `--pre` flag; opt in per package with `allow_prerelease = true`.
 - **No security scanning.** Use `pip-audit` or similar next to depkeeper.
 - **No cache.** Every run fetches metadata again.
 - **Hash removal leaves a partly hashed file.** `pip install --require-hashes` rejects that. Prefer
@@ -363,7 +366,7 @@ Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.
 ```bash
 git clone https://github.com/rahulkaushal04/depkeeper.git
 cd depkeeper
-pip install -e ".[dev,docs]"
+pip install -e ".[dev]"
 python -m pytest tests -q --no-cov
 ```
 

@@ -54,7 +54,7 @@ python -m compileall -q depkeeper
 pre-commit run --all-files
 ```
 
-All four must pass on a clean checkout of `main`.
+Also run `python -m ruff format --check depkeeper tests` and `python -m ruff check --select E9,F depkeeper tests`. All must pass on a clean checkout of `main`; `publish.yml` does not run the test suite, so this step is the gate.
 
 ### 2. Bump the version
 
@@ -71,9 +71,9 @@ version = "0.2.0"
 
 ### 3. Update the changelog
 
-Add a dated section to the root `CHANGELOG.md` — the canonical file, linked from `pyproject.toml`
+Move the `[Unreleased]` entries into a dated section of the root `CHANGELOG.md` — the canonical file, linked from `pyproject.toml`
 and PyPI — following Keep a Changelog. Every user-visible change belongs in it, grouped under
-`Added` / `Changed` / `Fixed` / `Removed` / `Security`. Mirror the same section into
+`Added` / `Changed` / `Deprecated` / `Removed` / `Fixed` / `Security`, each once. Rename `[Unreleased]` to the new version and date, then add a fresh empty `[Unreleased]`. Mirror the same section into
 `docs/community/changelog.md`; that copy may summarise rather than repeat verbatim, but must not
 diverge in substance.
 
@@ -154,8 +154,7 @@ version before moving on.
 
 ### 8. Announce
 
-Create a GitHub release from the tag, using the changelog section as the body. Link the
-documentation for the new version.
+Create a GitHub release from the tag, using the changelog section as the body.
 
 ---
 

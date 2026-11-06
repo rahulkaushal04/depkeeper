@@ -33,13 +33,15 @@ Or run `./scripts/setup_dev.sh` (Windows: `scripts/setup_dev.ps1`). It does the 
 |---|---|
 | Run tests (with coverage) | `pytest` |
 | Run one test | `pytest tests/test_core/test_parser.py -k name --no-cov` |
-| Type check (strict) | `mypy depkeeper` |
-| Lint | `ruff check .` |
-| Format | `ruff format .` |
+| Type check (strict) | `mypy depkeeper --python-version 3.13` |
+| Lint (as CI runs it) | `ruff check --select E9,F depkeeper tests` |
+| Format | `ruff format depkeeper tests` |
 | Pre-commit hooks | `pre-commit run --all-files` |
 
 `ruff` is part of the `dev` extra. Its settings (Python 3.8 target,
-line length 88) are in `pyproject.toml`.
+line length 88) are in `pyproject.toml`. CI checks `ruff format --check` and the `E9,F` lint rules only; do not run bare `ruff check .`, which also scans `docs/` and applies newer default rules. The pre-commit hooks are file hygiene only (no ruff or mypy).
+
+mypy warns that `python_version = "3.8"` is unsupported by current releases; `--python-version 3.13` silences that.
 
 CI runs the tests on Python 3.8 to 3.12 on Linux, macOS and Windows.
 
@@ -50,13 +52,15 @@ CI runs the tests on Python 3.8 to 3.12 on Linux, macOS and Windows.
 | Path | What it holds |
 |---|---|
 | `depkeeper/cli.py` | Click group, global options, config loading |
-| `depkeeper/commands/` | `check` (read-only) and `update` (writes files) |
+| `depkeeper/commands/` | `check` (read-only), `update` (writes files) and `_report.py` (shared rendering) |
 | `depkeeper/core/` | Parser, PyPI data store, version checker, conflict analyzer, `verify.py` |
 | `depkeeper/core/sources/` | One adapter per file format (see below) |
 | `depkeeper/models/` | `Requirement`, `Package`, conflict types. No I/O. |
-| `depkeeper/utils/` | HTTP, filesystem, console, logging, name handling |
-| `tests/` | Mirrors the package layout |
+| `depkeeper/utils/` | HTTP, filesystem, console, logging, name and version helpers |
+| `tests/` | Mirrors the package layout; shared helpers in `tests/support/` |
 | `docs/` | User and contributor guides (Markdown) |
+| `assets/` | Logo and diagrams |
+| `scripts/` | Developer setup scripts |
 
 Layers only point one way: `commands` to `core` to `models` to `utils`.
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the full map.
@@ -119,7 +123,7 @@ CI will catch most of these, but only if the 3.8 job runs. Do not ignore a red 3
 - Tests mirror the package: `tests/test_core/`, `tests/test_commands/`, `tests/test_sources/`, `tests/test_models/`, `tests/test_utils/`. End-to-end flows go in `tests/integration/`.
 - Name files `test_*.py`, classes `Test*`, functions `test_*`.
 - Async tests need no decorator (`asyncio_mode = "auto"`).
-- Never hit the real PyPI. Use `pytest-httpx`, and build fake PyPI data with the helpers in `tests/support/` (`pypi.py`, `factories.py`, `datasets.py`). Shared fixtures are in `tests/conftest.py`.
+- Never hit the real PyPI. Use `pytest-httpx`, and build fake PyPI data with the helpers in `tests/support/` (`pypi.py`, `factories.py`, `datasets.py`). Shared fixtures are in `tests/conftest.py`. Tests that need the real PyPI are marked `network` and skip when it is unreachable.
 - A bug fix needs a regression test that fails without the fix.
 - A new adapter needs parse-then-update round trips, including a no-op update that leaves bytes identical.
 
@@ -139,8 +143,8 @@ If no issue fits, open one and say what you plan to do. Small, focused PRs get r
 
 ## Documentation and changelog
 
-- Change a flag, config key, exit code or output? Update the matching page under `docs/reference/` and the docs build must pass with `--strict`.
-- Add a line under **Unreleased** in [CHANGELOG.md](CHANGELOG.md). It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Use the sections `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
+- Change a flag, config key, exit code or output? Update the matching page under `docs/reference/`. Docs are plain Markdown; relative links must resolve.
+- Add a line under **Unreleased** in [CHANGELOG.md](CHANGELOG.md). It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Use the sections `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`, each at most once under Unreleased.
 - **Behaviour contract:** if the same requirements file now produces a different update plan, that is at least a minor release, even if it looks like a bug fix. Mark the entry **Impact** and say what changes.
 
 ---
@@ -150,8 +154,8 @@ If no issue fits, open one and say what you plan to do. Small, focused PRs get r
 This matches the [PR template](.github/PULL_REQUEST_TEMPLATE.md).
 
 - [ ] `pytest` passes
-- [ ] `mypy depkeeper` is clean
-- [ ] `ruff check .` and `ruff format --check .` are clean
+- [ ] `mypy depkeeper --python-version 3.13` is clean
+- [ ] `ruff format --check depkeeper tests` and `ruff check --select E9,F depkeeper tests` are clean
 - [ ] `pre-commit run --all-files` passes
 - [ ] Docs updated if behaviour changed (`docs/` is plain Markdown; links must resolve)
 - [ ] New behaviour has tests; bug fixes have a regression test

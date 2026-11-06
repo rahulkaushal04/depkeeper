@@ -608,3 +608,17 @@ class TestColorizeUpdateType:
         the caller never asserted.
         """
         assert colorize_update_type(update_type) == update_type
+
+
+class TestMessagesAreNotParsedAsMarkup:
+    """Square brackets in user-facing messages must be printed literally."""
+
+    @pytest.mark.parametrize(
+        "printer", [print_error, print_warning, print_success], ids=lambda f: f.__name__
+    )
+    def test_bracketed_names_survive(
+        self, printer: Any, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        printer("file has no [depkeeper] table", stderr=True)
+        captured = capsys.readouterr()
+        assert "has no [depkeeper] table" in captured.out + captured.err

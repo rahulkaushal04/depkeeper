@@ -131,6 +131,14 @@ def _status_stream_is_stderr(format: str) -> bool:
     help="Don't recommend versions released more recently than this "
     "(e.g. 7d, 12h, 2w). Default: config min_age.",
 )
+@click.option(
+    "--allow-major",
+    "allow_major",
+    multiple=True,
+    metavar="PKG",
+    help="Allow this package to cross its current major (repeatable; '*' = all). "
+    "Your declared upper bounds still apply.",
+)
 @pass_context
 def check(
     ctx: DepKeeperContext,
@@ -143,6 +151,7 @@ def check(
     check_conflicts: Optional[bool],
     python_version: Optional[str],
     min_age: Optional[timedelta],
+    allow_major: Tuple[str, ...],
 ) -> None:
     """Check requirements file for available updates.
 
@@ -197,6 +206,7 @@ def check(
         python_version: Target Python (``X.Y``); beats config and the file's
             own ``requires-python``.
         min_age: Release cooldown; beats config ``min_age``.
+        allow_major: Package names (or ``*``) allowed to cross their major.
 
     Exits:
         See "Exit codes" above.
@@ -230,6 +240,7 @@ def check(
                 ignore=ignored,
                 python=python,
                 min_age=min_age,
+                allow_major=_report.allow_major_names(allow_major),
             )
         )
         sys.exit(code)
@@ -254,6 +265,7 @@ async def _check_async(
     ignore: Sequence[str] = (),
     python: Tuple[Optional[str], str] = (None, "running interpreter"),
     min_age: Optional[timedelta] = None,
+    allow_major: Sequence[str] = (),
 ) -> int:
     """Run the check pipeline and return the process exit code.
 
@@ -273,6 +285,7 @@ async def _check_async(
         ignore: Package names to skip.
         python: ``(target Python or None, who decided)``.
         min_age: Release cooldown.
+        allow_major: Normalised ``--allow-major`` names.
 
     Returns:
         The process exit code: ``0``, `EXIT_UPDATES_FOUND` or
@@ -318,6 +331,7 @@ async def _check_async(
             infer_version_from_constraints=infer_version_from_constraints,
             target_python=python[0],
             min_age=min_age,
+            allow_major=allow_major or None,
         )
         packages = await checker.check_packages(requirements)
         links = _report.collect_links(data_store, packages)
@@ -401,7 +415,12 @@ async def _check_async(
         _display_json(packages, rows)
 
     if show_progress:
-        for note in (_report.policy_note(packages), _report.cooldown_note(packages)):
+        for note in (
+            _report.policy_note(packages),
+            _report.cooldown_note(packages),
+            _report.major_note(packages),
+            _report.unknown_allow_major_note(allow_major, requirements),
+        ):
             if note:
                 print_warning(note, stderr=status_to_stderr)
         if packages_needing_action > 0:

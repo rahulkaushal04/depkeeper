@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 272" role="img">
-<title>--refresh-hashes rewrites --hash lines from PyPI sha256 digests and refuses to write anything when no digests are found</title>
-<desc>Updates for hashed requirements go to PyPIDataStore.get_version_digests, which returns a sorted sha256 set. If none is found, nothing is written. Otherwise RequirementsTxtAdapter.apply_updates with refresh_hashes=True rewrites the file with the same layout and new --hash lines.</desc>
+<title>--refresh-hashes rewrites --hash lines from PyPI sha256 digests and exits 1 and writes nothing when any digest is missing</title>
+<desc>Updates for hashed requirements go to PyPIDataStore.get_version_digests, which returns a sorted sha256 set. If any package has no digests, depkeeper exits 1 and writes nothing (with --dry-run it only warns). Only requirements.txt files are rewritten, with sha256 only, and the flag conflicts with --allow-hash-removal. Otherwise RequirementsTxtAdapter.apply_updates with refresh_hashes=True rewrites the file with the same layout and new --hash lines.</desc>
 <defs>
 <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2563EB"/></marker>
 <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#16A34A"/></marker>
@@ -11,14 +11,14 @@
 <g font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#0F172A" text-anchor="middle">
 <rect x="16" y="62" width="100" height="56" rx="8" fill="#F1F5F9" stroke="#CBD5E1"/><text x="66" y="86" font-weight="600">updates</text><text x="66" y="104" font-size="11" fill="#475569">hashed reqs</text>
 <rect x="176" y="62" width="150" height="56" rx="8" fill="#F1F5F9" stroke="#CBD5E1"/><text x="251" y="86" font-weight="600">PyPIDataStore</text><text x="251" y="104" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" fill="#475569">.get_version_digests</text>
-<polygon points="431,45 476,90 431,135 386,90" fill="#FFFBEB" stroke="#F59E0B" stroke-width="1.5" stroke-linejoin="round"/><text x="431" y="87" font-size="11">sha256</text><text x="431" y="101" font-size="11">found?</text>
+<polygon points="431,45 476,90 431,135 386,90" fill="#FFFBEB" stroke="#F59E0B" stroke-width="1.5" stroke-linejoin="round"/><text x="431" y="87" font-size="11">all sha256</text><text x="431" y="101" font-size="11">found?</text>
 <rect x="536" y="62" width="176" height="56" rx="8" fill="#F1F5F9" stroke="#CBD5E1"/><text x="624" y="86" font-weight="600">RequirementsTxtAdapter</text><text x="624" y="104" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" fill="#475569">.apply_updates</text>
 <rect x="772" y="62" width="112" height="56" rx="8" fill="#F1F5F9" stroke="#16A34A" stroke-width="1.5"/><text x="828" y="86" font-size="11.5">same layout,</text><text x="828" y="104" font-size="11.5">new --hash lines</text>
-<rect x="361" y="196" width="140" height="52" rx="8" fill="#FFFFFF" stroke="#DC2626" stroke-width="1.5"/><text x="431" y="219" font-weight="600">refuse</text><text x="431" y="236" font-size="11" fill="#475569">write nothing</text>
+<rect x="361" y="196" width="140" height="52" rx="8" fill="#FFFFFF" stroke="#DC2626" stroke-width="1.5"/><text x="431" y="219" font-weight="600">refuse</text><text x="431" y="236" font-size="11" fill="#475569">exit 1, nothing written</text>
 <g stroke="#2563EB" stroke-width="1.5" fill="none"><path d="M118,90 H174" marker-end="url(#ah)"/><path d="M328,90 H384" marker-end="url(#ah)"/><path d="M478,90 H534" marker-end="url(#ah)"/><path d="M714,90 H770" marker-end="url(#ah)"/></g>
 <path d="M431,135 V194" stroke="#DC2626" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
 <path d="M251,118 V146" stroke="#475569" stroke-width="1" stroke-dasharray="3 3" fill="none"/>
 <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" fill="#475569"><text x="146" y="110">pkg==ver</text><text x="356" y="110">digests</text><text x="506" y="110">sorted</text><text x="742" y="110">text</text><text x="251" y="162">cached JSON, else</text><text x="251" y="176">GET /pypi/&lt;name&gt;/&lt;version&gt;/json</text></g>
-<text x="445" y="172" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" fill="#DC2626" text-anchor="start">none</text>
+<text x="445" y="172" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" fill="#DC2626" text-anchor="start">any missing</text>
 </g>
 </svg>

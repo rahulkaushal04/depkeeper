@@ -21,6 +21,7 @@ from depkeeper.core import ResolutionResult
 from depkeeper.core.data_store import PyPIDataStore
 from depkeeper.models import Package, Requirement
 from depkeeper.utils import get_logger, get_raw_console
+from depkeeper.utils.naming import normalize_package_name
 from depkeeper.utils.version_utils import get_update_type
 
 logger = get_logger("commands.report")
@@ -255,6 +256,41 @@ def cooldown_note(packages: Sequence[Package]) -> Optional[str]:
     return f"held back by min_age cooldown: {', '.join(items)}" if items else None
 
 
+def major_note(packages: Sequence[Package]) -> Optional[str]:
+    """Return one line naming majors that exist but were not applied."""
+    items = [
+        f"{p.name} {p.major_available} "
+        + (
+            "(blocked by max_update; raise --max-update)"
+            if p.major_capped
+            else f"(use --allow-major {p.name})"
+        )
+        for p in packages
+        if p.major_available
+    ]
+    return f"major available: {'; '.join(items)}" if items else None
+
+
+def allow_major_names(values: Sequence[str]) -> List[str]:
+    """Normalise ``--allow-major`` values, keeping the ``*`` wildcard as is."""
+    return sorted(
+        {v.strip() if v.strip() == "*" else normalize_package_name(v) for v in values}
+    )
+
+
+def unknown_allow_major_note(
+    names: Sequence[str], requirements: Sequence[Requirement]
+) -> Optional[str]:
+    """Return one warning for ``--allow-major`` names absent from the files."""
+    known = {normalize_package_name(r.name) for r in requirements}
+    unknown = [n for n in names if n != "*" and n not in known]
+    if not unknown:
+        return None
+    return "; ".join(
+        f"--allow-major {n}: not in the requirements file(s)" for n in unknown
+    )
+
+
 def package_json(row: Row) -> Dict[str, Any]:
     """Return ``Package.to_json()`` plus links/ignored (and file info)."""
     entry = row.pkg.to_json()
@@ -471,6 +507,10 @@ def render_markdown(
             for p in pkgs
             if p.cooldown_skipped
         ],
+    )
+    bullets(
+        "Major updates available (not applied)",
+        [f"`{p.name}`: {p.major_available}" for p in pkgs if p.major_available],
     )
     bullets(
         "Conflicts",

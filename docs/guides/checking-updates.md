@@ -1,6 +1,6 @@
 ---
 title: Checking for Updates
-description: Using depkeeper check — filters, formats, streams, conflict analysis and automation
+description: Using depkeeper check — filters, formats, gating, streams, conflict analysis and automation
 ---
 
 # Checking for Updates
@@ -13,7 +13,9 @@ installs anything.
 depkeeper check [OPTIONS] [FILE]
 ```
 
-`FILE` defaults to `requirements.txt` and must exist. See
+`FILE` is a requirements file, a `pyproject.toml`, a conda `environment.yml`, or a directory (every
+supported file in it is checked). Without it, `requirements.txt` is used when present, otherwise
+the supported files in the current directory. See
 [CLI reference](../reference/cli-commands.md#check) for the exhaustive option list.
 
 ---
@@ -31,11 +33,17 @@ depkeeper check --outdated-only        # suppress up-to-date rows
 is current it prints `[OK] All packages are up to date!`.
 
 > [!NOTE]
-> **Exit code is not a signal**
+> **Exit codes**
 >
-> `check` exits `0` whenever it completed successfully, regardless of what it found. To gate a
-> build on the result, parse the JSON payload. See
+> `check` exits `0` when it completed, even if updates exist. Use `--fail-on` to turn updates into
+> exit `3`: `updates` (any update, conflict or downgrade), `minor` (minor or major) or `major`
+> (major only); the default is `none`. Exit `4` means at least one package could not be looked up
+> on PyPI and wins over `3`. Both can be set once as `fail_on` in the config file. See
 > [Exit codes](../reference/exit-codes.md#gating-on-results).
+
+```bash
+depkeeper check --fail-on major --format json > report.json   # exit 3 if a major update is proposed
+```
 
 ---
 
@@ -43,7 +51,10 @@ is current it prints `[OK] All packages are up to date!`.
 
 ### `--format table` (default)
 
-Full report for humans: eight columns plus the Resolution Summary. Column meanings are documented
+Full report for humans: eight columns (Status, Package, Current, Latest, Recommended, Update
+Type, Conflicts, Python Support), plus a Source column when several files are read. The release
+age appears under the recommended version. The Resolution Summary is printed when something
+changed or conflicted, or with `-v`. Column meanings are documented
 in [Basic usage → The table format](../getting-started/basic-usage.md#the-table-format).
 
 Status messages share stdout with the table in this format only.
@@ -56,7 +67,8 @@ One line per package plus indented detail lines. Suited to grep-based checks and
 depkeeper check --format simple | grep '^\[OUTDATED\]'
 ```
 
-The arrow points at the **latest** version; when the recommendation differs it is appended in
+Each package also shows its release age, its Python requirements and, for several files, a
+`Source:` line. The arrow points at the **latest** version; when the recommendation differs it is appended in
 parentheses. Do not parse the arrow target as the version depkeeper would apply.
 
 ### `--format json`
@@ -80,6 +92,24 @@ depkeeper check --format json \
   | jq -r '.[] | [.name, .versions.current // "", .versions.recommended // "", .status] | @csv'
 ```
 
+### `--format json-v2` and `--format markdown`
+
+`json-v2` is a versioned envelope (`schema_version`, `summary`, `python`, `files`, `packages`,
+`errors`) for tools that want totals and the file and line of each package:
+
+```bash
+depkeeper check --format json-v2 | jq '.summary'
+```
+
+`markdown` is a ready-made PR body or CI summary: tables grouped by update type with release age
+and changelog links, then held, cooldown, conflict and lookup-failure lists.
+
+```bash
+depkeeper check --format markdown >> "$GITHUB_STEP_SUMMARY"
+```
+
+The bare-array `json` format is kept stable; prefer `json-v2` for new tooling.
+
 ---
 
 ## Output streams
@@ -88,7 +118,7 @@ depkeeper check --format json \
 |---|---|---|
 | `table` | report and status messages | log records |
 | `simple` | package lines only | status messages, warnings, errors, log records |
-| `json` | the JSON document only | status messages, warnings, errors, log records |
+| `json`, `json-v2`, `markdown` | the document only | status messages, warnings, errors, log records |
 
 This holds with verbosity enabled, which is the point of the design:
 
@@ -111,19 +141,21 @@ depkeeper check                        # with resolution (default)
 depkeeper check --no-check-conflicts   # skip it — faster, fewer requests
 ```
 
-With resolution enabled and the `table` format (or any format with `-v`), a summary precedes the
-report:
+With resolution enabled, a summary precedes the report when the resolver changed something or
+found a conflict, or always with `-v` (on stderr for the non-table formats). For
+`flask>=2.3,<3.0` plus `werkzeug>=2.0,<2.3`:
 
 ```text
 Resolution Summary:
 ==================================================
 Total packages: 2
 Packages with conflicts: 1
-Packages changed: 1
-Converged: Yes (2 iterations)
+Packages changed: 2
+Converged: No (stopped after 2 iterations)
 
 Version changes:
-  • flask: 2.3.3 → 2.2.5 (constrained)
+  • flask: 2.3.3 → 2.3 (kept_current)
+  • werkzeug: 2.2.3 → 2.0 (kept_current)
 ```
 
 | Line | Interpretation |
@@ -162,8 +194,36 @@ Here the declared `<2.3` cap still holds, so the recommendation is unchanged. It
 a requirement such as `django>=3.2` with no cap: default mode anchors to major `3`, strict mode
 allows any major.
 
-Use strict mode when your file is a lockfile of exact pins and you want ranges ignored entirely.
+`check` also accepts `--no-strict-version-matching` to override `strict_version_matching = true` in
+the config. Use strict mode when your file is a lockfile of exact pins and you want ranges ignored entirely.
 Be aware that for **unbounded** ranges it removes the major-boundary protection.
+
+---
+
+## Major upgrades are opt-in
+
+By default depkeeper never recommends a version in a higher major than the current one. A newer
+major that your declared range allows is reported instead:
+
+```text
+[WARNING] major available: urllib3 2.8.0 (use --allow-major urllib3)
+```
+
+`--allow-major PKG` (repeatable; `'*'` for every package, or `allow_major = true` in the package's
+policy) lets that package cross its major, still bounded by your own upper bounds. With
+`django>=3.2,<5.0` it moves to the newest `4.x`, never `5.x`. A name that is not in the file warns.
+
+```bash
+depkeeper check --allow-major django
+```
+
+## Release age, cooldown and target Python
+
+- `--min-age 7d` (also `12h`, `2w`; a bare number is days; config `min_age`) withholds versions
+  released more recently; the withheld version is reported as held back by the cooldown.
+- `--python-version X.Y` sets the Python that candidates must support. Without it: config
+  `python_version`, then the file's own `requires-python` or conda `python` pin (the lowest
+  supported minor), then the interpreter running depkeeper. `-v` logs which rule decided.
 
 ---
 
@@ -175,8 +235,10 @@ depkeeper check requirements/dev.txt
 depkeeper check requirements/prod.txt
 ```
 
-There is no `--recursive` or directory mode. `-r` includes are followed automatically, so checking
-a file that includes others reports the union of them in one table.
+`-r` includes are followed automatically, so checking a file that includes others reports the
+union of them in one table. Passing a directory checks every supported file in it
+(`requirements*.txt`, `pyproject.toml`, `environment.yml`/`.yaml`) and adds a Source column.
+There is no recursive mode.
 
 ```bash
 # Check every requirements file in a project
@@ -192,7 +254,8 @@ done
 
 | Row | Meaning | Action |
 |---|---|---|
-| `[ERROR]`, `Latest: error` | PyPI metadata unavailable — package does not exist, is private-index-only, or the network failed. | Verify the name; check connectivity; see [Troubleshooting](troubleshooting.md#pypi-errors). |
+| `[ERROR]`, `Latest: error` (`[NO-UPDATE]` in `simple`, `"status": "no-update"` with an `error` field in JSON) | PyPI metadata unavailable — package does not exist, is private-index-only, or the network failed. `check` also exits `4`, even with `--outdated-only`. | Verify the name; check connectivity; see [Troubleshooting](troubleshooting.md#pypi-errors). |
+| `[HELD]`, `[IGNORED]` | A per-package `hold` or `ignore` policy froze the package. | Edit `[depkeeper.packages.<name>]` if unintended. |
 | `[CONFLICT]`, `Update Type: blocked` | Conflicts eliminated every candidate version. | Read the `Conflicts` column and relax the offending constraint yourself. |
 | `[INCOMP]`, `Update Type: downgrade` | The declared version is unusable and a lower version is proposed. | Investigate before applying — this rewrites your floor downwards. |
 | `[OK]` with an empty `Current` | The requirement has no version specifier. | `update` will add a pin. See [Limitations](../reference/limitations.md#unversioned-requirements-report-as-ok). |
@@ -206,7 +269,7 @@ done
 |---|---|
 | `--no-check-conflicts` | Removes the entire resolution phase — usually the dominant cost. |
 | Smaller files | One HTTP request per unique package; `-r` includes count toward the total. |
-| Repeated runs | No persistent cache exists. Each invocation refetches everything. |
+| Repeated runs | There is no persistent cache. Each invocation refetches everything. |
 
 Typical timings are dominated by network latency, not by depkeeper. See
 [Operations → Performance](operations.md#performance).
@@ -217,7 +280,7 @@ Typical timings are dominated by network latency, not by depkeeper. See
 
 ```bash
 depkeeper -v check     # INFO: per-phase progress, resolution decisions
-depkeeper -vv check    # DEBUG: per-package decisions, cache behaviour, HTTP retries
+depkeeper -vv check    # DEBUG: per-package decisions, HTTP retries
 ```
 
 Log records always go to stderr, so verbosity never corrupts a piped payload.

@@ -32,8 +32,8 @@ release; upgrade rather than backport.
 
 Use a private channel:
 
-- The repository's **Security** tab → **Report a vulnerability**
-- A **private security advisory** on GitHub
+- The repository's **Security** tab → **Report a vulnerability**, or directly
+  <https://github.com/rahulkaushal04/depkeeper/security/advisories/new>
 
 ### Include
 
@@ -44,38 +44,14 @@ Use a private channel:
 5. **Proof of concept** — if available.
 6. **Suggested fix** — if you have one.
 
-```text
-Subject: [SECURITY] Vulnerability in requirements parser
-
-Description:
-A crafted requirements.txt triggers <behaviour> …
-
-Impact:
-<what an attacker gains>
-
-Affected Versions:
-0.1.0
-
-Reproduction:
-1. Create file X
-2. Run `depkeeper check`
-3. Observe <behaviour>
-
-Proof of Concept:
-[link or attachment]
-
-Suggested Fix:
-<if known>
-```
-
 ### What to expect
 
 | Stage | Target |
 |---|---|
-| Initial acknowledgement | 48 hours |
-| Validation decision | 5 business days |
-| Status updates | every 5–7 days |
-| Resolution for critical issues | within 30 days |
+| Acknowledge your report | 3 business days |
+| Confirm or reject it | 10 business days |
+| Fix for a confirmed critical issue | 30 days |
+| Updates while we work | about every 2 weeks |
 
 Coordinated disclosure is appreciated: we will work with you to verify, fix and disclose
 responsibly.
@@ -97,7 +73,7 @@ responsibly.
 
 - Vulnerabilities in third-party dependencies (report those upstream; tell us if depkeeper's usage
   makes them exploitable)
-- Denial of service requiring extreme resources or an input beyond the 10 MB file limit
+- Denial of service requiring extreme resources or an input beyond the 10 MB file limit or the 20 MB response cap
 - Social engineering and physical access attacks
 - Issues affecting unsupported versions
 - Features depkeeper does not implement — for example private-index authentication, which does not
@@ -112,14 +88,14 @@ described in [Operations → Security posture](../guides/operations.md#security-
 
 | Property | Behaviour |
 |---|---|
-| Code execution | depkeeper **never** imports, installs, builds or executes the packages it analyses. It reads JSON metadata only. |
-| Network destinations | `pypi.org` only, over TLS with certificate verification enabled. There is no flag to disable verification. |
+| Code execution | depkeeper does not import or run the packages it analyses. The one exception is `update --verify`, which runs `pip install --dry-run --only-binary=:all:` in a subprocess (no shell); wheels only, so no build code runs. |
+| Network destinations | `pypi.org` only, over TLS. Redirects must be https and land on the same host, `pypi.org` or `files.pythonhosted.org`. Response bodies over 20 MB are rejected. (`--verify` runs pip with your own pip index settings.) |
 | Outbound data | Package **names**, as URL path segments. Versions, comments and file contents never leave the machine. |
-| Credentials | None are read, stored or transmitted. |
-| Persisted state | None outside the working directory. No cache directory, no `$HOME` writes. |
+| Credentials | depkeeper reads, stores and sends none. URL credentials in dependency files are redacted from error and `--verify` output. |
+| Persisted state | No cache directory and no `$HOME` writes. |
 | File writes | Only the requirements files reached from the file you named, plus optional backups beside them. |
 | Input size limit | 10 MB per file. |
-| Untrusted input handling | The parser performs no `eval`, no shell invocation and no path writes. |
+| Untrusted input handling | The parser performs no `eval` and no shell invocation. |
 | Integrity controls | Updates that would strip `--hash` entries are refused unless `--allow-hash-removal` is passed explicitly. |
 | Write integrity | Atomic replace with `fsync`, mode preservation, and rollback of a partially committed multi-file batch. |
 | Path controls | `utils.filesystem.validate_path` exists to confine a resolved path to a base directory, but it is **not** applied to `-r`/`-c` include resolution or to `update`'s write targets — see the residual risk below. |

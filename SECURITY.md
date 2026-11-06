@@ -79,7 +79,7 @@ Facts about the current code:
 | Property | Behaviour |
 |---|---|
 | Writes | Atomic: temp file, then replace. Multi-file updates roll back if a later write fails. |
-| Network | Requests go to `https://pypi.org` only. Redirects must stay on HTTPS and on the same host or a PyPI host. |
+| Network | depkeeper's own requests go to `https://pypi.org` only. Redirects must stay on HTTPS and on the same host or a PyPI host (`pypi.org`, `files.pythonhosted.org`), at most 5 hops. `update --verify` runs pip, which uses your own pip index settings. |
 | Response size | Bodies over 20 MB are rejected. |
 | Input size | Dependency files over 10 MB are rejected. |
 | Credentials | URL credentials (`user:pass@`) are redacted in error output and in `--verify` output. |

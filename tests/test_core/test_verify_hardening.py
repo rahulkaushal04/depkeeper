@@ -86,15 +86,24 @@ def test_env_keeps_index_config_strips_only_breaking_vars(
     monkeypatch.setenv("PIP_REQUIRE_HASHES", "1")
     got = {}
 
-    def fake_run(args: List[str], **kw: Any) -> Any:
+    def fake_popen(args: List[str], **kw: Any) -> Any:
         got.update(kw["env"])
 
         class P:
-            returncode, stdout, stderr = 0, "", ""
+            returncode = 0
+
+            def __enter__(self) -> "P":
+                return self
+
+            def __exit__(self, *a: Any) -> None:
+                pass
+
+            def communicate(self, timeout: Any = None) -> Any:
+                return "", ""
 
         return P()
 
-    with patch.object(verify.subprocess, "run", fake_run):
+    with patch.object(verify.subprocess, "Popen", fake_popen):
         verify._run(["pip"], 1.0)
     assert got["PIP_INDEX_URL"] == "https://u:p@private/simple"
     assert got["PIP_EXTRA_INDEX_URL"] and got["PIP_CONSTRAINT"] == "c.txt"

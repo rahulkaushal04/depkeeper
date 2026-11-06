@@ -46,6 +46,7 @@ A change is ready to merge when all of the following hold:
 - [ ] `python -m pytest tests -q --no-cov` passes.
 - [ ] `python -m mypy depkeeper --python-version 3.13` reports no new errors.
 - [ ] `python -m compileall -q depkeeper` succeeds.
+- [ ] `python -m ruff format --check depkeeper tests` and `python -m ruff check --select E9,F depkeeper tests` are clean.
 - [ ] `pre-commit run --all-files` passes.
 - [ ] New behaviour has tests; fixed bugs have regression tests.
 - [ ] Public API changes are reflected in the docstrings **and** in the affected
@@ -58,18 +59,15 @@ A change is ready to merge when all of the following hold:
 
 ## Commit convention
 
-Conventional Commits:
+Short, imperative subject lines with no required prefix:
 
 ```text
-feat(update): add --pin to replace declared ranges with exact pins
-fix(parser): join backslash line continuations
-docs(reference): document the JSON schema
-test(analyzer): pin cumulative-conflict behaviour
-refactor(core): extract the alternative search from the resolution loop
-chore(deps): bump httpx floor
+Fix duplicate-requirement resolution
+Add --allow-major for opt-in major upgrades
+Document the JSON schema
 ```
 
-The scope is the module or subsystem. The body should state *why*, not what — the diff already
+Squash-merged PRs end with the PR number. The body should state *why*, not what — the diff already
 says what.
 
 ---

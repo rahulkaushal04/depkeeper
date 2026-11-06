@@ -5,7 +5,7 @@ description: Typing, docstrings, comments and naming conventions enforced in dep
 
 # Code Style
 
-These conventions are enforced by review and by `mypy --strict`.
+These conventions are enforced by review, `mypy --strict`, and `ruff format` / `ruff check --select E9,F` in CI.
 
 ---
 
@@ -27,8 +27,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 | `Optional[X]` rather than `X | None` in runtime positions. | 3.8 compatibility. |
 | Public constants are `Final`. | See `constants.py`. |
 
-The project baseline is exactly one known mypy error (`data_store.py`, `no-any-return`). A pull
-request must not add a second.
+The mypy baseline is zero errors. A pull request must not add one.
 
 ---
 
@@ -63,7 +62,7 @@ def rewrite_version_specs(specs: Sequence[Spec], new_version: str) -> List[Spec]
 | Summary on the **same line** as the opening `"""`. | PEP 257. Never open with a blank line. |
 | Imperative mood for the summary. | "Return the …", not "Returns the …". |
 | `Args:` documents **callable parameters only**. | |
-| Dataclasses and NamedTuples document fields under `Attributes:`. | `merge_init_into_class: true` folds `__init__` into the class, so constructor arguments belong under the class's `Args:`. |
+| Dataclasses and NamedTuples document fields under `Attributes:`. | Constructor arguments belong under the class's `Args:`. |
 | `Raises:` lists every exception a caller can reasonably catch. | |
 | American English throughout. | normalize, behavior, color, initialize, canonicalize. |
 
@@ -71,8 +70,7 @@ def rewrite_version_specs(specs: Sequence[Spec], new_version: str) -> List[Spec]
 
 Use a plain Markdown code span — `` `Requirement` ``, `` `_find_updates` `` — never a Sphinx
 role such as `:class:` or `:meth:`. Nothing in this project resolves those roles, so they show
-up as literal, broken text (`:meth:reset` instead of a code span). A prior revision of the
-codebase used them throughout; they were converted to plain code spans.
+up as literal, broken text.
 
 ### Doctest examples
 
@@ -81,8 +79,7 @@ blocks are unverified prose.
 
 - Keep them only on the **public** API, and only when you have actually executed them.
 - Do not add them to private helpers.
-- A wrong example is worse than no example: earlier revisions carried fabricated output such as
-  `<Requirement requests>=2.25.0>`, which is not the real `__repr__`.
+- A wrong example is worse than no example.
 
 ---
 
@@ -215,7 +212,7 @@ Level guidance:
 ## Formatting
 
 - 4-space indentation, no tabs.
-- Target ~88 columns; do not reflow unrelated lines to satisfy it.
+- Line length 88 (`ruff format`); do not reflow unrelated lines.
 - LF line endings in the repository (enforced by pre-commit).
 - One blank line between methods, two between top-level definitions.
 - Trailing commas in multi-line literals and call sites.

@@ -19,12 +19,27 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). depkee
 
 ## Unreleased
 
-### Planned
+See [CHANGELOG.md](https://github.com/rahulkaushal04/depkeeper/blob/main/CHANGELOG.md#unreleased) for the full list. Highlights:
 
-- Security advisory scanning against a vulnerability database
-- Configurable package index for private repositories
-- A flag to override the target Python version used for compatibility filtering
-- Joining backslash line continuations in the parser
+### Added
+
+- **Opt-in major upgrades:** `--allow-major PKG` (or `allow_major = true` per package). A newer major that was not applied is reported as `major available`. A compatible-release spec such as `click~=7.0` still caps the major.
+- `pyproject.toml` and conda `environment.yml` input, calendar versioning, per-package policy, `--python-version`, `--min-age`, `--fail-on`, `--ignore`, `--max-update`, `--refresh-hashes`, `--verify`, and `markdown` / `json-v2` output formats.
+
+### Changed
+
+- **Impact:** `check` and `update` exit `4` when a package lookup fails; `update` exits `1` when the prompt is declined or `--packages` matches nothing.
+- **Impact:** conflict resolution honours `min_age` and per-package policy.
+- `update --verify` resolves for the target Python and skips (with a warning) source-only packages.
+
+### Fixed
+
+- Parser: backslash continuations, `-rfile` forms and comment lines ending in a backslash.
+- Many `--verify`, write-safety, HTTP-client and `min_age` edge cases.
+
+### Security
+
+- Responses are capped at 20 MB, redirects are limited to https PyPI hosts, `--verify` never builds source distributions, and URL credentials are redacted.
 
 ---
 
@@ -157,6 +172,6 @@ Documented in [Known limitations](../reference/limitations.md). The most signifi
 
 - Not a substitute for `pip`'s resolver — the transitive graph is not expanded.
 - Only `pypi.org` is queried.
-- Backslash line continuations are not parsed.
+- Backslash line continuations are not parsed (fixed after 0.1.1; see Unreleased).
 - `--allow-hash-removal` yields a partially hashed file.
-- Compatibility filtering uses depkeeper's own interpreter, with no override.
+- Compatibility filtering uses depkeeper's own interpreter, with no override (`--python-version` added after 0.1.1).

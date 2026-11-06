@@ -43,6 +43,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    Iterable,
     List,
     Mapping,
     Optional,
@@ -64,6 +65,7 @@ from depkeeper.utils.version_utils import (
     gating_type,
     update_rank,
     parse_version_lenient,
+    implied_major_bounds,
     retained_specs,
     specs_allow_version,
     specs_to_string,
@@ -115,6 +117,12 @@ class VersionChecker:
         policies: Per-package `PackagePolicy`, keyed by normalized name
             (``max_update``, ``hold``, ``allow_prerelease``, ``versioning``,
             ``ignore``).
+        allow_major: Package names (or ``"*"`` for all) whose recommendation may
+            cross the current major. The requirement's own upper bounds,
+            ``max_update``, Python compatibility and the cooldown still apply.
+        max_update: Run-wide cap (CLI ``--max-update``). Applied before choosing
+            a candidate, but only for packages opted into major upgrades; for the
+            rest the command filters afterwards, as before.
         clock: Returns the current UTC time (injectable for tests).
 
     Raises:
@@ -130,6 +138,8 @@ class VersionChecker:
         min_age: Optional[timedelta] = None,
         policies: Optional[Mapping[str, PackagePolicy]] = None,
         clock: Optional[Callable[[], datetime]] = None,
+        allow_major: Iterable[str] = (),
+        max_update: Optional[str] = None,
     ) -> None:
         if data_store is None:
             raise TypeError(
@@ -148,6 +158,8 @@ class VersionChecker:
             lambda: datetime.now(timezone.utc)
         )
         self._warned_undated: Set[str] = set()
+        self.max_update: Optional[str] = max_update
+        self._allow_major: Set[str] = {normalize_package_name(n) for n in allow_major}
 
     @classmethod
     def from_config(
@@ -173,6 +185,24 @@ class VersionChecker:
         }
         kwargs.update({k: v for k, v in overrides.items() if v is not None})
         return cls(data_store, **kwargs)
+
+    def allows_major(self, name: str) -> bool:
+        """Return whether *name* may be recommended across its current major."""
+        key = normalize_package_name(name)
+        policy = self.policies.get(key)
+        return (
+            "*" in self._allow_major
+            or key in self._allow_major
+            or bool(policy and policy.allow_major)
+        )
+
+    def _cap_for(self, name: str, policy: PackagePolicy) -> Optional[str]:
+        """Stricter of the policy cap and the run-wide cap (opted-in packages)."""
+        caps = [policy.max_update]
+        if self.allows_major(name):
+            caps.append(self.max_update)
+        set_caps = [c for c in caps if c]
+        return min(set_caps, key=update_rank) if set_caps else None
 
     async def get_package_info(
         self,
@@ -323,7 +353,9 @@ class VersionChecker:
                 requirement.name,
                 current_version,
                 # -c constraint caps always bind (never rewritten, so all kept).
-                retained_specs(requirement.specs) + list(requirement.constraint_specs),
+                retained_specs(requirement.specs)
+                + implied_major_bounds(requirement.specs)
+                + list(requirement.constraint_specs),
                 requirement.series,
             )
         )
@@ -392,6 +424,7 @@ class VersionChecker:
 
         recommended_version: Optional[str] = None
         cooldown_skipped: Optional[str] = None
+        major_available: Optional[str] = None
         held = bool(policy.hold and current_version)
 
         if held or policy.ignore:
@@ -412,11 +445,20 @@ class VersionChecker:
                     )
                     recommended_version = current_version
                 else:
+                    # Opt-in drops only depkeeper's own boundary; the user's
+                    # declared bounds still filter via *constraints*.
                     candidates = self._candidates(
-                        pkg_data, python_version, boundary, constraints, policy
+                        pkg_data,
+                        python_version,
+                        None if self.allows_major(pkg_data.name) else boundary,
+                        constraints,
+                        policy,
                     )
                     candidates = self._cap_update(
-                        candidates, current_version, policy.max_update, scheme
+                        candidates,
+                        current_version,
+                        self._cap_for(pkg_data.name, policy),
+                        scheme,
                     )
                     if series:
                         candidates = _newer_series(candidates, current_version, series)
@@ -436,6 +478,15 @@ class VersionChecker:
                             current_version,
                         )
                         recommended_version = current_version
+                    if scheme != "calver" and not series:
+                        major_available = self._higher_major(
+                            pkg_data,
+                            python_version,
+                            constraints,
+                            policy,
+                            current_version,
+                            recommended_version,
+                        )
             except InvalidVersion:
                 logger.warning(
                     "%s: invalid current version %s, cannot recommend",
@@ -485,7 +536,37 @@ class VersionChecker:
             current_released=times.get(current_version or ""),
             latest_released=times.get(latest_version or ""),
             cooldown_skipped=cooldown_skipped,
+            major_available=major_available,
+            major_capped=bool(major_available and self.allows_major(pkg_data.name)),
         )
+
+    def _higher_major(
+        self,
+        pkg_data: PyPIPackageData,
+        python_version: str,
+        constraints: Optional[Sequence[Tuple[str, str]]],
+        policy: PackagePolicy,
+        current_version: str,
+        recommended: str,
+    ) -> Optional[str]:
+        """Newest eligible version in a higher major than *recommended*, if any.
+
+        Ignores ``max_update`` (that cap is why it was not applied) but keeps
+        the user's declared bounds, Python compatibility and the cooldown, so
+        it is only ever something the user could opt in to.
+        """
+        top, _ = self._apply_cooldown(
+            pkg_data,
+            self._candidates(pkg_data, python_version, None, constraints, policy),
+            current_version,
+        )
+        if top is None:
+            return None
+        top_major = self._major_from_version(top)
+        rec_major = self._major_from_version(recommended)
+        if top_major is None or rec_major is None or top_major <= rec_major:
+            return None
+        return top
 
     @staticmethod
     def _candidates(
@@ -556,7 +637,10 @@ class VersionChecker:
             ]
         if current_version:
             versions = self._cap_update(
-                versions, current_version, policy.max_update, scheme
+                versions,
+                current_version,
+                self._cap_for(pkg_data.name, policy),
+                scheme,
             )
         if self.min_age is None:
             return versions

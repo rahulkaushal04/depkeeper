@@ -332,6 +332,37 @@ def retained_specs(specs: Iterable[Spec]) -> List[Spec]:
     ]
 
 
+def implied_major_bounds(specs: Iterable[Spec]) -> List[Spec]:
+    """Return the major-level upper bounds implied by ``~=`` specifiers.
+
+    ``~=7.0`` means ``>=7.0,<8.0`` (PEP 440), so the declared range forbids
+    the next major even though ``~=`` is a floor that rewrites move. Only the
+    major boundary is returned (``~=1.4.2`` yields ``<2``): tighter minor
+    bounds are left to the existing rewrite behaviour.
+
+    Args:
+        specs: The requirement's declared specifier pairs.
+
+    Returns:
+        ``("<", "<major+1>")`` for each parseable ``~=`` spec, else nothing.
+
+    Example::
+        >>> implied_major_bounds([("~=", "7.0")])
+        [('<', '8')]
+        >>> implied_major_bounds([(">=", "7.0")])
+        []
+    """
+    bounds: List[Spec] = []
+    for operator, version in specs:
+        if operator != "~=":
+            continue
+        try:
+            bounds.append(("<", str(Version(version).major + 1)))
+        except InvalidVersion:
+            continue
+    return bounds
+
+
 def specs_allow_version(specs: Iterable[Spec], version: str) -> bool:
     """Check whether *version* satisfies every specifier in *specs*.
 

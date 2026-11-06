@@ -23,6 +23,7 @@ import sys
 import threading
 from typing import IO, Any, Callable, Dict, List, Optional
 
+from rich.markup import escape
 from rich.table import Table
 from rich.theme import Theme
 from rich.console import Console
@@ -107,7 +108,7 @@ def print_success(message: str, *, prefix: str = "[OK]", stderr: bool = False) -
         stderr: Write to stderr instead of stdout. Use this whenever stdout
             carries machine-readable output.
     """
-    _get_console(stderr=stderr).print(f"{prefix} {message}", style="success")
+    _get_console(stderr=stderr).print(f"{prefix} {escape(message)}", style="success")
 
 
 def print_error(message: str, *, prefix: str = "[ERROR]", stderr: bool = True) -> None:
@@ -120,7 +121,7 @@ def print_error(message: str, *, prefix: str = "[ERROR]", stderr: bool = True) -
         prefix: Label rendered before the message.
         stderr: Write to stderr (default) or stdout.
     """
-    _get_console(stderr=stderr).print(f"{prefix} {message}", style="error")
+    _get_console(stderr=stderr).print(f"{prefix} {escape(message)}", style="error")
 
 
 def print_warning(
@@ -134,7 +135,7 @@ def print_warning(
         stderr: Write to stderr instead of stdout. Use this whenever stdout
             carries machine-readable output.
     """
-    _get_console(stderr=stderr).print(f"{prefix} {message}", style="warning")
+    _get_console(stderr=stderr).print(f"{prefix} {escape(message)}", style="warning")
 
 
 def print_table(

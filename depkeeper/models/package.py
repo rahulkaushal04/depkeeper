@@ -55,6 +55,9 @@ class Package:
         cooldown_skipped: Newest version withheld by the ``min_age`` cooldown
             (the recommendation fell back to an older eligible one).
         retained_specs: The requirement's own upper bounds and exclusions.
+        major_available: Newest eligible version in a higher major than the
+            recommendation that was *not* applied (no ``--allow-major`` opt-in,
+            or capped by ``max_update``). Informational only.
         conflict_held: A conflict was resolved by holding or reverting a
             version, so ``conflicts`` may be empty.
     """
@@ -81,6 +84,9 @@ class Package:
     # A conflict was recorded and resolved by holding/reverting a version, so
     # `conflicts` may be empty although the resolver still counts it.
     conflict_held: bool = field(default=False, compare=False)
+    major_available: Optional[str] = field(default=None, compare=False)
+    # The major is blocked by a max_update cap, not by lack of opt-in.
+    major_capped: bool = field(default=False, compare=False)
 
     _parsed_versions: Dict[str, Optional[Version]] = field(
         default_factory=dict,
@@ -294,6 +300,8 @@ class Package:
             entry["cooldown_skipped"] = self.cooldown_skipped
         if self.conflict_held:
             entry["conflict_held"] = True
+        if self.major_available:
+            entry["major_available"] = self.major_available
 
         python_reqs: Dict[str, str] = {}
         for key in ("current", "latest", "recommended"):

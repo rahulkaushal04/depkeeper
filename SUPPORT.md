@@ -46,8 +46,8 @@ Not sure if it is a bug? Open a question issue. We can relabel it as a bug.
 5. `debug.log` from `depkeeper -vv <command> 2> debug.log`
 6. What you expected, and what happened
 
-Python version matters. depkeeper filters versions for the Python it runs on (or `--python-version`),
-so a wrong-looking recommendation is often a version mismatch.
+Python version matters. depkeeper filters versions for a target Python: `--python-version`, then config `python_version`, then the file's `requires-python`, then the Python it runs on.
+A wrong-looking recommendation is often a version mismatch.
 
 ---
 
@@ -68,7 +68,7 @@ These are not bugs:
 - Full transitive dependency resolution. `pip` does that.
 - Vulnerability scanning. Use `pip-audit` or `safety`.
 - Private index authentication.
-- Major-version upgrades.
+- Major-version upgrades unless you opt in per package with `--allow-major` (they are otherwise reported as `major available`).
 - Managing virtual environments or installing packages.
 
 See [Known limitations](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/reference/limitations.md) for

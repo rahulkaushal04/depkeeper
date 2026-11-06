@@ -30,10 +30,12 @@ URL, local path) are never looked up on PyPI and never cause `4`.
 | `update`: nothing to update | `0` |
 | `update`: `--dry-run` (and no lookup failed) | `0` |
 | `update`: a package skipped because its target violates the declared constraints | `0` |
+| `update --verify`: pip resolved the plan, or the check was skipped with a warning (pip missing, offline, source-only release) | `0` |
+| `check`: no packages found in the file | `0` |
 
 ## `1` — Error
 
-Also returned by `update` when you decline the confirmation prompt, or when `--packages` matches nothing.
+Also returned by `update` when you decline the confirmation prompt, when `--packages` matches nothing, or when `--verify` finds that the proposed set does not resolve.
 
 Raised when a `DepKeeperError` (or any unexpected exception) reaches a command boundary. The
 message is printed to **stderr** with an `[ERROR]` prefix.
@@ -48,6 +50,8 @@ message is printed to **stderr** with an `[ERROR]` prefix.
 | Unsatisfiable rewrite | `Cannot update requirement at requirements.txt:3: ...` |
 | Write failure | `Failed to write /path/requirements.txt: ...` |
 | File too large / unreadable | `File too large: 12000000 bytes (max 10485760)` |
+| No terminal for the prompt | `Cannot ask for confirmation without a terminal. Re-run with --yes to apply or --dry-run to preview.` |
+| Empty directory target | `No supported dependency files found in <dir>` |
 | Unexpected exception | `Unexpected error: <detail>` (full traceback at `-vv`) |
 
 ## `3` — Updates found (`check` only)
@@ -57,7 +61,7 @@ message is printed to **stderr** with an `[ERROR]` prefix.
 ## `4` — Lookup failed
 
 At least one non-ignored package could not be looked up on PyPI (not found, or network error).
-For `update`, the file is still updated for the packages that were found.
+For `update`, the file is still updated for the packages that were found, and the command then exits `4`. The stderr line is `N package(s) could not be checked on PyPI: <names>` (`update`) or `N package(s) could not be checked (not found on PyPI or network error): <names>` (`check`). Conda-only names that PyPI does not know are a warning, not a `4`.
 
 ## `2` — Usage error
 
@@ -74,11 +78,11 @@ Error: Invalid value for '[FILE]': File 'nosuchfile.txt' does not exist.
 Error: No such option: --bogus
 ```
 
-Also raised for a `--config` path that does not exist, and for an invalid `--format` value.
+Also raised for a `--config` path that does not exist, an invalid `--format`, `--fail-on`, `--max-update` or `--python-version`/`--min-age` value, `update --refresh-hashes` together with `--allow-hash-removal`, and `update -f markdown` without `--yes` or `--dry-run`.
 
 ## `130` — Interrupted
 
-`Ctrl+C` at any point, including at the confirmation prompt. A warning is written to stderr:
+`Ctrl+C` at any point, or Ctrl-D / abort at the confirmation prompt on a terminal (`Aborted.`). A warning is written to stderr:
 
 ```text
 [WARNING] Operation cancelled by user
@@ -162,4 +166,5 @@ deps-check:
 | Piping stdout to a parser without checking the exit code. | A failed run produces no payload and the parser sees empty input. |
 | Using `set -e` with `depkeeper check \| jq ...`. | The pipeline's exit status is `jq`'s. Use `set -o pipefail`, or capture to a file first. |
 | Assuming `update` fails when it skips a package. | Skips are warnings, not errors; the command still exits `0`. |
+| Expecting `--fail-on` to affect `update`. | It is a `check` option; `update` only exits `4` for lookup failures. |
 | Piping `echo n \|` into `update` and expecting `0`. | Declining the prompt exits `1`. |

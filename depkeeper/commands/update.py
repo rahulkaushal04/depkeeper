@@ -45,6 +45,7 @@ from depkeeper.core import (
     DependencyAnalyzer,
     ResolutionResult,
 )
+from depkeeper.core.parser import RequirementsParser
 from depkeeper.core.sources import default_target, get_adapter, parse_targets
 from depkeeper.utils import (
     HTTPClient,
@@ -179,6 +180,14 @@ logger = get_logger("commands.update")
     "(e.g. 7d, 12h, 2w). Default: config min_age.",
 )
 @click.option(
+    "--allow-major",
+    "allow_major",
+    multiple=True,
+    metavar="PKG",
+    help="Allow this package to cross its current major (repeatable; '*' = all). "
+    "Your declared upper bounds and --max-update still apply.",
+)
+@click.option(
     "--strict-version-matching",
     is_flag=True,
     default=None,
@@ -206,6 +215,7 @@ def update(
     output_format: str,
     python_version: Optional[str],
     min_age: Optional[timedelta],
+    allow_major: Tuple[str, ...],
     strict_version_matching: Optional[bool],
     check_conflicts: Optional[bool],
 ) -> None:
@@ -310,6 +320,7 @@ def update(
                 output_format=output_format,
                 python=python,
                 min_age=min_age,
+                allow_major=_report.allow_major_names(allow_major),
             )
         )
         sys.exit(code)
@@ -339,6 +350,7 @@ async def _update_async(
     output_format: str = "table",
     python: Tuple[Optional[str], str] = (None, "running interpreter"),
     min_age: Optional[timedelta] = None,
+    allow_major: Sequence[str] = (),
     refresh_hashes: bool = False,
     verify: bool = False,
 ) -> int:
@@ -372,6 +384,7 @@ async def _update_async(
         output_format: ``table`` or ``markdown``.
         python: ``(target Python or None, who decided)``.
         min_age: Release cooldown.
+        allow_major: Normalised ``--allow-major`` names.
 
     Returns:
         0 on success, 1 when the user declined or ``--verify`` found a
@@ -388,6 +401,7 @@ async def _update_async(
     logger.info("Checking %s for updates...", file)
 
     requirements = parse_targets(file)
+    all_requirements = requirements  # --verify checks the whole final plan
 
     if not requirements:
         warn("No packages found in requirements file")
@@ -408,6 +422,8 @@ async def _update_async(
             infer_version_from_constraints=infer_version_from_constraints,
             target_python=python[0],
             min_age=min_age,
+            allow_major=allow_major or None,
+            max_update=max_update,
         )
         packages = await checker.check_packages(requirements)
         links = _report.collect_links(data_store, packages) if markdown else {}
@@ -550,7 +566,12 @@ async def _update_async(
             package_names,
         )
 
-    for note in (_report.policy_note(packages), _report.cooldown_note(packages)):
+    for note in (
+        _report.policy_note(packages),
+        _report.cooldown_note(packages),
+        _report.major_note(packages),
+        _report.unknown_allow_major_note(allow_major, requirements),
+    ):
         if note:
             warn(note)
 
@@ -576,7 +597,7 @@ async def _update_async(
 
     if not updates:
         # An already-conflicting set must not pass as "up to date" under --verify.
-        if verify and not _verify_ok(requirements, updates, warn, ok):
+        if verify and not _verify_ok(all_requirements, updates, warn, ok, python[0]):
             return 1
         if markdown:
             emit_markdown()
@@ -598,7 +619,21 @@ async def _update_async(
     if not markdown:
         _display_update_plan(updates, dry_run)
 
-    if verify and not _verify_ok(requirements, updates, warn, ok):
+    majors = sorted(
+        {
+            pkg.name
+            for _req, pkg, ver in updates
+            if get_update_type(pkg.current_version, ver, pkg.versioning) == "major"
+        }
+    )
+    if majors:
+        verb = "would be applied" if dry_run else "applied"
+        warn(
+            f"{len(majors)} major upgrade(s) {verb}: {', '.join(majors)}. "
+            "Run --verify and your tests."
+        )
+
+    if verify and not _verify_ok(all_requirements, updates, warn, ok, python[0]):
         return 1
 
     if dry_run:
@@ -748,6 +783,13 @@ def _find_updates(
             > UPDATE_RANK[max_update]
         ):
             logger.debug("Skipping %s: exceeds --max-update %s", req.name, max_update)
+            # A capped major stays visible as an opt-in the user declined.
+            if (
+                get_update_type(pkg.current_version, target_version, pkg.versioning)
+                == "major"
+            ):
+                pkg.major_available = pkg.major_available or target_version
+                pkg.major_capped = True
             if capped is not None:
                 capped.append(req.name)
             continue
@@ -835,20 +877,60 @@ def _plan_requirement_strings(
     return out
 
 
+def _plan_constraints(requirements: List[Requirement]) -> List[str]:
+    """Every ``-c`` constraint of the files, including ones for unlisted packages."""
+    specs = {
+        normalize_package_name(r.name): (r.name, r.constraint_specs)
+        for r in requirements
+        if r.constraint_specs
+    }
+    for f in {
+        r.source_file
+        for r in requirements
+        if r.source_file and (r.source_format or "").startswith("requirements")
+    }:
+        try:
+            parser = RequirementsParser()
+            parser.parse_file(Path(f))
+            consts = parser.get_constraints()
+        except Exception:  # noqa: BLE001 -- verification is best-effort
+            continue
+        for name, c in consts.items():
+            if c.specs:
+                specs.setdefault(normalize_package_name(name), (c.name, c.specs))
+    return [f"{n}{specs_to_string(sp)}" for n, sp in specs.values()]
+
+
 def _verify_ok(
     requirements: List[Requirement],
     updates: List[Tuple[Requirement, Package, str]],
     warn: Callable[[str], None],
     ok: Callable[[str], None],
+    python_version: Optional[str] = None,
 ) -> bool:
-    """Run ``--verify`` on the plan; report a conflict and return False."""
-    constraints = [
-        f"{r.name}{specs_to_string(r.constraint_specs)}"
-        for r in requirements
-        if r.constraint_specs
-    ]
+    """Run ``--verify`` on the plan for the run's target Python.
+
+    Args:
+        requirements: Parsed requirements of the file(s).
+        updates: Planned ``(requirement, package, new_version)`` changes.
+        warn: Warning printer (used when verification is skipped).
+        ok: Success printer; receives the "what was verified" line.
+        python_version: Target Python resolved for the run, or ``None`` for
+            the running interpreter.
+
+    Returns:
+        ``False`` (after printing the conflicts) when pip rejects the plan.
+    """
+    constraints = _plan_constraints(requirements)
     plan = _plan_requirement_strings(requirements, updates)
-    result = _run_verify(plan, constraints) if constraints else _run_verify(plan)
+    # Optional arguments are only passed when set so narrow stand-ins still work.
+    kwargs: Dict[str, str] = (
+        {"python_version": python_version} if python_version else {}
+    )
+    if constraints:
+        result = _run_verify(plan, constraints, **kwargs)
+    else:
+        result = _run_verify(plan, **kwargs)
     if result.skipped:
         warn(f"--verify skipped: {result.message}")
     elif not result.ok:
@@ -858,17 +940,29 @@ def _verify_ok(
         print_error("Aborting: no changes were made.", stderr=True)
         return False
     else:
-        ok("--verify: pip resolved the proposed set")
+        from depkeeper.core.verify import VerifyResult
+
+        excluded = sum(1 for r in requirements if r.url or r.editable)
+        line = (
+            result.summary(excluded=excluded)
+            if isinstance(result, VerifyResult)
+            else "pip resolved the proposed set"
+        )
+        ok(f"--verify: {line}")
     return True
 
 
 def _run_verify(
-    requirements: List[str], constraints: Sequence[str] = ()
+    requirements: List[str],
+    constraints: Sequence[str] = (),
+    python_version: Optional[str] = None,
 ) -> "VerifyResult":
     """Call `depkeeper.core.verify.verify_plan` (imported lazily; tests patch this)."""
     from depkeeper.core.verify import verify_plan
 
-    return verify_plan(requirements, constraints=constraints)
+    return verify_plan(
+        requirements, constraints=constraints, python_version=python_version
+    )
 
 
 def _fuzzy_noop(req: Requirement, target: str) -> bool:

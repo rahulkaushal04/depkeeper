@@ -14,7 +14,7 @@ A map for contributors who need to add capability rather than fix a defect. Read
 
 | Rule | Consequence if broken |
 |---|---|
-| A recommendation never crosses a major boundary when a current version is known. | The core safety promise is void. |
+| A recommendation never crosses a major boundary when a current version is known, unless the package is opted in (`--allow-major` / `allow_major`). | The core safety promise is void. |
 | A recommendation never violates the declared constraints (except under `--pin`). | depkeeper writes unsatisfiable lines. |
 | `Package.recommended_version` equals the resolver's `resolved` value. | The report and the write disagree. |
 | Names are compared only in PEP 503 canonical form. | Cross-package lookups silently miss. |
@@ -36,8 +36,7 @@ A map for contributors who need to add capability rather than fix a defect. Read
 5. Test the flag on, the flag off, and its interaction with the config file.
 
 The precedence contract is `defaults < config file < CLI flag`. A flag that cannot express
-"unset" cannot participate in it — that is why `--strict-version-matching` has no negative form,
-and why a new boolean should be added as a `--x/--no-x` pair.
+"unset" cannot participate in it, so add a new boolean as a `--x/--no-x` pair with `default=None`.
 
 ## Add an output format
 
@@ -73,25 +72,19 @@ All network access goes through `utils/http.py` and is cached by `core/data_stor
   swallowed prefetch error. Negative caching belongs to the consumer, as the analyzer does it.
 - Normalise the cache key with `normalize_package_name`.
 
-## Support another requirements format
+## Support another file format
 
-This is a **refactor**, not a plugin. As of 0.1.x there is no parser interface, no strategy
-pattern and no format-selection configuration. The coupling points are:
+Write a `SourceAdapter` subclass in `depkeeper/core/sources/` and register it in
+`registry._register_builtins`. The step-by-step guide is the docstring at the top of
+`depkeeper/core/sources/base.py`; `requirements_txt.py`, `pyproject_toml.py` and `conda_yaml.py`
+are working examples.
 
-| Location | Coupling |
-|---|---|
-| `core/parser.py` | Hardcoded pip directives (`-r`, `-c`, `-e`, `--hash`), line-based parsing, URL scheme detection. |
-| `models/requirement.py` | `to_string()` and `update_version()` emit requirements.txt syntax. |
-| `commands/update.py` | Line-number-based in-place rewriting. |
-| `constants.py` | `REQUIREMENT_FILE_PATTERNS` covers `.txt` only; directive constants are pip-specific. |
-| `commands/*.py` | `default="requirements.txt"`, and the parser is constructed directly with no format detection. |
-
-Format-agnostic already: `core/data_store.py`, `core/checker.py`, `core/dependency_analyzer.py`,
-`models/package.py`, `models/conflict.py` — they operate on `Requirement` and `Package` only.
-
-A credible design would introduce a parser interface plus a writer interface, keep the existing
-class as the pip implementation, and add format detection at the command layer. Open an issue
-before starting.
+- Edit in place: comments, order, quoting and line endings must survive byte for byte.
+- Adapters never touch the disk when updating; the caller owns atomic writes, backups and rollback.
+- Reuse `Requirement.update_version` / `rewrite_version_specs` so `--pin` and upper-bound
+  preservation behave the same in every format.
+- Test parse-then-update round trips under `tests/test_sources/`, including a no-op update that
+  leaves bytes identical.
 
 ## Support a private index
 

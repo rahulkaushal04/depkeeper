@@ -12,14 +12,14 @@ description: Frequently asked questions about depkeeper's behaviour and scope
 ### What is depkeeper for?
 
 Answering one question well: *what is the largest upgrade I can take for each requirement without
-crossing a major version, without breaking Python compatibility, without violating the constraints
+crossing a major version (unless I opt in), without breaking Python compatibility, without violating the constraints
 I declared, and without conflicting with the other packages in my file?* It then rewrites the file
 with those answers.
 
 ### How is it different from `pip list --outdated`?
 
 `pip` reports the **latest** version. depkeeper reports the **safe** version, and can apply it.
-`pip` also reports on the installed environment; depkeeper reads a requirements file and needs
+`pip` also reports on the installed environment; depkeeper reads a dependency file (`requirements*.txt`, `pyproject.toml`, conda `environment.yml`) and needs
 nothing installed.
 
 ### How is it different from Poetry or pip-tools?
@@ -33,7 +33,7 @@ already have and adds no new format. The trade-off is that it does not perform f
 | Enforces major-version boundaries | no | no | no | yes |
 | Full transitive resolution | yes (at install) | yes | yes | no |
 | Requires a new file format | no | `.in` files | `pyproject.toml` + lock | no |
-| Rewrites `requirements.txt` in place | no | regenerates | n/a | yes |
+| Rewrites your dependency file in place | no | regenerates | n/a | yes |
 
 ### Does it replace `pip`?
 
@@ -50,13 +50,13 @@ No. Use `pip-audit` or `safety` alongside it.
 
 ### Why won't it upgrade past a major version?
 
-That is the core safety rule. Crossing a major version is, by convention, permission to break the
+That is the default safety rule. Crossing a major version is, by convention, permission to break the
 caller — not a decision an unattended tool should make. See
 [the boundary rule](../concepts/version-recommendation.md#the-major-version-boundary).
 
 ### How do I take a major upgrade?
 
-Edit the floor yourself and let depkeeper continue from there:
+Opt in per package with `--allow-major PKG` (repeatable, `'*'` for all) or `allow_major = true` under `[depkeeper.packages.<name>]`. Your own upper bounds, `--max-update`, Python compatibility and `min_age` still apply. Without the opt-in, a newer major is reported as `major available`. Or edit the floor yourself and let depkeeper continue from there:
 
 ```text
 django>=3.2,<5.0    →    django>=4.2,<5.0
@@ -68,10 +68,11 @@ Then run `depkeeper update`, install, and test.
 
 One of four reasons, in order of likelihood:
 
-1. Your own declared cap or exclusion (`<`, `!=`, `==x.*`).
-2. The major boundary, anchored on the version inferred from your file.
+1. Your own declared cap or exclusion (`<`, `!=`, `==x.*`, or the bound implied by `~=`).
+2. The major boundary (without `--allow-major`), anchored on the version inferred from your file.
 3. A conflict with another package in the file.
-4. `requires_python` of newer releases excludes the interpreter depkeeper is running on.
+4. `requires_python` of newer releases excludes the target Python.
+5. `--min-age`, `--max-update` or a per-package `hold`.
 
 `depkeeper -vv check` names the reason.
 
@@ -115,8 +116,7 @@ Yes. A target that would produce a byte-identical line is skipped, so a second r
 
 ### Why are the recommendations different in CI than on my laptop?
 
-Different Python versions running depkeeper. Compatibility filtering uses **depkeeper's own**
-interpreter. Pin the CI Python to your project's target.
+Different target Python. It comes from `--python-version`, then config `python_version`, then the file's `requires-python`, then the interpreter running depkeeper. Set one of the first three to get the same answer everywhere.
 
 ---
 
@@ -145,7 +145,7 @@ depkeeper check --format json > report.json
 jq '[.[] | select(.status == "outdated")] | length' report.json
 ```
 
-Do not gate on the exit code — `check` exits `0` whether or not updates exist. See
+`check` exits `0` whether or not updates exist, unless you pass `--fail-on` (exit `3` when the threshold is met). Exit `4` means a package lookup failed. See
 [Exit codes](../reference/exit-codes.md).
 
 ### Can I pipe the JSON with verbose logging on?
@@ -158,12 +158,11 @@ depkeeper -vv check --format json | jq .
 
 ### Does it work with multiple requirements files?
 
-Yes, via `-r` includes: checking a file reports the union, and updating it rewrites every included
-file that contains an updated requirement. There is no directory or recursive mode.
+Yes. `-r` includes are followed (checking a file reports the union, and updating it rewrites every included file that contains an updated requirement), and passing a directory checks every supported file in it. Directory discovery is not recursive.
 
 ### Can I point it at a private index?
 
-No. depkeeper always queries `pypi.org`; `--index-url` lines are parsed and ignored. Private
+No. depkeeper always queries `pypi.org`; `--index-url` lines are parsed and ignored (`update --verify` runs pip, which uses your own pip index settings). Private
 packages report as `[ERROR]`.
 
 ### Can I change the timeout or concurrency?
@@ -192,7 +191,7 @@ comments and file contents never leave the machine.
 
 ### Does it execute or install the packages it analyses?
 
-Never. It reads JSON metadata only.
+Never, with one exception: `update --verify` runs `pip install --dry-run --only-binary=:all:` in a subprocess, so no package is built or installed and no build code runs. Otherwise it reads JSON metadata only.
 
 ### Is it safe to run against an untrusted repository?
 
@@ -216,7 +215,7 @@ Too many requests from one egress IP — usually many CI jobs sharing it. Stagge
 
 ### What Python versions are supported?
 
-3.8 and later. Note that the interpreter you install depkeeper on affects its recommendations.
+3.8 and later. The interpreter you install depkeeper on is the default target Python; override it with `--python-version`.
 
 ### Is it production-ready?
 

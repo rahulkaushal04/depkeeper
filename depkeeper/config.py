@@ -15,7 +15,7 @@ Discovery order:
 The upward search stops at the first directory containing ``.git`` (the
 repository root) or at the filesystem root.
 
-Configuration precedence: defaults < config file < environment < CLI args.
+Configuration precedence: defaults < config file < CLI flags.
 
 Typical usage::
 
@@ -103,6 +103,8 @@ class PackagePolicy:
         allow_prerelease: Consider pre-releases as candidates.
         versioning: ``auto``/``semver``/``calver`` for this package.
         ignore: Skip the package entirely (never recommend a change).
+        allow_major: Let recommendations cross the current major (still bounded
+            by the requirement's own upper bounds and by ``max_update``).
     """
 
     max_update: Optional[str] = None
@@ -110,6 +112,7 @@ class PackagePolicy:
     allow_prerelease: bool = False
     versioning: Optional[str] = None
     ignore: bool = False
+    allow_major: bool = False
 
 
 @dataclass
@@ -475,7 +478,7 @@ def _parse_packages(raw: Any, config_path: str) -> Dict[str, PackagePolicy]:
             config_path=config_path,
             option="packages",
         )
-    bool_keys = ("hold", "allow_prerelease", "ignore")
+    bool_keys = ("hold", "allow_prerelease", "ignore", "allow_major")
     known = {"max_update", "versioning", *bool_keys}
     policies: Dict[str, PackagePolicy] = {}
 

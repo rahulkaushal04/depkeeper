@@ -33,18 +33,14 @@ need to embed dependency analysis.
 
 ```python
 import asyncio
+from pathlib import Path
 
-from depkeeper.core import (
-    DependencyAnalyzer,
-    PyPIDataStore,
-    RequirementsParser,
-    VersionChecker,
-)
+from depkeeper.core import DependencyAnalyzer, PyPIDataStore, VersionChecker
+from depkeeper.core.sources import parse_targets
 from depkeeper.utils import HTTPClient
 
 async def analyse(path: str):
-    parser = RequirementsParser()
-    requirements = parser.parse_file(path)          # synchronous
+    requirements = parse_targets(Path(path))        # synchronous; any supported file type
 
     async with HTTPClient() as http:
         store = PyPIDataStore(http)                 # one store, shared
@@ -182,6 +178,8 @@ VersionChecker(
     min_age: Optional[timedelta] = None,
     policies: Optional[Mapping[str, PackagePolicy]] = None,
     clock: Optional[Callable[[], datetime]] = None,
+    allow_major: Iterable[str] = (),
+    max_update: Optional[str] = None,
 )
 ```
 
@@ -196,6 +194,7 @@ Computes recommendations without crossing a major version boundary.
 | `create_unavailable_package(name, current_version) -> Package` | A stub `Package` for when PyPI data is unavailable. |
 | `restrict_versions(pkg_data, versions, current_version, scheme="semver") -> List[str]` | Apply hold/ignore, `max_update` and the cooldown. |
 | `include_prereleases(name) -> bool` | Whether the per-package policy allows pre-releases. |
+| `allows_major(name) -> bool` | Whether `allow_major` (the `--allow-major` names, `*`, or the package policy) lets this package cross its major. |
 
 ### DependencyAnalyzer
 
@@ -260,7 +259,8 @@ A dataclass holding version and compatibility state for one package.
 
 Fields: `name`, `current_version`, `latest_version`, `recommended_version`, `metadata`,
 `conflicts`, `retained_specs`, `versioning`, `held`, `ignored`, `recommended_released`,
-`current_released`, `latest_released`, `cooldown_skipped`, `conflict_held`.
+`current_released`, `latest_released`, `cooldown_skipped`, `conflict_held`, `major_available`,
+`major_capped`.
 
 Properties: `current`, `latest`, `recommended` (parsed versions), `requires_downgrade`,
 `update_type`.
@@ -304,6 +304,8 @@ From `depkeeper.config`.
 | Name | Description |
 |---|---|
 | `DepKeeperConfig` | Dataclass of validated settings: `check_conflicts=True`, `strict_version_matching=False`, `fail_on="none"`, `ignore`, `python_version`, `min_age`, `versioning="auto"`, `packages`, `source_path`. `to_log_dict() -> Dict[str, Any]` returns it for debug logging. |
+| `PackagePolicy` | Per-package policy dataclass: `max_update=None`, `hold=False`, `allow_prerelease=False`, `versioning=None`, `ignore=False`, `allow_major=False`. |
+| `parse_duration(value: Union[str, int, float]) -> timedelta` | Parse a `min_age` value (`7`, `"12h"`, `"2w"`); raises `ValueError`. |
 | `load_config(config_path: Optional[Path] = None) -> DepKeeperConfig` | Load and validate a configuration. |
 | `discover_config_file(explicit_path: Optional[Path] = None) -> Optional[Path]` | Find the configuration file to load. |
 
@@ -350,6 +352,20 @@ From `depkeeper.utils.version_utils`.
 | `specs_allow_version(specs, version) -> bool` | Whether a version satisfies every specifier. |
 | `specs_to_string(specs) -> str` | Render specs as a PEP 440 specifier string. |
 | `is_lower_bound(operator) -> bool` | Whether an operator constrains only the floor of a range. |
+
+### Source adapters
+
+From `depkeeper.core.sources`; they read `requirements*.txt`, `pyproject.toml` and `environment.yml` and are what the CLI uses.
+
+| Function | Description |
+|---|---|
+| `parse_targets(path: Path) -> List[Requirement]` | Parse a file or a directory of supported files into one list (`Requirement.source_file`/`source_format` are set). |
+| `resolve_targets(path: Path) -> List[Path]` | Expand a file or directory to the files to process. |
+| `default_target(file: Optional[Path]) -> Path` | The CLI's default (`requirements.txt`, else the current directory). |
+| `discover(directory) -> List[Path]` | Supported dependency files in a directory (not recursive). |
+| `get_adapter(path) -> SourceAdapter` | The adapter for a file. |
+
+`RequirementsParser` handles `requirements.txt` syntax only; use `parse_targets` for `pyproject.toml` and conda files.
 
 ### Name canonicalisation
 

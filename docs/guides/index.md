@@ -10,10 +10,10 @@ Task-oriented documentation. For the model behind these tasks, see
 [Reference](../reference/index.md).
 
 - **[Checking for updates](checking-updates.md)** — The read-only report: filters, formats, streams and how to consume them.
-- **[Updating dependencies](updating-dependencies.md)** — Applying changes safely: previews, selection, pin mode, hashes, backups.
+- **[Updating dependencies](updating-dependencies.md)** — Applying changes safely: previews, selection, pin mode, hashes, `--verify`, backups.
 - **[Configuration](configuration.md)** — Config files, environment variables and the precedence rules between them.
 - **[CI/CD integration](ci-cd-integration.md)** — Gating builds, opening update pull requests, and scheduled drift reports.
-- **[Operations](operations.md)** — Networking, caching, performance, security posture and diagnostics.
+- **[Operations](operations.md)** — Networking, retries, in-memory caching, performance, security posture and diagnostics.
 - **[Best practices](best-practices.md)** — How to structure requirements files so depkeeper produces good answers.
 - **[Troubleshooting](troubleshooting.md)** — Symptom-indexed diagnosis and recovery.
 
@@ -37,11 +37,21 @@ depkeeper check --format json | jq '.[] | select(.name == "django")'
 depkeeper update -p django --dry-run
 ```
 
-**CI drift report**
+**CI drift report and gate**
 
 ```bash
 depkeeper check --format json --no-check-conflicts > report.json
 jq '[.[] | select(.status == "outdated")] | length' report.json
+depkeeper check --fail-on major        # exit 3 if a major update is proposed, 4 if PyPI lookup failed
+```
+
+**Safer updates**
+
+```bash
+depkeeper update --verify --min-age 7d --dry-run       # pip dry-runs the plan; skip releases < 7 days old
+depkeeper update --refresh-hashes -y                   # hashed files: regenerate --hash lines
+depkeeper check --allow-major django                   # opt a package in to a major upgrade
+depkeeper update -y --format markdown > pr-body.md     # PR description of what changed
 ```
 
 **Release preparation**
@@ -58,4 +68,5 @@ git diff requirements.txt
 ```bash
 depkeeper update requirements/base.txt --dry-run   # follows -r includes
 depkeeper check requirements/dev.txt
+depkeeper check pyproject.toml                     # also environment.yml, or a directory
 ```

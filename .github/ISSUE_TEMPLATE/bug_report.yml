@@ -26,7 +26,7 @@ body:
     id: python-version
     attributes:
       label: Python version
-      description: Output of `python --version` for the interpreter depkeeper runs on. It filters candidate versions against that interpreter.
+      description: Output of `python --version` for the interpreter depkeeper runs on. By default it filters candidate versions for this interpreter, unless `--python-version`, config or `requires-python` sets a target.
       placeholder: "3.12.4"
     validations:
       required: true

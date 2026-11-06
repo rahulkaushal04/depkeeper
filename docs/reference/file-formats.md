@@ -9,7 +9,7 @@ depkeeper reads and writes **pip requirements files** (`requirements*.txt`), **`
 (`[project]` / optional / PEP 735 dependency groups and Poetry tables) and conda **`environment.yml`**
 (including its `pip:` list). It does not read `Pipfile`, `poetry.lock`, `setup.py` or `setup.cfg`.
 The rest of this page describes requirements-file syntax. In `pyproject.toml`, dependency strings
-containing backslash escapes are skipped with a warning naming `file:line`. In `environment.yml`,
+containing backslash escapes are skipped with a warning naming `file:line`; see [pyproject.toml](#pyprojecttoml) below. In `environment.yml`,
 fuzzy specs such as `numpy=1.24` pin a series and update only to a newer series (`numpy=1.26`).
 
 Behavioural background: [Requirements parsing](../concepts/requirements-parsing.md).
@@ -18,12 +18,19 @@ Behavioural background: [Requirements parsing](../concepts/requirements-parsing.
 
 ## File selection
 
-`FILE` is an explicit argument, defaulting to `requirements.txt`. There is no automatic
-discovery in the CLI — the glob patterns below exist in `constants.py` and are used only by the
-`find_requirements_files` helper in the [Python API](python-api.md).
+`FILE` defaults to `requirements.txt`; when that is absent and the current directory holds other
+supported files, the directory is scanned. A directory argument is scanned the same way (not
+recursively) for `requirements*.txt`, `pyproject.toml` and `environment.yml`/`environment.yaml` that
+contain dependencies. Any other `*.txt` / `*.in` name given explicitly is read as a
+requirements file. The separate `find_requirements_files` helper in the [Python API](python-api.md) (recursive by default) uses these patterns from `constants.py`:
 
 | Category | Patterns |
 |---|---|
+| requirements | `requirements.txt`, `requirements-*.txt`, `requirements/*.txt` |
+| constraints | `constraints.txt`, `constraints-*.txt` |
+| backup | `*.backup` |
+
+---|---|
 | requirements | `requirements.txt`, `requirements-*.txt`, `requirements/*.txt` |
 | constraints | `constraints.txt`, `constraints-*.txt` |
 | backup | `*.backup` |
@@ -57,9 +64,9 @@ requests>=2.25.0  # inline comment
 | `!=` | ✅ | Retained verbatim. |
 | `==2.*` | ✅ | Retained verbatim. |
 
-Extras and PEP 508 environment markers are captured and preserved. Markers are **not** evaluated:
-depkeeper reports every requirement in the file regardless of whether its marker matches the
-current environment.
+Extras and PEP 508 environment markers are captured and preserved. Markers are **not** evaluated
+(except by `update --verify`, which drops requirements whose marker is false for the target Python):
+depkeeper reports every requirement in the file regardless of whether its marker matches.
 
 ### Comments and blank lines
 
@@ -117,8 +124,8 @@ file:///abs/path/pkg-1.0.whl#egg=pkg
 C:\absolute\path\package
 ```
 
-Parsed and reported; **never updated**. Always add `#egg=<name>` — inference from the URL's last
-path segment is unreliable, and a URL with no inferable name raises `ParseError`.
+Parsed and reported; **never updated**. Always add `#egg=<name>` — without it the name is inferred from the URL's last
+path segment (with a warning) and is usually wrong, and a URL with no inferable name raises `ParseError`.
 
 ### Hashes
 
@@ -128,19 +135,16 @@ requests==2.31.0 --hash sha256:abcdef...
 ```
 
 Both separators are accepted. Hashed requirements are refused by `update` unless
-`--allow-hash-removal` is passed.
+`--refresh-hashes` (regenerate sha256 hashes from PyPI) or `--allow-hash-removal` (drop them) is passed.
 
-> [!WARNING]
-> **Line continuations are not supported**
->
-> ```text
-> requests==2.31.0 \
->     --hash=sha256:aaa... \
->     --hash=sha256:bbb...
-> ```
->
-> depkeeper does not join backslash continuations, so this — the default output of
-> `pip-compile --generate-hashes` — fails to parse. Use the single-line form.
+Backslash line continuations (the default output of `pip-compile --generate-hashes`) are joined
+before parsing:
+
+```text
+requests==2.31.0 \
+    --hash=sha256:aaa... \
+    --hash=sha256:bbb...
+```
 
 ### pip global options
 
@@ -163,7 +167,7 @@ Recognised and skipped:
 These are preserved in the file and **have no effect on depkeeper**. In particular, index options
 do not redirect depkeeper's queries; it always uses `pypi.org`.
 
-Any other option line raises `ParseError`.
+Any other option line raises `ParseError` (`Invalid requirement syntax: ...`).
 
 ---
 
@@ -250,6 +254,25 @@ directives, direct references, encoding and line endings.
 | `pkg~=2.0` | `2.0.30` | *(unchanged)* | Already covered by the declared floor; skipped for convergence. |
 | `pkg==2.*` | `2.9.0` | `pkg==2.*,>=2.9.0` | A wildcard band is retained, and a floor is added. |
 | `-e .` | any | *(unchanged)* | Editable installs are never updated. |
+
+---
+
+## `pyproject.toml`
+
+Parsed with `tomli`; edits replace only the specifier characters inside the original text, so
+comments, quoting, layout and line endings survive (the result is re-validated as TOML).
+
+| Section | Read |
+|---|---|
+| `[project].dependencies`, `[project.optional-dependencies].*` | Yes (PEP 508 strings) |
+| `[dependency-groups].*` (PEP 735) | Yes; `{include-group = ...}` entries are skipped with a warning |
+| `[build-system].requires` | Yes |
+| `[tool.poetry.dependencies]`, `dev-dependencies`, `group.*.dependencies` | Yes: `"1.2.3"`, `"==1.2.3"`, `">=1,<2"`, `"^1.2"`, `"~1.2"`, `{version = "..."}` |
+| Poetry `python`, `*`, `||` constraints, git/path/url/file tables, list-of-table values | Skipped |
+| `[project].requires-python` | Used as the target Python (lowest minor), never updated |
+
+Poetry `^` / `~` keep their style (`^1.2` → `^1.5.0`); `--pin` writes `==`. A bare name (no specifier) is
+only pinned with `--pin`. Dependency strings with backslash escapes are skipped with a warning.
 
 ---
 

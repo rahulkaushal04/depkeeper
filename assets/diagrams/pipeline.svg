@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 300" role="img">
+<title>check and update share one pipeline; only update continues to hash handling, verify and the atomic write</title>
+<desc>A dependency file path goes to the source registry, whose adapters (requirements.txt, pyproject.toml, environment.yml) return Requirement objects. PyPIDataStore fetches PyPI JSON once per package, VersionChecker returns Package objects with recommendations, and DependencyAnalyzer resolves cross-package conflicts in place. Both commands then render a report. Only update continues: it selects updates, optionally refreshes hashes, optionally runs pip --dry-run (--verify), then confirms and writes atomically.</desc>
+<defs>
+<marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2563EB"/></marker>
+<marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#16A34A"/></marker>
+<marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#DC2626"/></marker>
+<marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+</defs>
+<rect x="0.5" y="0.5" width="999" height="299" rx="12" fill="#FFFFFF" stroke="#CBD5E1"/>
+<g font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#0F172A" text-anchor="middle">
+<text x="20" y="34" font-size="11" fill="#475569" text-anchor="start" font-weight="600">BOTH COMMANDS</text>
+<rect x="20" y="50" width="128" height="80" rx="8" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1"/>
+<text x="84.0" y="72" font-weight="700" fill="#0F172A" font-size="12.5">Dependency file</text>
+<text x="84.0" y="90" font-size="11" fill="#475569">requirements.txt,</text>
+<text x="84.0" y="104" font-size="11" fill="#475569">pyproject.toml or</text>
+<text x="84.0" y="120" font-size="11" fill="#475569">environment.yml</text>
+<rect x="228" y="50" width="128" height="80" rx="8" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1"/>
+<text x="292.0" y="72" font-weight="700" fill="#0F172A" font-size="12.5">Source registry</text>
+<text x="292.0" y="90" font-size="11" fill="#475569">get_adapter(path)</text>
+<text x="292.0" y="104" font-size="11" fill="#475569">one adapter per</text>
+<text x="292.0" y="120" font-size="11" fill="#475569">file format</text>
+<rect x="436" y="50" width="128" height="80" rx="8" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1"/>
+<text x="500.0" y="79" font-weight="700" fill="#0F172A" font-size="12.5">PyPIDataStore</text>
+<text x="500.0" y="97" font-size="11" fill="#475569">1 request per package</text>
+<text x="500.0" y="112" font-size="11" fill="#475569">cached, coalesced</text>
+<rect x="644" y="50" width="128" height="80" rx="8" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1"/>
+<text x="708.0" y="79" font-weight="700" fill="#0F172A" font-size="12.5">VersionChecker</text>
+<text x="708.0" y="97" font-size="11" fill="#475569">boundary, Python,</text>
+<text x="708.0" y="112" font-size="11" fill="#475569">constraints, policy</text>
+<rect x="852" y="50" width="128" height="80" rx="8" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1"/>
+<text x="916.0" y="79" font-weight="700" fill="#0F172A" font-size="12.5">DependencyAnalyzer</text>
+<text x="916.0" y="97" font-size="11" fill="#475569">cross-package</text>
+<text x="916.0" y="112" font-size="11" fill="#475569">conflicts, in place</text>
+<path d="M148,90 H226" fill="none" stroke="#2563EB" stroke-width="1.5" marker-end="url(#ab)"/>
+<text x="188.0" y="82" font-size="11" fill="#475569" text-anchor="middle">path</text>
+<path d="M356,90 H434" fill="none" stroke="#2563EB" stroke-width="1.5" marker-end="url(#ab)"/>
+<text x="396.0" y="82" font-size="11" fill="#475569" text-anchor="middle">Requirement[]</text>
+<path d="M564,90 H642" fill="none" stroke="#2563EB" stroke-width="1.5" marker-end="url(#ab)"/>
+<text x="604.0" y="82" font-size="11" fill="#475569" text-anchor="middle">PyPI JSON</text>
+<path d="M772,90 H850" fill="none" stroke="#2563EB" stroke-width="1.5" marker-end="url(#ab)"/>
+<text x="812.0" y="82" font-size="11" fill="#475569" text-anchor="middle">Package[]</text>
+<path d="M916,130 V190" fill="none" stroke="#2563EB" stroke-width="1.5" marker-end="url(#ab)"/>
+<text x="924" y="158" font-size="11" fill="#475569" text-anchor="start">Package[]</text>
+<path d="M916,160 H84 V190" fill="none" stroke="#2563EB" stroke-width="1.5" marker-end="url(#ab)"/>
+<text x="500" y="152" font-size="11" fill="#475569" text-anchor="middle" font-weight="600">UPDATE ONLY: Package[] + ResolutionResult</text>
+<rect x="20" y="190" width="128" height="84" rx="8" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1"/>
+<text x="84.0" y="214" font-weight="700" fill="#0F172A" font-size="12.5">_find_updates</text>
+<text x="84.0" y="232" font-size="11" fill="#475569">safe upgrades;</text>
+<text x="84.0" y="246" font-size="11" fill="#475569">skips caps, ignores,</text>
+<text x="84.0" y="262" font-size="11" fill="#475569">no-op rewrites</text>
+<rect x="228" y="190" width="128" height="84" rx="8" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1"/>
+<text x="292.0" y="214" font-weight="700" fill="#0F172A" font-size="12.5">Hash handling</text>
+<text x="292.0" y="232" font-size="11" fill="#475569">hashed lines refused</text>
+<text x="292.0" y="246" font-size="11" fill="#475569">unless --refresh-hashes</text>
+<text x="292.0" y="262" font-size="11" fill="#475569">or --allow-hash-removal</text>
+<rect x="436" y="190" width="128" height="84" rx="8" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1"/>
+<text x="500.0" y="214" font-weight="700" fill="#0F172A" font-size="12.5">--verify (optional)</text>
+<text x="500.0" y="232" font-size="11" fill="#475569">pip install --dry-run</text>
+<text x="500.0" y="246" font-size="11" fill="#475569">over the whole plan</text>
+<text x="500.0" y="262" font-size="11" fill="#475569">conflict: exit 1</text>
+<rect x="644" y="190" width="128" height="84" rx="8" fill="#FFFBEB" stroke="#F59E0B" stroke-width="1.5"/>
+<text x="708.0" y="214" font-weight="700" fill="#0F172A" font-size="12.5">Confirm + write</text>
+<text x="708.0" y="232" font-size="11" fill="#475569">backup, render all,</text>
+<text x="708.0" y="246" font-size="11" fill="#475569">re-read check, atomic</text>
+<text x="708.0" y="262" font-size="11" fill="#475569">replace, rollback</text>
+<rect x="852" y="190" width="128" height="84" rx="8" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="1"/>
+<text x="916.0" y="214" font-weight="700" fill="#0F172A" font-size="12.5">Report</text>
+<text x="916.0" y="232" font-size="11" fill="#475569">table, simple, json,</text>
+<text x="916.0" y="246" font-size="11" fill="#475569">json-v2, markdown</text>
+<text x="916.0" y="262" font-size="11" fill="#475569">to stdout</text>
+<path d="M148,232 H226" fill="none" stroke="#2563EB" stroke-width="1.5" marker-end="url(#ab)"/>
+<text x="188.0" y="224" font-size="11" fill="#475569" text-anchor="middle">updates</text>
+<path d="M356,232 H434" fill="none" stroke="#2563EB" stroke-width="1.5" marker-end="url(#ab)"/>
+<text x="396.0" y="224" font-size="11" fill="#475569" text-anchor="middle">plan</text>
+<path d="M564,232 H642" fill="none" stroke="#2563EB" stroke-width="1.5" marker-end="url(#ab)"/>
+<text x="604.0" y="224" font-size="11" fill="#475569" text-anchor="middle">approved</text>
+</g>
+</svg>
