@@ -63,7 +63,7 @@ def test_duration_accepts(raw: Any, expected: timedelta) -> None:
         "7y",
         "٧d",  # arabic-indic digit
         "７d",  # fullwidth digit
-        "7 d x",
+        "7 d\u2028x",
         "9" * 400 + "d",
         "99999999999999d",
         -1,

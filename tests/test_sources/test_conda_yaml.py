@@ -212,7 +212,7 @@ def test_conda_stale_text_at_span_is_refused(tmp_path: Path) -> None:
 
     f = tmp_path / "environment.yml"
     text = "dependencies:\n  - numpy=1.20\n"
-    f.write_text(text)
+    f.write_bytes(text.encode())
     a = CondaYamlAdapter()
     (req,) = a.parse(f)
     with pytest.raises(DepKeeperError, match="changed since"):
@@ -224,7 +224,7 @@ def test_pip_item_keeps_marker_spacing(tmp_path: Path) -> None:
 
     f = tmp_path / "environment.yml"
     text = 'dependencies:\n  - pip:\n    - flask[async]>=1.0 ; python_version>"3"\n'
-    f.write_text(text)
+    f.write_bytes(text.encode())
     a = CondaYamlAdapter()
     (req,) = a.parse(f)
     assert a.apply_updates(text, [(req, "2.0")]) == text.replace(">=1.0", ">=2.0")

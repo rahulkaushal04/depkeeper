@@ -18,7 +18,7 @@ VERSIONS = ["1.23.0", "1.24.0", "1.24.5", "1.26.4", "2.0.0"]
 
 def _reqs(tmp_path: Path, deps: str) -> List[Requirement]:
     f = tmp_path / "environment.yml"
-    f.write_text(f"dependencies:\n{deps}")
+    f.write_bytes(f"dependencies:\n{deps}".encode())
     return CondaYamlAdapter().parse(f)
 
 

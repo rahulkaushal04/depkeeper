@@ -1385,6 +1385,7 @@ class TestAtomicWriteInterruptCleanup:
                 _atomic_write(target, "x")
         assert list(tmp_path.iterdir()) == []
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
     def test_mode_preserved(self, tmp_path: Path) -> None:
         target = tmp_path / "f.txt"
         target.write_text("a")

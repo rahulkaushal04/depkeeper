@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import errno
 import os
 from pathlib import Path
@@ -75,6 +76,8 @@ def test_rename_failure_rolls_everything_back(
 
 @pytest.mark.parametrize("fail_on", [1, 3, 5])  # file fsyncs; dir fsyncs follow each
 def test_enospc_on_fsync_of_temp_file(tmp_path: Path, fail_on: int) -> None:
+    if sys.platform == "win32":
+        fail_on = (fail_on + 1) // 2  # Windows has no directory fsync: file fsyncs only
     before = snapshot(tmp_path)
     with mock.patch.object(
         os, "fsync", counting(os.fsync, fail_on, OSError(errno.ENOSPC, "full"))
@@ -146,6 +149,7 @@ def test_external_edit_after_first_write_rolls_first_back(
     assert strays(tmp_path) == []
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions")
 def test_read_only_second_file_rolls_back_first(tmp_path: Path) -> None:
     if os.geteuid() == 0:
         pytest.skip("root bypasses permissions")
@@ -157,6 +161,7 @@ def test_read_only_second_file_rolls_back_first(tmp_path: Path) -> None:
     assert_untouched(tmp_path, before)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions")
 def test_read_only_directory_leaves_files_intact(tmp_path: Path) -> None:
     if os.geteuid() == 0:
         pytest.skip("root bypasses permissions")

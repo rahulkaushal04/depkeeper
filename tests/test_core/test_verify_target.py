@@ -159,6 +159,7 @@ class TestOutcomes:
 
 
 class TestTimeoutKillsProcessTree:
+    @pytest.mark.skipif(sys.platform == "win32", reason="process groups are POSIX-only")
     def test_killpg_called_with_group_of_session_leader(self) -> None:
         class P:
             pid = 4321

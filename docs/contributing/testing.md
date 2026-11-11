@@ -141,8 +141,26 @@ async def test_package_is_fetched_once(instant_sleep):
 
 ### Never hit the network
 
-Use `FakePyPIStore`, or `pytest-httpx` for tests of `HTTPClient` itself. A test that reaches
-`pypi.org` will be rejected.
+Unit tests use `FakePyPIStore`, or `pytest-httpx` for tests of `HTTPClient` itself, and never reach
+`pypi.org`. The few end-to-end tests that do (marked `network`, in `tests/robustness/` and
+`test_e2e_major_verify.py`) skip with one clear reason when PyPI is unreachable. Set
+`DEPKEEPER_REQUIRE_NETWORK=1` to turn that skip into a failure, for example in a release check.
+
+### Cross-platform tests
+
+CI runs Linux, macOS and Windows on Python 3.8 to 3.12, so a test must not depend on the platform
+or on the Python that runs it:
+
+- Write files whose exact bytes matter with `write_bytes`. `Path.write_text` turns `\n` into `\r\n` on
+  Windows (its `newline` argument needs Python 3.10).
+- Skip POSIX-only behaviour with `skipif(sys.platform == "win32")`: file modes, `geteuid`, `killpg`,
+  SIGINT, directory `fsync`.
+- When spawning Python, pass `{**os.environ, ...}`. A stripped environment breaks `import asyncio` on
+  Windows (`WinError 10106`).
+- Start the CLI with `[sys.executable, "-m", "depkeeper"]`, not a script path.
+- Tests that run pip need `pip` in the interpreter's environment; `uv venv` does not install it.
+- Pass `--python-version` when a test depends on which releases exist for a Python, so the result
+  does not depend on the host.
 
 ### Markers
 

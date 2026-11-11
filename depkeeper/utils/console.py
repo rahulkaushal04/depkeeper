@@ -19,9 +19,9 @@ corrupted for downstream consumers such as ``jq``.
 from __future__ import annotations
 
 import os
-import re
 import sys
 import threading
+import unicodedata
 from typing import IO, Any, Callable, Dict, List, Optional
 
 from rich import box
@@ -42,16 +42,23 @@ DEPKEEPER_THEME = Theme(
     }
 )
 
-# Control characters that can drive a terminal (ESC/CSI/OSC 8, BEL, backspace,
-# CR) plus invisible bidi overrides; newline and tab are kept.
-_CONTROL_CHARS = re.compile(
-    "[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]"
-)
+# Unicode categories removed from terminal text: control characters (ESC/CSI/OSC 8,
+# BEL, backspace, CR, C1), format characters (zero-width, bidi overrides, tag
+# characters, BOM) and the line and paragraph separators. Newline and tab are kept.
+_STRIPPED_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
+_KEPT_CONTROLS = "\n\t"
 
 
 def strip_controls(value: object) -> str:
-    """Return ``str(value)`` without terminal control or bidi-override characters."""
-    return _CONTROL_CHARS.sub("", str(value))
+    """Return ``str(value)`` without terminal control or invisible format characters."""
+    text = str(value)
+    if text.isascii() and text.isprintable():
+        return text
+    return "".join(
+        ch
+        for ch in text
+        if ch in _KEPT_CONTROLS or unicodedata.category(ch) not in _STRIPPED_CATEGORIES
+    )
 
 
 def safe_text(value: object) -> str:

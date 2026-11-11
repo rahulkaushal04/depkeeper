@@ -206,7 +206,8 @@ def test_constraints_on_listed_package_are_applied(tmp_path: Path) -> None:
     (tmp_path / "cons.txt").write_text("requests<2.30\n")
     req = tmp_path / "requirements.txt"
     req.write_text("-c cons.txt\nrequests==2.25.0\n")
-    res = _run("update", "-y", "--verify", str(req))
+    # An explicit target keeps the plan independent of the Python running the test.
+    res = _run("update", "-y", "--verify", "--python-version", "3.12", str(req))
     out = res.output + res.stderr
     assert res.exit_code == 0, out
     assert "1 constraint applied" in out
@@ -219,7 +220,7 @@ def test_constraint_on_transitive_dependency_is_enforced(tmp_path: Path) -> None
     req.write_text(
         "-c cons.txt\nrequests==2.25.0\n"
     )  # update targets 2.34.x: needs urllib3>=1.26
-    res = _run("update", "-y", "--verify", str(req))
+    res = _run("update", "-y", "--verify", "--python-version", "3.12", str(req))
     assert res.exit_code == 1
     assert req.read_text().endswith("requests==2.25.0\n")
 

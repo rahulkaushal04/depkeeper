@@ -78,7 +78,9 @@ def test_cli_verify_full_plan_even_with_package_selection(tmp_path: Path) -> Non
     )
     p = subprocess.run(
         [
-            str(Path(sys.executable).parent / "depkeeper"),
+            sys.executable,
+            "-m",
+            "depkeeper",
             "update",
             "-p",
             "six",

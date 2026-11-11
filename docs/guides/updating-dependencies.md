@@ -77,7 +77,7 @@ Update 6 packages? (y, n) [y]:
 - The default is **yes** — the plan has already been shown and you invoked `update` explicitly.
 - Any input other than `y`/`n` causes Click to re-prompt.
 - Declining prints `[WARNING] Aborted. No changes were made.`, writes nothing and exits `1`.
-- `Ctrl+C` at the prompt exits `130`.
+- `Ctrl+C` or `Ctrl-D` at the prompt prints `Aborted.` and exits `130`.
 - With no terminal (CI), the prompt fails with
   `Cannot ask for confirmation without a terminal. Re-run with --yes to apply or --dry-run to preview.`
 

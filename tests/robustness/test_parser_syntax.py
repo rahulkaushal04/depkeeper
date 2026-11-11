@@ -34,7 +34,9 @@ class TestLineHandling:
         reqs = _parse(separator.join(["a==1", "", "# c", "b==2", "c==3"]))
         assert [(r.name, r.line_number) for r in reqs] == [("a", 1), ("b", 4), ("c", 5)]
 
-    @pytest.mark.parametrize("odd", ["\x0c", "\x0b", "\x1c", "\x85", " ", " "])
+    @pytest.mark.parametrize(
+        "odd", ["\x0c", "\x0b", "\x1c", "\x85", "\u2028", "\u2029"]
+    )
     def test_exotic_separators_are_not_line_breaks(self, odd: str) -> None:
         """Only \\n, \\r\\n and \\r end a line, matching pip and the update writer."""
         reqs = _parse(f"a==1\n# note{odd}b==2\nc==3\n")
@@ -69,7 +71,7 @@ class TestLineHandling:
         assert [r.name for r in _parse("a==1 \\")] == ["a"]
 
     def test_bom_and_whitespace(self) -> None:
-        reqs = _parse("﻿  a==1\t\n\t\n  \tb==2")
+        reqs = _parse("\ufeff  a==1\t\n\t\n  \tb==2")
         assert [r.name for r in reqs] == ["a", "b"]
 
     def test_nul_byte_is_a_parse_error_not_a_crash(self) -> None:

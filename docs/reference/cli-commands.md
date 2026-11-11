@@ -182,7 +182,7 @@ changelog/PyPI links, then *Held by policy*, *Cooldown*, *Conflicts* and *Lookup
 (`file:line` for multi-file runs). Example: `depkeeper check -f markdown >> "$GITHUB_STEP_SUMMARY"`.
 
 > [!NOTE]
-> **Output safety.** Anything that comes from outside (PyPI metadata, file names, error text) is printed literally: Rich markup, hyperlinks and terminal control characters (escape sequences, carriage returns, bidi overrides) are neutralised in every terminal format, and the Markdown report escapes Markdown and HTML syntax. `json`/`json-v2` values are not altered; they are JSON-escaped.
+> **Output safety.** Anything that comes from outside (PyPI metadata, file names, error text) is printed literally: Rich markup, hyperlinks and terminal control characters (escape sequences, carriage returns) and invisible Unicode format characters (bidi overrides, zero-width and tag characters) are neutralised in every terminal format, and the Markdown report escapes Markdown and HTML syntax. `json`/`json-v2` values are not altered; they are JSON-escaped.
 
 ### Examples
 
@@ -265,7 +265,7 @@ depkeeper update [OPTIONS] [FILE]
 | pip missing or older than 22.2, offline, timeout (120 s, the whole pip process tree is killed) | warning, continue |
 | Target differs from pip's own Python and pip is older than 23.3 | warning, continue; upgrade pip or run depkeeper with the target Python |
 
-pip 22.2 is the floor; 23.3 is needed to verify for a Python other than the one running pip. pip's own index settings (`PIP_INDEX_URL`, ...) are honoured and URL credentials and token-like query values are redacted from output. Ctrl-C stops pip and its child processes immediately.
+pip 22.2 is the floor; 23.3 is needed to verify for a Python other than the one running pip. pip's own index settings (`PIP_INDEX_URL`, ...) are honoured and URL credentials and token-like query values are redacted from output. Ctrl-C stops pip and its child processes immediately. Whether a release exists is checked against the full index listing, not the list filtered for the Python running pip, so the result does not depend on which Python runs depkeeper.
 
 ### Confirmation prompt
 
@@ -273,7 +273,7 @@ pip 22.2 is the floor; 23.3 is needed to verify for a Python other than the one 
 Update 3 packages? (y, n) [y]:
 ```
 
-Defaults to yes. Invalid input re-prompts. Declining writes nothing and exits `1`. With no terminal on stdin (and no `--yes`/`--dry-run`) the prompt cannot be asked and the command fails with exit `1` (`Cannot ask for confirmation without a terminal`); Ctrl-C / Ctrl-D at a real prompt exits `130`.
+Defaults to yes. Invalid input re-prompts. Declining writes nothing and exits `1`. With no terminal on stdin (and no `--yes`/`--dry-run`) the prompt cannot be asked and the command fails with exit `1` (`Cannot ask for confirmation without a terminal`); Ctrl-C / Ctrl-D at a real prompt exits `130` with `Aborted.` On Windows the null device (`< NUL`) counts as a terminal, so scripts should always pass `--yes` or `--dry-run`.
 
 ### Which requirements are updated
 

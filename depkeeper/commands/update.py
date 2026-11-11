@@ -333,8 +333,8 @@ def update(
     except DepKeeperError as e:
         print_error(e.message)
         sys.exit(1)
-    except BrokenPipeError:
-        raise
+    except (BrokenPipeError, click.Abort):
+        raise  # handled once, in cli.main()
     except Exception as e:
         print_error(f"Unexpected error: {type(e).__name__}: {e}")
         logger.debug("Error in update command", exc_info=True)

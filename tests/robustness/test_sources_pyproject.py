@@ -421,7 +421,7 @@ def test_random_documents_update_minimally_and_idempotently(
     tomli.loads(new)
 
     # idempotent: re-reading and applying the same versions changes nothing
-    p.write_text(new)
+    p.write_bytes(new.encode())  # bytes: text mode would turn \n into \r\n on Windows
     again = A.parse(p)
     assert len(again) == len(reqs)
     chosen = {id(r): v for r, v in updates}

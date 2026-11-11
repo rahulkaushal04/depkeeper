@@ -44,3 +44,19 @@ def test_source_has_no_unicode_digit_patterns() -> None:
         if "\\d" in line and not line.lstrip().startswith("#")
     ]
     assert offenders == []
+
+
+def test_source_files_have_no_literal_invisible_characters() -> None:
+    """Zero-width, bidi, BOM and line/paragraph separators must be written as escapes."""
+    import unicodedata
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    offenders = [
+        f"{path.relative_to(root)}:{number}"
+        for folder in ("depkeeper", "tests")
+        for path in (root / folder).rglob("*.py")
+        for number, line in enumerate(path.read_text(encoding="utf-8").split("\n"), 1)
+        if any(unicodedata.category(ch) in ("Cf", "Zl", "Zp") for ch in line)
+    ]
+    assert offenders == []

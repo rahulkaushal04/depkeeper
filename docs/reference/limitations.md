@@ -185,6 +185,13 @@ resolution. depkeeper reports this (`Conflict check incomplete: ...` on stderr,
 could compute. The HTTP client's circuit breaker is per host: 3 consecutive connection failures
 to `pypi.org` stop requests to it for 30 s, then one probe decides whether to resume.
 
+### Windows treats the null device as a terminal
+
+`depkeeper update < NUL` looks interactive to depkeeper, so it shows the prompt and ends with
+`Aborted.` (exit `130`) instead of asking for `--yes`.
+
+**Workaround:** pass `--yes` or `--dry-run` in scripts.
+
 ### No file locking
 
 depkeeper reads once and writes once. If a file changes between those points the run fails

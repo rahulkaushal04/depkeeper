@@ -83,7 +83,7 @@ def test_unicode_and_odd_requirement_strings_never_raise(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(verify, "_run", _fake(lambda a, t: (0, "", "")))
-    for line in ["pkgé==1.0", "‮pkg", "pkg==\x00", "pkg\x1b[0m"]:
+    for line in ["pkgé==1.0", "\u202epkg", "pkg==\x00", "pkg\x1b[0m"]:
         r = verify_plan([line])
         assert r.skipped and not r.ok and r.checked == 0, line
         assert "not a plain requirement" in r.message, line
@@ -133,7 +133,8 @@ def test_requirement_file_is_private_and_removed_on_every_path(
         assert isinstance(r, VerifyResult)
         for flag in ("-r", "-c", "--report"):
             path, mode = seen[flag]
-            assert mode == 0o600, flag
+            if sys.platform != "win32":  # Windows reports 0o666 for every file
+                assert mode == 0o600, flag
             assert not os.path.exists(path), flag
     seen.clear()
     seen["outcome"] = iter([interrupt])

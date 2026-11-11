@@ -204,7 +204,7 @@ class TestMachineFormatsStaySeparate:
             assert r.stdout.startswith("## Dependency report")
 
     def test_json_v2_hostile_names_round_trip(self, tmp_path: Path) -> None:
-        pkgs = [_pkg(n) for n in HOSTILE + ["日本", "a b", "q\"'\\"]]
+        pkgs = [_pkg(n) for n in HOSTILE + ["日本", "a\u2028b", "q\"'\\"]]
         r = _run_check(tmp_path, ["check", "-f", "json-v2"], packages=pkgs)
         doc = json.loads(r.stdout, parse_constant=_no_nan)
         assert [p["name"] for p in doc["packages"]] == [p.name for p in pkgs]

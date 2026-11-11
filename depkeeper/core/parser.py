@@ -37,6 +37,7 @@ Typical usage::
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple, Union
@@ -406,10 +407,9 @@ class RequirementsParser:
 
         # Recognized pip global options are installer settings, not requirements.
         if self._is_supported_global_option_line(requirement_spec):
+            # The option text is not logged: index URLs may carry credentials.
             self.logger.debug(
-                "Line %d: Skipping supported pip global option: %s",
-                line_number,
-                redact(requirement_spec),
+                "Line %d: Skipping supported pip global option", line_number
             )
             return None
 
@@ -876,8 +876,11 @@ class RequirementsParser:
         """
         if parent_directory and not file_path.is_absolute():
             # parent_directory is the including file; pip resolves against its folder.
-            return (parent_directory.parent / file_path).resolve()
-        return file_path.resolve()
+            file_path = parent_directory.parent / file_path
+        resolved = file_path.resolve()
+        # Windows with Python < 3.10 leaves a missing path relative, which
+        # `Path.as_uri` rejects.
+        return resolved if resolved.is_absolute() else Path(os.path.abspath(resolved))
 
     def _parse_direct_url(
         self, requirement_line: str

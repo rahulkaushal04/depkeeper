@@ -56,12 +56,14 @@ per-package policy and `--verify`, and hardens parsing, writes and networking.
   - Duplicate packages across files are updated consistently.
   - `update --pin` works when the version does not change.
   - `update` without a terminal and without `--yes` gives a clear message, not a traceback.
+  - Ctrl-C or Ctrl-D at the confirmation prompt prints "Aborted." and exits `130`, instead of "Unexpected error".
 - **Parsing:**
   - Backslash continuations (pip-compile `--hash` files), `-rfile`, `-c=file`, `-e.`, quoted `-r` paths, `ftp://` and `git+file://` URLs and markers on URL lines are read correctly.
   - Comment lines ending in `\` no longer swallow the next requirement.
   - Editable, VCS and URL requirements are never looked up on PyPI.
   - A Poetry `python` constraint now sets the target Python.
   - Non-ASCII digits no longer crash version parsing.
+  - A local path requirement that does not exist yet no longer crashes on Windows with Python 3.8 or 3.9.
   - Conda packages such as `cuda-python` and `librosa` are no longer skipped as conda-only.
 - **Recommendations:**
   - Yanked-only releases are never recommended.
@@ -81,6 +83,7 @@ per-package policy and `--verify`, and hardens parsing, writes and networking.
   - Closing the output early (`| head -1`) exits `141` quietly.
 - **`--verify`:**
   - Source-only packages are skipped with a warning instead of blocking.
+  - A release that needs a newer Python than the one running pip is no longer reported as missing.
   - Constraints and `-p` selections are included in the checked plan.
   - Ctrl-C stops pip at once.
 - **Output:**
@@ -91,8 +94,8 @@ per-package policy and `--verify`, and hardens parsing, writes and networking.
 
 ### Security
 
-- Text from PyPI, file names and error messages can no longer inject Rich markup, hyperlinks or terminal control sequences into output. Markdown reports drop non-http(s) links and escape cell text.
-- Credentials in URLs, query strings and requirement lines are masked in errors, logs and `--verify` output by one shared redaction.
+- Text from PyPI, file names and error messages can no longer inject Rich markup, hyperlinks, terminal control sequences or invisible Unicode characters (bidi, zero-width, tag) into output. Markdown reports drop non-http(s) links and escape cell text.
+- Credentials in URLs, query strings and requirement lines are masked in errors, logs and `--verify` output by one shared redaction. pip option lines are never logged.
 - `--verify` never builds source distributions, and refuses requirement strings that carry pip options such as `--index-url` or `-r`.
 - HTTP: responses are capped at 64 MB, requests have a total deadline, and redirects are followed only over https to PyPI hosts.
 

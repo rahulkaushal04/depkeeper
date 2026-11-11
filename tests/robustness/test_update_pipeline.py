@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import os
 import stat
 from pathlib import Path
@@ -56,6 +57,7 @@ class TestByteFidelity:
         assert new.replace(b"2.31.0", b"2.0.0").replace(b"3.0.0", b"1.0.0") == raw
         assert strays(tmp_path) == []
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
     def test_mode_preserved(self, tmp_path: Path) -> None:
         f = write(tmp_path / "requirements.txt", b"requests==2.0.0\n")
         os.chmod(f, 0o640)

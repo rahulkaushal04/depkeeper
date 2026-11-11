@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -174,7 +175,7 @@ def test_live_update_then_check_agrees(tmp_path: Path, line: str) -> None:
             capture_output=True,
             text=True,
             timeout=120,
-            env={"NO_COLOR": "1", "PATH": "/usr/bin:/bin"},
+            env={**os.environ, "NO_COLOR": "1"},
         )
 
     assert run("update", "-y", str(f)).returncode == 0

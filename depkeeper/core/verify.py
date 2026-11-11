@@ -206,15 +206,19 @@ def parse_conflicts(output: str) -> List[str]:
 
 
 def _index_versions(
-    py: str, name: str, flag: Sequence[str] = ()
+    py: str, name: str, flag: Sequence[str] = (), *, fitting: bool = False
 ) -> Optional[List[str]]:
     """Versions of *name* the index lists, or ``None`` if unknown.
 
-    Without *flag* the list is not filtered by the target Python, so a
-    release that only needs a newer Python is not mistaken for a missing one.
+    By default every release is listed: ``--ignore-requires-python`` stops pip
+    filtering by the Python that runs it, which would otherwise hide a release
+    that only needs a newer Python and report it as missing. With *fitting*
+    the list is filtered for the target Python instead (*flag* selects it, or
+    the running one when empty), so the two lists tell the cases apart.
     """
+    extra = list(flag) or ([] if fitting else ["--ignore-requires-python"])
     try:
-        code, out, _ = _run([py, "-m", "pip", "index", "versions", name, *flag], 30.0)
+        code, out, _ = _run([py, "-m", "pip", "index", "versions", name, *extra], 30.0)
     except (OSError, subprocess.SubprocessError):
         return None
     m = _AVAILABLE_RE.search(out)
@@ -269,10 +273,11 @@ def _no_distribution(
                 [],
             )
         blocked = set(_IGNORED_RE.findall(text))
-        if flag and not all(v in blocked for v in found):
-            # pip stays silent about Requires-Python under --python-version:
-            # a release the target-filtered listing hides needs a newer Python.
-            fit = _index_versions(py, name, flag)
+        if not all(v in blocked for v in found):
+            # pip is silent about Requires-Python under --python-version and
+            # --quiet: a release the target-filtered listing hides needs a
+            # newer Python.
+            fit = _index_versions(py, name, flag, fitting=True)
             if fit is not None:
                 blocked |= set(found) - set(fit)
         if all(v in blocked for v in found):

@@ -159,7 +159,7 @@ def _scan(text: str) -> List[_Item]:
             continue
         kind = "pip" if in_pip else "conda"
         if kind == "pip" and value.startswith("-"):
-            logger.debug("Skipping pip option %r at line %d", redact(value), lineno)
+            logger.debug("Skipping pip option at line %d", lineno)
             continue
         items.append(_Item(kind, lineno, value, line_off + start, line_off + end))
     return items

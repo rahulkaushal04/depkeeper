@@ -29,7 +29,7 @@ from depkeeper.utils.console import (
 
 ESC_NOT_SGR = re.compile(r"\x1b(?!\[[0-9;]*m)")
 EVIL = "[link=https://evil.example]>=3.8[/link][bold red]HI"
-CONTROLS = "\x1b]8;;http://evil\x07x\x1b[2J\r\x08\x00‮abc\x9b31m"
+CONTROLS = "\x1b]8;;http://evil\x07x\x1b[2J\r\x08\x00\u202eabc\x9b31m"
 
 
 @pytest.fixture
@@ -53,12 +53,12 @@ def term(monkeypatch: pytest.MonkeyPatch) -> io.StringIO:
 def _assert_inert(raw: str) -> None:
     assert "\x1b]" not in raw, raw
     assert not ESC_NOT_SGR.search(raw), raw
-    assert not any(c in raw for c in "\x07\x08\r\x00‮"), raw
+    assert not any(c in raw for c in "\x07\x08\r\x00\u202e"), raw
 
 
 class TestHelpers:
     def test_strip_controls_keeps_newline_and_tab(self) -> None:
-        assert strip_controls("a\tb\nc\x1bd\re‮f") == "a\tb\ncdef"
+        assert strip_controls("a\tb\nc\x1bd\re\u202ef") == "a\tb\ncdef"
 
     def test_safe_text_escapes_markup(self) -> None:
         out = safe_text("[red]x[/red]\x1b")
@@ -118,7 +118,7 @@ class TestMessages:
 
 
 def _hostile_package(rng: random.Random) -> Package:
-    junk = "".join(rng.choice("[]/\\ab\x1b\x07\r|`*_<>#-‮") for _ in range(12))
+    junk = "".join(rng.choice("[]/\\ab\x1b\x07\r|`*_<>#-\u202e") for _ in range(12))
     return Package(
         name=junk,
         current_version="1." + junk,
@@ -175,7 +175,7 @@ def _split_row(line: str) -> List[str]:
 
 class TestMarkdown:
     def _render(self, rng: random.Random, multi: bool) -> str:
-        alphabet = "ab|`\\[]()<>*_#-~&\n\r\t\x1b‮​:!"
+        alphabet = "ab|`\\[]()<>*_#-~&\n\r\t\x1b\u202e\u200b:!"
         rows = []
         for i in range(4):
             junk = "".join(rng.choice(alphabet) for _ in range(rng.randint(1, 14)))
@@ -199,7 +199,7 @@ class TestMarkdown:
         rng = random.Random(99)
         for _ in range(150):
             text = self._render(rng, multi)
-            assert not any(c in text for c in "\r\x1b‮​")
+            assert not any(c in text for c in "\r\x1b\u202e\u200b")
             table_lines = [ln for ln in text.split("\n") if ln.startswith("| ")]
             assert table_lines
             width = len(_split_row(table_lines[0]))
@@ -230,7 +230,7 @@ class TestMarkdown:
         assert md("a`b|c") == "a\\`b&#124;c"
 
     def test_pypi_link_name_is_percent_encoded(self) -> None:
-        pkg = Package(name="x)‮[", recommended_version="2")
+        pkg = Package(name="x)\u202e[", recommended_version="2")
         text = render_markdown(
             [Row(pkg, None, {}, "2")],
             title="t",
@@ -395,3 +395,46 @@ class TestLogRecordsAreSanitised:
         assert "\x1b]8" not in text
         assert record.msg == "bad \x1b]8;;http://evil\x07link\r%s"
         assert record.args == ("arg\x1b[2J",)
+
+
+class TestStripControlsByCategory:
+    """``strip_controls`` removes by Unicode category, not hand-written ranges."""
+
+    @pytest.mark.parametrize(
+        "char",
+        [
+            "\x00",
+            "\x07",
+            "\x08",
+            "\x0b",
+            "\x0c",
+            "\r",
+            "\x1b",
+            "\x7f",
+            "\x85",
+            "\x9b",
+            "\u200b",
+            "\u200d",
+            "\u200f",
+            "\u2028",
+            "\u2029",
+            "\u202e",
+            "\u2066",
+            "\u2069",
+            "\ufeff",
+            "\U000e0041",
+            "\U000e007f",
+        ],
+    )
+    def test_removed(self, char: str) -> None:
+        assert strip_controls(f"a{char}b") == "ab"
+
+    @pytest.mark.parametrize(
+        "text", ["é", "日本語", "🔒", "Ωmega", "a\tb\nc", "name_with-dots.1", "ａｂ"]
+    )
+    def test_kept(self, text: str) -> None:
+        assert strip_controls(text) == text
+
+    def test_non_string_values_are_stringified(self) -> None:
+        assert strip_controls(12) == "12"
+        assert strip_controls(None) == "None"
