@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import ExitStack
 import inspect
 import json
+import os
 from pathlib import Path
 from typing import Any, Iterator, List, Optional
 from unittest import mock
@@ -145,7 +146,14 @@ def _run_check(
                 _fake_analyzer(resolution),
             )
         )
-        return runner.invoke(cli, args, catch_exceptions=False)
+        # Run from tmp_path: without a FILE argument the CLI reads ./requirements.txt,
+        # which must be the file written above, not whatever the repo itself has.
+        previous = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            return runner.invoke(cli, args, catch_exceptions=False)
+        finally:
+            os.chdir(previous)
 
 
 def _resolution_with_change() -> ResolutionResult:
