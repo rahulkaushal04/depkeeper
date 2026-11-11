@@ -1,9 +1,7 @@
 """Tests for :mod:`depkeeper.utils.naming`.
 
-Primary purpose: lock the single canonical PEP 503 normalisation rule that
-guards against regression M9 — four independent normalisers existed, three
-of which folded ``_`` but not ``.``, so a dotted distribution
-(``zope.interface``) had two identities inside one process.
+Primary purpose: lock the single canonical PEP 503 normalisation rule, so a
+dotted distribution (``zope.interface``) has one identity in every layer.
 """
 
 from __future__ import annotations
@@ -95,7 +93,7 @@ class TestNormalizePackageName:
 
 @pytest.mark.unit
 class TestNormaliserConsistency:
-    """Regression guard for M9: every layer must agree on one rule."""
+    """Every layer must agree on one rule."""
 
     @pytest.mark.parametrize(
         "raw",
@@ -109,6 +107,6 @@ class TestNormaliserConsistency:
 
     @pytest.mark.parametrize("raw", DOTTED_NAMES)
     def test_dotted_names_are_hyphenated_everywhere(self, raw: str) -> None:
-        """The specific M9 failure: dots must not survive in any layer."""
+        """Dots must not survive in any layer."""
         for fn in ALL_NORMALISERS:
             assert "." not in fn(raw), f"{fn.__module__}.{fn.__name__} kept a dot"

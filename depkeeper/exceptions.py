@@ -29,10 +29,17 @@ class DepKeeperError(Exception):
         message: str,
         details: Optional[Mapping[str, Any]] = None,
     ) -> None:
-        self.message: str = message
-        # Internally normalize to a mutable dict
-        self.details: MutableMapping[str, Any] = dict(details) if details else {}
-        super().__init__(message)
+        # Imported here: depkeeper.utils imports this module at package import.
+        from depkeeper.utils.redact import redact
+
+        # Every error is built from user files or URLs: mask credentials here so
+        # no call site can forget to.
+        self.message: str = redact(message)
+        self.details: MutableMapping[str, Any] = {
+            k: redact(v) if isinstance(v, str) else v
+            for k, v in (details or {}).items()
+        }
+        super().__init__(self.message)
 
     def __str__(self) -> str:
         if not self.details:
@@ -88,8 +95,10 @@ class ParseError(DepKeeperError):
         super().__init__(message, details)
 
         self.line_number = line_number
-        self.line_content = line_content
-        self.file_path = file_path
+        self.line_content = (
+            self.details["content"] if line_content is not None else None
+        )
+        self.file_path = self.details.get("file", self.details.get("path"))
 
 
 class NetworkError(DepKeeperError):
@@ -113,17 +122,21 @@ class NetworkError(DepKeeperError):
         response_body: Optional[str] = None,
     ) -> None:
         details: MutableMapping[str, Any] = {}
+        from depkeeper.utils.redact import redact
+
         _add_if(details, "url", url)
         _add_if(details, "status_code", status_code)
 
         if response_body is not None:
-            details["response"] = _truncate(response_body)
+            details["response"] = _truncate(redact(response_body))
 
         super().__init__(message, details)
 
-        self.url = url
+        self.url = self.details.get("url")
         self.status_code = status_code
-        self.response_body = response_body
+        self.response_body = (
+            redact(response_body) if response_body is not None else None
+        )
 
 
 class PyPIError(NetworkError):
@@ -182,7 +195,7 @@ class FileOperationError(DepKeeperError):
 
         super().__init__(message, details)
 
-        self.file_path = file_path
+        self.file_path = self.details.get("file", self.details.get("path"))
         self.operation = operation
         self.original_error = original_error
 

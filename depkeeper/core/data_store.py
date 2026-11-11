@@ -21,10 +21,14 @@ Typical usage::
 from __future__ import annotations
 
 import sys
+import re
 import asyncio
+from datetime import datetime, timezone
+from urllib.parse import quote
 from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Tuple, TypeVar
 
+from packaging.requirements import InvalidRequirement, Requirement
 from packaging.version import InvalidVersion, Version, parse
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 
@@ -36,26 +40,14 @@ from depkeeper.constants import PYPI_JSON_API
 
 logger = get_logger("data_store")
 
-# Public API
 __all__ = ["PyPIDataStore", "PyPIPackageData"]
 
-# Result type of a coalesced in-flight fetch (see PyPIDataStore._coalesce)
 _T = TypeVar("_T")
-
-
-# ---------------------------------------------------------------------------
-# Data container
-# ---------------------------------------------------------------------------
 
 
 @dataclass
 class PyPIPackageData:
-    """Immutable-by-convention snapshot of one PyPI package.
-
-    Populated once by `PyPIDataStore._parse_package_data` and then
-    shared across every caller that requests the same package.  All
-    mutable collections use ``field(default_factory=…)`` so that each
-    instance owns its own lists / dicts.
+    """Snapshot of one PyPI package, shared by every caller (treat as read-only).
 
     Attributes:
         name: Normalized package name (lower-case, hyphens).
@@ -85,9 +77,52 @@ class PyPIPackageData:
 
     dependencies_cache: Dict[str, List[str]] = field(default_factory=dict)
 
-    # ------------------------------------------------------------------
-    # Queries
-    # ------------------------------------------------------------------
+    #: Earliest file upload time per version (UTC); ``None`` when PyPI omits or
+    #: garbles it. Missing entries mean "unknown" and are treated as old.
+    upload_times: Dict[str, Optional[datetime]] = field(default_factory=dict)
+
+    #: PyPI ``info.project_urls`` (label -> URL) plus ``home_page`` under the
+    #: key ``"Homepage"`` when no such label exists. Only http(s) URLs kept.
+    project_urls: Dict[str, str] = field(default_factory=dict)
+
+    def release_links(self) -> Dict[str, str]:
+        """Return changelog, release-notes and homepage links from ``project_urls``.
+
+        Keys are ``"changelog"``, ``"release_notes"`` and ``"homepage"``; kinds
+        with no matching label are omitted.
+        """
+        wanted = {
+            "changelog": (
+                "changelog",
+                "change log",
+                "changes",
+                "history",
+                "news",
+                "what's new",
+            ),
+            "release_notes": (
+                "release notes",
+                "releases",
+                "release",
+                "release history",
+            ),
+            "homepage": (
+                "homepage",
+                "home",
+                "home page",
+                "website",
+                "source",
+                "repository",
+            ),
+        }
+        lowered = {k.strip().lower(): v for k, v in self.project_urls.items()}
+        links: Dict[str, str] = {}
+        for kind, labels in wanted.items():
+            for label in labels:
+                if label in lowered:
+                    links[kind] = lowered[label]
+                    break
+        return links
 
     def get_versions_in_major(self, major: int) -> List[str]:
         """Return stable versions that share a given major number.
@@ -107,8 +142,7 @@ class PyPIPackageData:
         for version_str, parsed in self.parsed_versions:
             if parsed.is_prerelease:
                 continue
-            # `release` may be empty for exotic versions such as an epoch-only
-            # tag, so index 0 is not guaranteed to exist.
+            # `release` can be empty (e.g. epoch-only tags).
             if parsed.release and parsed.release[0] == major:
                 result.append(version_str)
 
@@ -145,21 +179,22 @@ class PyPIPackageData:
         """
         requires_python = self.python_requirements.get(version)
 
-        # Absent constraint means "any Python", which is how pip reads it.
-        if not requires_python:
+        if not requires_python or not isinstance(requires_python, str):
             return True
 
         try:
-            return python_version in SpecifierSet(requires_python)
+            return SpecifierSet(requires_python).contains(
+                python_version, prereleases=True
+            )
         except InvalidSpecifier:
-            # Malformed upstream metadata must not exclude an otherwise
-            # installable release.
+            # Malformed upstream metadata must not exclude a release.
             return True
 
     def get_python_compatible_versions(
         self,
         python_version: str,
         major: Optional[int] = None,
+        include_prereleases: bool = False,
     ) -> List[str]:
         """Return stable versions compatible with *python_version*.
 
@@ -171,6 +206,8 @@ class PyPIPackageData:
                 e.g. ``"3.10.0"``.
             major: If provided, only versions with this major number are
                 included.
+            include_prereleases: Also return pre-releases (per-package
+                ``allow_prerelease`` policy).
 
         Returns:
             Filtered, descending list of version strings.
@@ -178,7 +215,7 @@ class PyPIPackageData:
         result: List[str] = []
 
         for version_str, parsed in self.parsed_versions:
-            if parsed.is_prerelease:
+            if parsed.is_prerelease and not include_prereleases:
                 continue
 
             if major is not None:
@@ -189,11 +226,6 @@ class PyPIPackageData:
                 result.append(version_str)
 
         return result
-
-
-# ---------------------------------------------------------------------------
-# Async data-store with per-key request coalescing
-# ---------------------------------------------------------------------------
 
 
 class PyPIDataStore:
@@ -224,6 +256,11 @@ class PyPIDataStore:
             connection pool / session).
         concurrent_limit: Maximum number of PyPI fetches that may be
             in-flight at once.  Defaults to ``10``.
+        target_python: ``"X.Y"`` Python the dependency environment markers
+            (``python_version`` / ``python_full_version``) are evaluated
+            for.  ``None`` (or an unusable value) means the running
+            interpreter.  It is fixed for the store's lifetime, so the
+            per-store dependency caches never mix targets.
 
     Raises:
         ValueError: *concurrent_limit* is less than ``1`` (a limit of zero
@@ -234,10 +271,8 @@ class PyPIDataStore:
         async with HTTPClient() as client:
             store = PyPIDataStore(client, concurrent_limit=5)
 
-            # warm the cache for several packages at once
             await store.prefetch_packages(["flask", "click", "jinja2"])
 
-            # subsequent calls return instantly from cache
             flask = await store.get_package_data("flask")
             print(flask.latest_version)
     """
@@ -246,30 +281,33 @@ class PyPIDataStore:
         self,
         http_client: HTTPClient,
         concurrent_limit: int = 10,
+        target_python: Optional[str] = None,
     ) -> None:
         if concurrent_limit < 1:
-            raise ValueError(
-                f"concurrent_limit must be >= 1, got {concurrent_limit}"
-            )
+            raise ValueError(f"concurrent_limit must be >= 1, got {concurrent_limit}")
+
+        # Only Python-version markers change; platform markers stay the host's.
+        self._marker_env: Dict[str, str] = {"extra": ""}
+        match = re.match(r"\s*([0-9]+)\.([0-9]+)", target_python or "")
+        if match:
+            xy = f"{match.group(1)}.{match.group(2)}"
+            self._marker_env["python_version"] = xy
+            self._marker_env["python_full_version"] = f"{xy}.0"
 
         self.http_client = http_client
         self._semaphore = asyncio.Semaphore(concurrent_limit)
 
-        # Primary cache: normalized name → parsed package snapshot
         self._package_data: Dict[str, PyPIPackageData] = {}
 
-        # Secondary cache: "name==version" → dependency list (avoids
-        # repeated per-version fetches even after the main cache is warm)
+        # "name==version" -> dependency list
         self._version_deps_cache: Dict[str, List[str]] = {}
 
-        # In-flight maps: normalized key → the task currently fetching it.
-        # Entries live only for the duration of a fetch (see _coalesce).
+        # "name==version" -> sorted sha256 hex digests (successes only)
+        self._digests_cache: Dict[str, List[str]] = {}
+
+        # Entries live only while a fetch is running (see _coalesce).
         self._inflight_packages: Dict[str, "asyncio.Task[PyPIPackageData]"] = {}
         self._inflight_version_deps: Dict[str, "asyncio.Task[List[str]]"] = {}
-
-    # ------------------------------------------------------------------
-    # Public async accessors
-    # ------------------------------------------------------------------
 
     async def get_package_data(self, name: str) -> PyPIPackageData:
         """Fetch (or return cached) metadata for *name*.
@@ -302,7 +340,6 @@ class PyPIDataStore:
         """
         normalized = _normalize(name)
 
-        # Fast path — already cached (never suspends)
         cached = self._package_data.get(normalized)
         if cached is not None:
             return cached
@@ -330,8 +367,7 @@ class PyPIDataStore:
             # two fetches, not three; subsequent get_package_data calls
             # for these return instantly
         """
-        # dict preserves insertion order → deterministic request ordering,
-        # and the first spelling of each name is the one sent to PyPI.
+        # Insertion order keeps requests deterministic; first spelling wins.
         unique: Dict[str, str] = {}
         for name in names:
             unique.setdefault(_normalize(name), name)
@@ -374,12 +410,10 @@ class PyPIDataStore:
         normalized = _normalize(name)
         cache_key = f"{normalized}=={version}"
 
-        # ── layer 1: flat version-deps cache ──────────────────────────
         cached_deps = self._version_deps_cache.get(cache_key)
         if cached_deps is not None:
             return cached_deps
 
-        # ── layer 2: already inside PyPIPackageData ────────────────────
         pkg_data = self._package_data.get(normalized)
         if pkg_data:
             if version == pkg_data.latest_version:
@@ -391,16 +425,51 @@ class PyPIDataStore:
                 self._version_deps_cache[cache_key] = deps
                 return deps
 
-        # ── layer 3: network fetch (coalesced per name==version) ───────
         return await self._coalesce(
             self._inflight_version_deps,
             cache_key,
-            lambda: self._load_version_dependencies(name, version, normalized, cache_key),
+            lambda: self._load_version_dependencies(
+                name, version, normalized, cache_key
+            ),
         )
 
-    # ------------------------------------------------------------------
-    # Fetch coalescing (private)
-    # ------------------------------------------------------------------
+    async def get_version_digests(self, name: str, version: str) -> Optional[List[str]]:
+        """Return the sorted, unique sha256 hex digests of a release's files.
+
+        Reads the cached package JSON when it carries digests, else fetches
+        ``/pypi/{name}/{version}/json``. Returns ``None`` when the digests
+        cannot be determined (network error, unknown release, no files);
+        failures are never cached.
+        """
+        key = f"{_normalize(name)}=={version}"
+        cached = self._digests_cache.get(key)
+        if cached is not None:
+            return cached
+
+        pkg_data = self._package_data.get(_normalize(name))
+        files = (pkg_data.releases.get(version) if pkg_data else None) or []
+        digests = _sha256_digests(files)
+        if not digests:
+            url = (
+                f"https://pypi.org/pypi/{quote(name, safe='')}"
+                f"/{quote(version, safe='')}/json"
+            )
+            try:
+                async with self._semaphore:
+                    response = await self.http_client.get(url)
+                if response.status_code != 200:
+                    return None
+                body = response.json()
+                digests = _sha256_digests(body.get("urls") or [])
+            except Exception as exc:  # noqa: BLE001 -- never cache, never raise
+                logger.debug(
+                    "Error fetching digests for %s==%s: %s", name, version, exc
+                )
+                return None
+        if not digests:
+            return None
+        self._digests_cache[key] = digests
+        return digests
 
     async def _coalesce(
         self,
@@ -437,8 +506,8 @@ class PyPIDataStore:
         if task is None:
             task = asyncio.ensure_future(loader())
             inflight[key] = task
-            # Runs even when every waiter was cancelled: drops the entry and
-            # marks any exception retrieved (no "never retrieved" warnings).
+            # Runs even if every waiter was cancelled, so the entry is dropped
+            # and the exception is retrieved.
             task.add_done_callback(lambda t: self._on_inflight_done(inflight, key, t))
 
         return await asyncio.shield(task)
@@ -456,7 +525,9 @@ class PyPIDataStore:
         if not task.cancelled():
             task.exception()  # retrieve to silence asyncio's warning
 
-    def _discard_inflight(self, inflight: Dict[str, "asyncio.Task[_T]"], key: str) -> None:
+    def _discard_inflight(
+        self, inflight: Dict[str, "asyncio.Task[_T]"], key: str
+    ) -> None:
         """Drop this coroutine's own in-flight entry before it settles.
 
         Removing the entry inside the loader (rather than only in the done
@@ -475,8 +546,7 @@ class PyPIDataStore:
         """Fetch, parse and cache one package (semaphore-throttled)."""
         try:
             async with self._semaphore:
-                # Another coroutine may have cached this while we queued
-                # for a semaphore slot.
+                # Re-check: another coroutine may have cached it while we queued.
                 cached = self._package_data.get(normalized)
                 if cached is not None:
                     return cached
@@ -502,12 +572,14 @@ class PyPIDataStore:
                 if cached is not None:
                     return cached
 
-                deps = await self._fetch_version_dependencies(name, version)
+                fetched = await self._fetch_version_dependencies(name, version)
+                if fetched is None:
+                    # Transient failure: answer "none known" but do not cache.
+                    return []
+                deps = fetched
                 self._version_deps_cache[cache_key] = deps
 
-                # Back-fill the package-level cache so future reads skip
-                # this path.  Re-read the entry: it may have been fetched
-                # while we waited for a semaphore slot.
+                # Re-read the entry: it may have been fetched while we queued.
                 pkg_data = self._package_data.get(normalized)
                 if pkg_data:
                     pkg_data.dependencies_cache[version] = deps
@@ -515,10 +587,6 @@ class PyPIDataStore:
                 return deps
         finally:
             self._discard_inflight(self._inflight_version_deps, cache_key)
-
-    # ------------------------------------------------------------------
-    # Public synchronous accessors (cache-only, no I/O)
-    # ------------------------------------------------------------------
 
     def get_cached_package(self, name: str) -> Optional[PyPIPackageData]:
         """Return cached data for *name* without triggering a fetch.
@@ -569,17 +637,13 @@ class PyPIDataStore:
         pkg = self.get_cached_package(name)
         return pkg.is_python_compatible(version, python_version) if pkg else True
 
-    # ------------------------------------------------------------------
-    # Network helpers (private)
-    # ------------------------------------------------------------------
-
     async def _fetch_from_pypi(self, name: str) -> Dict[str, Any]:
-        """Hit ``/pypi/{name}/json`` and return the raw JSON body.
+        """Fetch ``/pypi/{name}/json`` and return the raw JSON body.
 
         Raises:
             PyPIError: On 404 (package not found) or any non-200 status.
         """
-        url = PYPI_JSON_API.format(package=name)
+        url = PYPI_JSON_API.format(package=quote(name, safe=""))
         response = await self.http_client.get(url)
 
         if response.status_code == 404:
@@ -593,41 +657,54 @@ class PyPIDataStore:
                 package_name=name,
             )
 
-        return response.json()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise PyPIError(
+                f"PyPI returned invalid JSON for '{name}'",
+                package_name=name,
+            ) from exc
+        if not isinstance(payload, dict):
+            raise PyPIError(
+                f"PyPI returned an unexpected payload for '{name}'",
+                package_name=name,
+            )
+        return payload
 
     async def _fetch_version_dependencies(
         self,
         name: str,
         version: str,
-    ) -> List[str]:
-        """Hit ``/pypi/{name}/{version}/json`` and extract base deps.
+    ) -> Optional[List[str]]:
+        """Fetch ``/pypi/{name}/{version}/json`` and extract base deps.
 
-        Any network or parsing error is caught and logged at DEBUG level;
-        an empty list is returned so that one broken version does not
-        break the whole analysis.
+        Returns ``None`` (unknown, must not be cached) on any network,
+        status or parsing failure; ``[]`` only when PyPI answers 404 or the
+        release genuinely has no dependencies.
         """
-        url = f"https://pypi.org/pypi/{name}/{version}/json"
+        url = (
+            f"https://pypi.org/pypi/{quote(name, safe='')}"
+            f"/{quote(version, safe='')}/json"
+        )
 
         try:
             response = await self.http_client.get(url)
-            if response.status_code != 200:
+            if response.status_code == 404:
                 return []
+            if response.status_code != 200:
+                return None
 
-            info = response.json().get("info", {})
+            info = response.json().get("info") or {}
             return self._extract_dependencies(info)
 
-        except Exception as exc:  # noqa: BLE001 — intentional broad catch
+        except Exception as exc:  # noqa: BLE001 -- never raise
             logger.debug(
                 "Error fetching deps for %s==%s: %s",
                 name,
                 version,
                 exc,
             )
-            return []
-
-    # ------------------------------------------------------------------
-    # Parsing helpers (private, synchronous)
-    # ------------------------------------------------------------------
+            return None
 
     def _parse_package_data(
         self,
@@ -636,48 +713,58 @@ class PyPIDataStore:
     ) -> PyPIPackageData:
         """Transform a raw PyPI JSON response into `PyPIPackageData`.
 
-        Filters out versions that cannot be parsed by ``packaging`` and
-        those with no associated file uploads.  The resulting
-        ``parsed_versions`` list is sorted descending so that callers can
-        rely on index-0 being the newest parseable version.
-        """
-        info = data.get("info", {})
-        releases = data.get("releases", {})
+        Skips versions with no files, only yanked files, or an unparseable
+        version. ``parsed_versions`` is sorted newest first.
 
-        latest_version: Optional[str] = info.get("version")
-        latest_requires_python: Optional[str] = info.get("requires_python")
+        Raises:
+            PyPIError: The payload is malformed.
+        """
+        info = data.get("info") or {}
+        releases = data.get("releases") or {}
+        if not isinstance(info, dict) or not isinstance(releases, dict):
+            raise PyPIError(
+                f"PyPI returned a malformed payload for '{name}'",
+                package_name=name,
+            )
+
+        latest_version = _text(info.get("version"))
+        latest_requires_python = _text(info.get("requires_python"))
         latest_deps: List[str] = self._extract_dependencies(info)
+        project_urls = _http_urls(info.get("project_urls"), info.get("home_page"))
 
         parsed_versions: List[Tuple[str, Version]] = []
         python_requirements: Dict[str, Optional[str]] = {}
+        upload_times: Dict[str, Optional[datetime]] = {}
 
         for version_str, files in releases.items():
-            # Skip phantom versions that have no uploaded files
-            if not files:
+            if not files or not isinstance(files, list):
+                continue
+
+            # pip ignores yanked releases; skip one only if every file is yanked
+            if all(isinstance(f, dict) and f.get("yanked") for f in files):
                 continue
 
             try:
                 parsed = parse(version_str)
             except InvalidVersion:
-                # Non-PEP-440 tags (e.g. "1.0-alpha") — silently skip
+                # Non-PEP-440 tags (e.g. "1.0-alpha").
                 continue
 
             parsed_versions.append((version_str, parsed))
+            upload_times[version_str] = _earliest_upload(version_str, files)
 
-            # Pull requires_python from the first file that declares it;
-            # most releases are uniform, so iterating once is sufficient.
+            # Files of a release agree on requires_python; take the first.
             for file_info in files:
-                if file_info.get("requires_python"):
+                if isinstance(file_info, dict) and _text(
+                    file_info.get("requires_python")
+                ):
                     python_requirements[version_str] = file_info["requires_python"]
                     break
             else:
-                # for/else: no file had requires_python → record None
                 python_requirements[version_str] = None
 
-        # Descending sort so index 0 == newest
         parsed_versions.sort(key=lambda x: x[1], reverse=True)
 
-        # Public version list excludes pre-releases
         all_versions: List[str] = [v for v, p in parsed_versions if not p.is_prerelease]
 
         return PyPIPackageData(
@@ -688,21 +775,21 @@ class PyPIDataStore:
             all_versions=all_versions,
             parsed_versions=parsed_versions,
             python_requirements=python_requirements,
+            upload_times=upload_times,
+            project_urls=project_urls,
             releases=releases,
-            # Seed the per-version dep cache with what we already know
             dependencies_cache=(
                 {latest_version: latest_deps} if latest_version else {}
             ),
         )
 
-    @staticmethod
-    def _extract_dependencies(info: Dict[str, Any]) -> List[str]:
-        """Pull base (non-extra) dependency specifiers from ``info``.
+    def _extract_dependencies(self, info: Dict[str, Any]) -> List[str]:
+        """Return base (non-extra) dependency specifiers from ``info``.
 
-        ``requires_dist`` entries that belong to an *extra* group contain
-        a ``; extra == "…"`` marker and are stripped here.  The
-        environment-marker portion after the first ``;`` is also removed
-        so callers get clean PEP-508 name+version specs.
+        Environment markers are evaluated for the store's target Python
+        (the running interpreter when none was given) with ``extra`` empty,
+        so extra-only deps drop out; deps whose marker is false are skipped.  The marker is then removed so callers
+        get clean PEP-508 name+version specs.
 
         Args:
             info: The ``info`` sub-dict from a PyPI JSON response.
@@ -710,24 +797,24 @@ class PyPIDataStore:
         Returns:
             List of strings like ``["requests>=2.25", "click"]``.
         """
-        requires_dist: List[str] = info.get("requires_dist") or []
+        requires_dist = info.get("requires_dist")
         deps: List[str] = []
 
-        for dep in requires_dist:
-            # Extra-conditional dependencies are out of scope
-            if "extra==" in dep or "extra ==" in dep:
+        for dep in requires_dist if isinstance(requires_dist, list) else ():
+            if not isinstance(dep, str):
                 continue
+            try:
+                marker = Requirement(dep).marker
+                if marker is not None and not marker.evaluate(self._marker_env):
+                    continue
+            except InvalidRequirement:
+                pass  # keep unparseable lines as-is; the analyzer skips them
 
-            # Strip environment markers (everything after the first ";")
             base = dep.split(";")[0].strip()
             if base:
                 deps.append(base)
 
         return deps
-
-    # ------------------------------------------------------------------
-    # Utility
-    # ------------------------------------------------------------------
 
     @staticmethod
     def get_current_python_version() -> str:
@@ -745,22 +832,60 @@ class PyPIDataStore:
         )
 
 
-# ---------------------------------------------------------------------------
-# Module-level helpers
-# ---------------------------------------------------------------------------
+def _earliest_upload(version: str, files: List[Any]) -> Optional[datetime]:
+    """Earliest ``upload_time_iso_8601`` among *files*, or ``None`` if unknown."""
+    times: List[datetime] = []
+    for f in files:
+        raw = f.get("upload_time_iso_8601") if isinstance(f, dict) else None
+        if not isinstance(raw, str):
+            continue
+        try:
+            # fromisoformat rejects "Z" before Python 3.11.
+            t = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        times.append(t if t.tzinfo else t.replace(tzinfo=timezone.utc))
+    if not times:
+        logger.debug("%s: no usable upload time; treating as old", version)
+        return None
+    return min(times)
+
+
+def _sha256_digests(files: Any) -> List[str]:
+    """Sorted unique sha256 hex digests found in PyPI file entries."""
+    found = set()
+    for f in files if isinstance(files, list) else []:
+        d = (f.get("digests") or {}).get("sha256") if isinstance(f, dict) else None
+        if isinstance(d, str) and re.fullmatch(r"[0-9a-fA-F]{64}", d):
+            found.add(d.lower())
+    return sorted(found)
+
+
+def _text(value: Any) -> Optional[str]:
+    """Return *value* when it is a non-empty string, else ``None``."""
+    return value if isinstance(value, str) and value else None
 
 
 def _normalize(name: str) -> str:
-    """Normalize a package name to its canonical PEP 503 form.
-
-    Thin alias for `depkeeper.utils.naming.normalize_package_name`,
-    kept so cache keys here can never drift from the rule used by the
-    parser, the analyzer and the models.
-
-    Args:
-        name: Raw package name.
-
-    Returns:
-        Normalized name string.
-    """
+    """Normalize *name* (PEP 503); alias keeping cache keys consistent app-wide."""
     return normalize_package_name(name)
+
+
+def _http_urls(project_urls: Any, home_page: Any) -> Dict[str, str]:
+    """Keep only http(s) links (they end up in Markdown/JSON output)."""
+    out: Dict[str, str] = {}
+    if isinstance(project_urls, dict):
+        for label, url in project_urls.items():
+            if (
+                isinstance(label, str)
+                and isinstance(url, str)
+                and url.startswith(("http://", "https://"))
+            ):
+                out[label] = url.strip()
+    if (
+        isinstance(home_page, str)
+        and home_page.startswith(("http://", "https://"))
+        and not any(k.strip().lower() in ("homepage", "home") for k in out)
+    ):
+        out["Homepage"] = home_page.strip()
+    return out

@@ -38,7 +38,7 @@ Raised by the parser. Attributes: `line_number`, `line_content`, `file_path`.
 
 | Message | Cause | Fix |
 |---|---|---|
-| `Invalid requirement syntax: <packaging detail>` | The line is not valid PEP 508. | Correct the line. Note that backslash continuations are not joined. |
+| `Invalid requirement syntax: <packaging detail>` | The line is not valid PEP 508. | Correct the line (backslash continuations are joined before parsing; an unknown `--option` line also surfaces here). |
 | `Invalid version specifier: empty version in '<op>'` | A specifier parsed with no version. | Supply a version. |
 | `Circular dependency detected: a.txt -> b.txt -> a.txt` | `-r` include cycle. | Break the cycle. |
 | `Failed to process include directive: <detail>` | The included file is missing or invalid. | The message names the including line; fix the referenced file. |
@@ -60,10 +60,20 @@ Raised during configuration discovery, decoding, parsing and validation. Attribu
 | `Cannot read configuration file <path>: <detail>` | Permission or I/O error. |
 | `Configuration file <name> is not valid UTF-8: <detail>` | Wrong encoding. |
 | `Invalid TOML in <name>: <detail>` | Syntax error. |
-| `Unknown configuration keys: <keys>` | A key outside `{check_conflicts, strict_version_matching}`. |
-| `<option> must be a boolean, got <type>` | Wrong value type. |
+| `Configuration file <name> has no [depkeeper] table` (or `[tool.depkeeper]`) | An explicit `--config` file configures nothing. |
+| `Unknown configuration keys: <keys>` | A key outside `{check_conflicts, strict_version_matching, fail_on, ignore, python_version, min_age, versioning, packages}`. |
+| `<option> must be a boolean, got <type>` | Wrong type for `check_conflicts` / `strict_version_matching`. |
+| `fail_on must be one of none, updates, minor, major, got <v>` | Bad `fail_on`. |
+| `ignore must be a list of package names` | Wrong type. |
+| `python_version must look like '3.9', got <v>` | Bad `python_version`. |
+| `min_age: invalid duration <v> (use e.g. '7d', '12h', '2w')` | Bad `min_age` (also `duration must not be negative`, `is too large`). |
+| `versioning must be one of auto, semver, calver, got <v>` | Bad global or per-package `versioning`. |
+| `packages must be a table of per-package tables` / `packages.<name> must be a table` | Wrong shape. |
+| `Unknown keys in packages.<name>: <keys>` | Key outside `max_update, versioning, hold, allow_prerelease, ignore, allow_major`. |
+| `packages.<name>.<key> must be a boolean, got <type>` / `packages.<name>.max_update must be one of patch, minor, major, got <v>` | Bad policy value. |
+| `packages.<name> duplicates another entry for '<canonical>'` | Two entries normalise to one name. |
 
-Exit code `1`. Raised before any command runs.
+Exit code `1`. Raised before any command runs. `ConfigError.config_path` and `.option` carry the file and key. A `--config` path that does not exist is rejected earlier by Click (exit `2`).
 
 ---
 
@@ -109,8 +119,7 @@ Network errors for an individual package rarely reach the user as an error:
 | `DependencyAnalyzer._get_package_data_or_none` | Catches `NetworkError`, logs once at WARNING, negatively caches the name for the run, and returns `None` so the "revert both to current" fallback applies. |
 | `PyPIDataStore._fetch_version_dependencies` | Any exception is logged at DEBUG and an empty dependency list is returned. |
 
-The consequence: a run completes and reports, even with total network failure. Every package
-simply becomes an `[ERROR]` row.
+The consequence: a run completes and reports, even with total network failure. Every unavailable package becomes a `no-update` row (with `error` in JSON), is listed in a `could not be checked` error, and the run exits `4`.
 
 ---
 
@@ -126,8 +135,11 @@ Raised as plain `DepKeeperError` by the command layer.
 | `Cannot update requirement at <file>:<line>: <detail>` | `update` | `Requirement.update_version` refused to produce an unsatisfiable line. |
 | `Failed to read <path>: <detail>` | `update` | A file could not be read during rendering. |
 | `Failed to write <path>: <detail>` | `update` | A commit failed; earlier commits in the batch were rolled back. |
-| `Failed to apply updates: <detail>` | `update` | The outer wrapper. Backups, if taken, have been restored. |
-| `Unexpected error: <detail>` | both | Any non-depkeeper exception. Full traceback at `-vv`. |
+| `<path> was modified while depkeeper was running; ...` | `update` | The file changed between read and write; nothing was written to it. |
+| `Proposed updates do not resolve (pip): ...` | `update --verify` | Printed to stderr, followed by `Aborting: no changes were made.`; exit `1`. |
+| `Cannot ask for confirmation without a terminal. Re-run with --yes to apply or --dry-run to preview.` | `update` | No tty on stdin and no `--yes`. |
+| `No supported dependency files found in <dir>` | both | A directory `FILE` with nothing to read. |
+| `Unexpected error: <detail>` | both | Any non-depkeeper exception (`update` prints `Unexpected error: <Type>: <detail>`). |
 
 ---
 
@@ -137,7 +149,7 @@ These are printed to stderr and do **not** change the exit code.
 
 | Message | Meaning |
 |---|---|
-| `Package '<name>' unavailable; creating stub` | PyPI metadata could not be fetched. |
+| `Package '<name>' unavailable; creating stub` | PyPI metadata could not be fetched. The run then ends with `N package(s) could not be checked (not found on PyPI or network error): <names>` on stderr and exit `4`. |
 | `PyPI metadata for '<name>' is unavailable (<detail>); conflict resolution will skip this package` | The analyzer negatively cached the package. |
 | `Skipping <pkg>: <version> is excluded by the declared constraint '<specs>' (use --pin to replace the constraint)` | The resolver proposed a version your file forbids. |
 | `Proceeding with --allow-hash-removal: hashes will be removed for <names>` | Integrity opt-out acknowledged. |
@@ -145,12 +157,14 @@ These are printed to stderr and do **not** change the exit code.
 | `No compatible version found for A ↔ B within major boundaries; reverting both` | Neither strategy succeeded; no change proposed for either package. |
 | `Conflict resolution stalled after <n> iteration(s)` | A pass changed nothing; the loop stopped early. |
 | `Conflict resolution did not converge within 100 iterations` | The iteration budget was exhausted. |
-| `<pkg>: no eligible version found in major <n> (Python <v>, constraints '<specs>'), staying on <version>` | Every candidate was eliminated by a filter. |
+| `<pkg>: no eligible version found (Python <v>, constraints '<specs>'), staying on <version>` | Every candidate was eliminated by a filter. |
 | `Line <n>: URL without '#egg=' - inferred name '<name>'` | The inferred name may be wrong. |
 | `Line <n>: Include directive missing file path` | A malformed `-r` line was skipped. |
 | `No matching packages found: <names>` | `--packages` matched nothing. |
 | `No packages found in requirements file` | The file parsed to zero requirements. |
-| `Operation cancelled by user` | `Ctrl+C`. |
+| `Operation cancelled by user` | `Ctrl+C` (exit `130`). |
+| `Aborted.` | EOF / abort at the confirmation prompt on a terminal (exit `130`). |
+| `Aborted. No changes were made.` | Prompt answered `n` (exit `1`). |
 
 ---
 

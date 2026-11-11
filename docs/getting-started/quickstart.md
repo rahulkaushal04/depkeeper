@@ -10,7 +10,7 @@ block on this page is real command output, not an illustration.
 
 ## 0. The sample project
 
-```text title="requirements.txt"
+```text
 requests==2.28.0
 flask>=2.0,<2.3
 celery[redis]>=5.0,<6.0
@@ -30,46 +30,41 @@ bounded range, an extras + range, a compatible-release band, and an unversioned 
 depkeeper check
 ```
 
-```text
-Resolution Summary:
-==================================================
-Total packages: 6
-Packages with conflicts: 0
-Packages changed: 0
-Converged: Yes (1 iterations)
+Real output (trimmed to the first columns; the live table also has a `Python Support` column and
+an `N d old` age line under each recommendation):
 
-                       Dependency Status
-┏━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━┓
-┃   Status   ┃ Package  ┃ Current ┃  Latest   ┃ Recommended ┃ Update Type ┃ Conflicts ┃
-┡━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━┩
-│ [OUTDATED] │ requests │ 2.28.0  │  2.34.2   │   2.34.2    │    minor    │ -         │
-│ [OUTDATED] │ flask    │   2.0   │   3.1.3   │    2.2.5    │    minor    │ -         │
-│ [OUTDATED] │ celery   │   5.0   │   5.6.3   │    5.6.3    │    minor    │ -         │
-│ [OUTDATED] │ click    │   8.0   │   8.4.2   │    8.4.2    │    minor    │ -         │
-│   [OK]     │ certifi  │    -    │ 2026.7.22 │      -      │      -      │ -         │
-│ [OUTDATED] │ urllib3  │ 1.26.0  │   2.7.0   │   1.26.20   │    patch    │ -         │
-└────────────┴──────────┴─────────┴───────────┴─────────────┴─────────────┴───────────┘
+```text
+┏━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━┓
+┃   Status   ┃ Package  ┃ Current ┃   Latest   ┃ Recommended ┃ Update Type ┃ Conflicts ┃
+┡━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━┩
+│ [OUTDATED] │ requests │ 2.28.0  │   2.34.2   │   2.34.2    │    minor    │ -         │
+│ [OUTDATED] │ flask    │   2.0   │   3.1.3    │    2.2.5    │    minor    │ -         │
+│ [OUTDATED] │ celery   │   5.0   │   5.7.0    │    5.7.0    │    minor    │ -         │
+│ [OUTDATED] │ click    │   8.0   │   8.5.0    │    8.5.0    │    minor    │ -         │
+│    [OK]    │ certifi  │    -    │ 2026.10.23 │      -      │      -      │ -         │
+│ [OUTDATED] │ urllib3  │ 1.26.0  │   2.8.0    │   1.26.20   │    patch    │ -         │
+└────────────┴──────────┴─────────┴────────────┴─────────────┴─────────────┴───────────┘
+[WARNING] major available: urllib3 2.8.0 (use --allow-major urllib3)
 [WARNING]
 5 package(s) have updates available
 ```
 
-!!! note "The real table has a `Python Support` column"
-
-    It is omitted here for width. The full column set is documented in
-    [Reading the output](basic-usage.md#the-table-format).
+(Versions change as PyPI does; the shape does not.) The `Resolution Summary` block is printed only
+when conflict resolution changed something, found a conflict, or with `-v`.
 
 Three results are worth understanding immediately:
 
 - **`flask`: latest `3.1.3`, recommended `2.2.5`.** Your file says `<2.3`. depkeeper will not
   propose a version your own constraint forbids.
-- **`urllib3`: latest `2.7.0`, recommended `1.26.20`.** `2.x` is a major boundary crossing and is
-  never proposed automatically.
+- **`urllib3`: latest `2.8.0`, recommended `1.26.20`.** `2.x` crosses a major boundary, so it is
+  not proposed unless you opt in; the `major available` hint names the flag.
 - **`certifi`: shown as `[OK]`.** It has no version specifier, so there is nothing to compare
   against. `update` will still add a pin for it — see the
   [known inconsistency](../reference/limitations.md#unversioned-requirements-report-as-ok).
 
-`check` always exits `0` when it completed successfully, whether or not updates exist. See
-[Exit codes](../reference/exit-codes.md).
+`check` exits `0` when it completed, whether or not updates exist, unless you ask otherwise:
+`--fail-on updates|minor|major` exits `3` when updates at that level exist, and exit `4` means a
+package could not be looked up. See [Exit codes](../reference/exit-codes.md).
 
 ---
 
@@ -80,20 +75,23 @@ depkeeper update --dry-run
 ```
 
 ```text
-                       Update Plan (Dry Run)
-┏━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━┓
-┃ Package  ┃    Current    ┃ New Version ┃ Change ┃ Python Requires ┃
-┡━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━┩
-│ requests │    2.28.0     │   2.34.2    │ minor  │ >=3.10          │
-│ flask    │      2.0      │    2.2.5    │ minor  │ >=3.7           │
-│ celery   │      5.0      │    5.6.3    │ minor  │ >=3.9           │
-│ click    │      8.0      │    8.4.2    │ minor  │ >=3.10          │
-│ certifi  │ not specified │  2026.7.22  │  new   │ >=3.7           │
-│ urllib3  │    1.26.0     │   1.26.20   │ patch  │ !=3.0.*,...     │
-└──────────┴───────────────┴─────────────┴────────┴─────────────────┘
+[WARNING] major available: urllib3 2.8.0 (use --allow-major urllib3)
+                             Update Plan (Dry Run)
+┏━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Package  ┃    Current    ┃ New Version ┃ Change ┃ Python Requires            ┃
+┡━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ requests │    2.28.0     │   2.34.2    │ minor  │ >=3.10                     │
+│ flask    │      2.0      │    2.2.5    │ minor  │ >=3.7                      │
+│ celery   │      5.0      │    5.7.0    │ minor  │ >=3.10                     │
+│ click    │      8.0      │    8.5.0    │ minor  │ >=3.10                     │
+│ certifi  │ not specified │ 2026.10.23  │  new   │ >=3.7                      │
+│ urllib3  │    1.26.0     │   1.26.20   │ patch  │ !=3.0.*,!=3.1.*,...        │
+└──────────┴───────────────┴─────────────┴────────┴────────────────────────────┘
 [WARNING]
 Dry run mode - no changes applied
 ```
+
+(Each `New Version` cell also carries an `N d old` age line; omitted here.)
 
 `--dry-run` performs the entire pipeline — parse, fetch, recommend, resolve, render — and stops
 immediately before the first byte is written. It is the authoritative preview: the plan shown is
@@ -114,39 +112,44 @@ Update 6 packages? (y, n) [y]:
 ```
 
 The prompt defaults to **yes**, because the plan table has already been displayed and you invoked
-`update` explicitly. Press `n` to abort; nothing is written and the command exits `0`.
+`update` explicitly. Answering `n` writes nothing, prints `Aborted. No changes were made.` and
+exits `1`. Without a terminal and without `--yes` the command errors instead of guessing
+(`Cannot ask for confirmation without a terminal`).
 
 Result:
 
-```text title="requirements.txt (after)"
+```text
 requests==2.34.2
 flask>=2.2.5,<2.3
-celery[redis]>=5.6.3,<6.0
-click~=8.4
-certifi==2026.7.22
+celery[redis]>=5.7.0,<6.0
+click~=8.5
+certifi==2026.10.23
 urllib3==1.26.20
 ```
 
 `--backup` wrote a sibling copy named
-`requirements.20260815_144129_853745_d54d785d.backup.txt` before touching the original.
+`requirements.txt.20261106_191359_861179_35e36bf1.backup` before touching the original
+(`[OK] Backup saved: <path>`).
 
 ---
 
 ## 4. Verify with pip
 
-depkeeper only edits text. Install the result to confirm the environment resolves:
+depkeeper only edits text. Ask pip's resolver before writing with `depkeeper update --verify` (a conflict aborts with
+nothing written; skipped with a warning when pip is unavailable), or install the result to confirm it resolves:
 
 ```bash
 python -m pip install -r requirements.txt
 python -m pytest        # or your project's test command
 ```
 
-!!! warning "depkeeper is not a resolver substitute"
-
-    depkeeper checks the packages *listed in your file* against each other. It does not build a
-    complete transitive dependency graph, and it cannot see a conflict introduced by a package
-    that is not in the file. `pip install` remains the authority. See
-    [Conflict resolution → What is not checked](../concepts/conflict-resolution.md#what-is-not-checked).
+> [!WARNING]
+> **depkeeper is not a resolver substitute**
+>
+> depkeeper checks the packages *listed in your file* against each other. It does not build a
+> complete transitive dependency graph, and it cannot see a conflict introduced by a package
+> that is not in the file. `pip install` remains the authority. See
+> [Conflict resolution → What is not checked](../concepts/conflict-resolution.md#what-is-not-checked).
 
 ---
 
@@ -157,11 +160,12 @@ depkeeper update -y
 ```
 
 ```text
+[WARNING] major available: urllib3 2.8.0 (use --allow-major urllib3)
 [OK] All packages are up to date!
 ```
 
 Rewrites converge. A target already covered by the declared floor is skipped, so
-`click~=8.4` does not re-report `8.4.2` on every run. This property is what makes depkeeper safe
+`click~=8.5` does not re-report `8.5.0` on every run. This property is what makes depkeeper safe
 to run on a schedule — see [CI/CD integration](../guides/ci-cd-integration.md).
 
 ---
@@ -178,6 +182,9 @@ depkeeper -v check --format json | jq '[.[] | select(.status == "outdated")] | l
 ```text
 5
 ```
+
+(`json` is the stable bare array; `--format json-v2` wraps it in a versioned envelope, and
+`--format markdown` renders a PR-body report.)
 
 The schema is documented in [JSON output](../reference/json-output.md).
 

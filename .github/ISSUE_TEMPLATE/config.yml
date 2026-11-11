@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/rahulkaushal04/depkeeper/blob/main/docs/index.md
+    about: Usage guides, CLI reference and troubleshooting. Please check here first.
+  - name: Report a security vulnerability
+    url: https://github.com/rahulkaushal04/depkeeper/security/advisories/new
+    about: Report vulnerabilities privately. Do not open a public issue (see SECURITY.md).

@@ -1,13 +1,8 @@
-"""Tests for update selection (``_find_updates``).
-
-Primary purpose: guard against regression C2 — direct references
-(VCS/URL/local-path/editable installs) are not version-managed by PyPI
-metadata. Selecting them for update appends a version specifier to the URL,
-producing an uninstallable line such as
-``-e git+https://...#egg=pkg==9.9.9``. They must be skipped entirely.
-"""
+"""Tests for update selection (``_find_updates``)."""
 
 from __future__ import annotations
+
+from typing import Any
 
 from depkeeper.commands.update import _find_hashed_updates, _find_updates
 from depkeeper.models import Package, Requirement
@@ -22,7 +17,7 @@ def _pkg(name: str, *, current: str | None, recommended: str | None) -> Package:
 
 
 def test_editable_vcs_requirement_is_skipped() -> None:
-    """C2: an editable VCS requirement must never be selected for update."""
+    """an editable VCS requirement must never be selected for update."""
     req = Requirement(
         name="devpkg",
         specs=[],
@@ -35,7 +30,7 @@ def test_editable_vcs_requirement_is_skipped() -> None:
 
 
 def test_non_editable_url_requirement_is_skipped() -> None:
-    """C2: a plain URL requirement (non-editable) is also skipped."""
+    """a plain URL requirement (non-editable) is also skipped."""
     req = Requirement(
         name="mypackage",
         specs=[],
@@ -47,7 +42,7 @@ def test_non_editable_url_requirement_is_skipped() -> None:
 
 
 def test_local_path_requirement_is_skipped() -> None:
-    """C2: a local-path reference (url set) is skipped."""
+    """a local-path reference (url set) is skipped."""
     req = Requirement(
         name="mypackage",
         specs=[],
@@ -60,7 +55,7 @@ def test_local_path_requirement_is_skipped() -> None:
 
 
 def test_regular_pinned_requirement_still_updates() -> None:
-    """Regression guard: normal PyPI requirements are unaffected by the skip."""
+    """Normal PyPI requirements are unaffected by the skip."""
     req = Requirement(name="flask", specs=[("==", "2.0.0")])
     pkg = _pkg("flask", current="2.0.0", recommended="2.3.3")
 
@@ -107,17 +102,8 @@ def test_find_hashed_updates_only_returns_hashed_requirements() -> None:
     assert _find_hashed_updates(updates) == [(hashed_req, hashed_pkg, "2.31.0")]
 
 
-# ---------------------------------------------------------------------------
-# M5 — declared ranges are preserved, so targets they exclude must be skipped
-# ---------------------------------------------------------------------------
-
-
 def test_target_excluded_by_upper_bound_is_skipped() -> None:
-    """M5: writing 2.3.3 under ``<2.3`` would yield ``flask>=2.3.3,<2.3``.
-
-    The conflict resolver can override the checker's constraint-filtered
-    recommendation, so the writer input is validated as a second gate.
-    """
+    """A target above the declared upper bound is not written."""
     req = Requirement(name="flask", specs=[(">=", "2.0"), ("<", "2.3")])
     pkg = _pkg("flask", current="2.0", recommended="2.3.3")
 
@@ -125,7 +111,7 @@ def test_target_excluded_by_upper_bound_is_skipped() -> None:
 
 
 def test_target_excluded_by_exclusion_is_skipped() -> None:
-    """M5: a version the file explicitly excludes is never written."""
+    """a version the file explicitly excludes is never written."""
     req = Requirement(name="flask", specs=[(">=", "2.0"), ("!=", "2.3.3")])
     pkg = _pkg("flask", current="2.0", recommended="2.3.3")
 
@@ -149,11 +135,7 @@ def test_pin_mode_ignores_declared_constraints() -> None:
 
 
 def test_noop_rewrite_is_skipped() -> None:
-    """A target already covered by the declared floor is not an update.
-
-    ``~=2.3`` keeps selecting 2.3.3 at the author's two-component precision,
-    so without this guard the command would never converge.
-    """
+    """A target already covered by the declared floor is not an update."""
     req = Requirement(name="flask", specs=[("~=", "2.3")])
     pkg = _pkg("flask", current="2.3", recommended="2.3.3")
 
@@ -168,17 +150,8 @@ def test_compatible_release_still_updates_when_floor_moves() -> None:
     assert _find_updates([pkg], [req]) == [(req, pkg, "2.3.3")]
 
 
-# ---------------------------------------------------------------------------
-# M9 — requirement/package matching uses one canonical (PEP 503) name
-# ---------------------------------------------------------------------------
-
-
 def test_dotted_requirement_matches_its_package() -> None:
-    """``Requirement`` does not self-normalise, but ``Package`` does.
-
-    Matching on bare ``.lower()`` split ``zope.interface`` from
-    ``zope-interface`` and silently dropped the update.
-    """
+    """A dotted requirement name matches its normalised package."""
     req = Requirement(name="zope.interface", specs=[("==", "5.4.0")])
     pkg = _pkg("zope.interface", current="5.4.0", recommended="5.5.2")
 
@@ -230,13 +203,53 @@ def test_duplicate_requirements_with_different_constraints_use_their_own() -> No
     req_bounded = Requirement(
         name="requests", specs=[(">=", "2.20"), ("<", "2.32")], line_number=1
     )
-    req_unbounded = Requirement(name="requests", specs=[("==", "2.25.0")], line_number=3)
+    req_unbounded = Requirement(
+        name="requests", specs=[("==", "2.25.0")], line_number=3
+    )
 
     pkg_bounded = _pkg("requests", current="2.20", recommended="2.34.2")
     pkg_unbounded = _pkg("requests", current="2.25.0", recommended="2.34.2")
 
-    updates = _find_updates(
-        [pkg_bounded, pkg_unbounded], [req_bounded, req_unbounded]
-    )
+    updates = _find_updates([pkg_bounded, pkg_unbounded], [req_bounded, req_unbounded])
 
     assert updates == [(req_unbounded, pkg_unbounded, "2.34.2")]
+
+
+def _pair(text: str, latest: str, recommended: str, current: str) -> Any:
+    from depkeeper.core import RequirementsParser
+
+    reqs = RequirementsParser().parse_string(text)
+    pkg = Package(
+        name=reqs[0].name,
+        current_version=current,
+        latest_version=latest,
+        recommended_version=recommended,
+    )
+    return [pkg], reqs
+
+
+def test_ignore_skips_package() -> None:
+    pkgs, reqs = _pair("click==8.0.0\n", "8.1.7", "8.1.7", "8.0.0")
+    assert _find_updates(pkgs, reqs, ignore={"click"}) == []
+    assert len(_find_updates(pkgs, reqs)) == 1
+
+
+def test_max_update_filters_by_level() -> None:
+    pkgs, reqs = _pair("click==8.0.0\n", "8.1.7", "8.1.7", "8.0.0")
+    assert _find_updates(pkgs, reqs, max_update="patch") == []
+    assert len(_find_updates(pkgs, reqs, max_update="minor")) == 1
+
+
+def test_bare_name_in_pyproject_or_conda_is_pinned_only_with_pin() -> None:
+    for fmt in ("pyproject", "conda"):
+        req = Requirement(name="wheel", specs=[], source_format=fmt)
+        pkg = _pkg("wheel", current=None, recommended="1.0")
+        assert _find_updates([pkg], [req]) == []
+        assert len(_find_updates([pkg], [req], pin=True)) == 1
+
+
+def test_bare_name_in_requirements_is_still_pinned() -> None:
+    req = Requirement(name="wheel", specs=[], source_format="requirements.txt")
+    assert (
+        len(_find_updates([_pkg("wheel", current=None, recommended="1.0")], [req])) == 1
+    )

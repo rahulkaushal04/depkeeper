@@ -14,10 +14,6 @@ Only symbols listed in ``__all__`` are considered part of the public API.
 
 from __future__ import annotations
 
-# ---------------------------------------------------------------------------
-# Filesystem utilities
-# ---------------------------------------------------------------------------
-
 from depkeeper.utils.filesystem import (
     create_backup,
     create_timestamped_backup,
@@ -28,20 +24,12 @@ from depkeeper.utils.filesystem import (
     validate_path,
 )
 
-# ---------------------------------------------------------------------------
-# Logging utilities
-# ---------------------------------------------------------------------------
-
 from depkeeper.utils.logger import (
     disable_logging,
     get_logger,
     is_logging_configured,
     setup_logging,
 )
-
-# ---------------------------------------------------------------------------
-# Console utilities
-# ---------------------------------------------------------------------------
 
 from depkeeper.utils.console import (
     colorize_update_type,
@@ -52,23 +40,12 @@ from depkeeper.utils.console import (
     print_table,
     print_warning,
     reconfigure_console,
+    safe_text,
 )
-
-# ---------------------------------------------------------------------------
-# HTTP utilities
-# ---------------------------------------------------------------------------
 
 from depkeeper.utils.http import HTTPClient
 
-# ---------------------------------------------------------------------------
-# Naming utilities
-# ---------------------------------------------------------------------------
-
 from depkeeper.utils.naming import normalize_package_name
-
-# ---------------------------------------------------------------------------
-# Version utilities
-# ---------------------------------------------------------------------------
 
 from depkeeper.utils.version_utils import (
     get_update_type,
@@ -80,12 +57,7 @@ from depkeeper.utils.version_utils import (
     specs_to_string,
 )
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
 __all__ = [
-    # Console
     "confirm",
     "print_error",
     "print_table",
@@ -93,13 +65,12 @@ __all__ = [
     "print_warning",
     "get_raw_console",
     "reconfigure_console",
+    "safe_text",
     "colorize_update_type",
-    # Logging
     "get_logger",
     "setup_logging",
     "disable_logging",
     "is_logging_configured",
-    # Filesystem
     "safe_read_file",
     "safe_write_file",
     "create_backup",
@@ -107,11 +78,8 @@ __all__ = [
     "find_requirements_files",
     "validate_path",
     "create_timestamped_backup",
-    # HTTP
     "HTTPClient",
-    # Naming
     "normalize_package_name",
-    # Version utilities
     "get_update_type",
     "is_lower_bound",
     "parse_version_lenient",

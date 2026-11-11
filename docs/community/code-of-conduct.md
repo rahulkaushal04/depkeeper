@@ -59,8 +59,8 @@ appropriate and fair corrective action in response to any behaviour they deem in
 threatening, offensive or harmful. They may remove, edit or reject contributions that are not
 aligned with this Code of Conduct, and will communicate the reasons when appropriate.
 
-Report unacceptable behaviour privately to the maintainers via the repository's Security tab or a
-private discussion. All complaints will be reviewed and investigated promptly and fairly, and the
+Report unacceptable behaviour privately to the maintainers via the repository's Security tab (the private advisory form,
+<https://github.com/rahulkaushal04/depkeeper/security/advisories/new>). All complaints will be reviewed and investigated promptly and fairly, and the
 privacy and security of the reporter will be respected.
 
 Enforcement follows the Contributor Covenant's escalation ladder: correction, warning, temporary

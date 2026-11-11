@@ -19,14 +19,14 @@ depkeeper follows [Semantic Versioning](https://semver.org/).
 | **Minor** | New commands, flags or output fields; a behavioural change that produces different (but still safe) recommendations. |
 | **Patch** | Bug fixes and documentation that do not change recommendations. |
 
-!!! warning "Recommendation logic is a behavioural contract"
+> [!WARNING]
+> **Recommendation logic is a behavioural contract**
+>
+> A change that makes the same requirements file produce a different update plan is at minimum
+> a **minor** release, even if the diff looks like a bug fix. Consumers gate pipelines on this
+> output.
 
-    A change that makes the same requirements file produce a different update plan is at minimum
-    a **minor** release, even if the diff looks like a bug fix. Consumers gate pipelines on this
-    output.
-
-While the project is `0.x`, the CLI surface is stable within a patch series; anything may change
-between minor versions.
+These rules apply from 1.0.0 on.
 
 ---
 
@@ -51,31 +51,29 @@ python -m pytest tests -q --no-cov
 python -m mypy depkeeper --python-version 3.13
 python -m compileall -q depkeeper
 pre-commit run --all-files
-mkdocs build --strict
 ```
 
-All five must pass on a clean checkout of `main`.
+Also run `python -m ruff format --check depkeeper tests` and `python -m ruff check --select E9,F depkeeper tests`. All must pass on a clean checkout of `main`; `publish.yml` does not run the test suite, so this step is the gate.
 
 ### 2. Bump the version
 
 ```bash
 # depkeeper/__version__.py
-__version__ = "0.2.0"
+__version__ = "1.1.0"
 ```
 
 ```toml
 # pyproject.toml
 [project]
-version = "0.2.0"
+version = "1.1.0"
 ```
 
 ### 3. Update the changelog
 
-Add a dated section to the root `CHANGELOG.md` — the canonical file, linked from `pyproject.toml`
+Move the `[Unreleased]` entries into a dated section of the root `CHANGELOG.md` — the canonical file, linked from `pyproject.toml`
 and PyPI — following Keep a Changelog. Every user-visible change belongs in it, grouped under
-`Added` / `Changed` / `Fixed` / `Removed` / `Security`. Mirror the same section into
-`docs/community/changelog.md`; that copy may summarise rather than repeat verbatim, but must not
-diverge in substance.
+`Added` / `Changed` / `Deprecated` / `Removed` / `Fixed` / `Security`, each once. Rename `[Unreleased]` to the new version and date, then add a fresh empty `[Unreleased]`.
+`CHANGELOG.md` is the only place release notes live; `docs/community/changelog.md` just points to it.
 
 Call out behavioural changes explicitly, with a "how this affects you" note:
 
@@ -101,7 +99,7 @@ Behavioural changes must already be reflected in:
 ### 5. Commit and push to `main`
 
 ```bash
-git commit -am "chore(release): 0.2.0"
+git commit -am "chore(release): 1.1.0"
 git push origin main
 ```
 
@@ -119,8 +117,8 @@ python -m build
 python -m twine check dist/*                            # must report PASSED for both artefacts
 
 python -m venv /tmp/verify && source /tmp/verify/bin/activate
-pip install dist/depkeeper-0.2.0-py3-none-any.whl
-depkeeper --version                                      # must print 0.2.0
+pip install dist/depkeeper-1.1.0-py3-none-any.whl
+depkeeper --version                                      # must print 1.1.0
 printf 'requests==2.28.0\n' > /tmp/r.txt
 depkeeper check /tmp/r.txt --format json | jq -e 'length == 1'
 deactivate
@@ -130,8 +128,8 @@ rm -rf dist build *.egg-info /tmp/verify
 ### 7. Tag and push — this publishes to PyPI
 
 ```bash
-git tag -a v0.2.0 -m "Release 0.2.0"
-git push origin v0.2.0
+git tag -a v1.1.0 -m "Release 1.1.0"
+git push origin v1.1.0
 ```
 
 Pushing a `v*` tag triggers
@@ -152,33 +150,15 @@ build and verification still run, so the failure is isolated and nothing partial
 Watch the run under **Actions** and confirm the `pypi.org/project/depkeeper/` page shows the new
 version before moving on.
 
-### 8. Documentation deploys automatically — no manual step
+### 8. Announce
 
-Two independent workflows keep the docs site in sync, both using `mike` as the version provider:
-
-- **`.github/workflows/docs.yml`** deploys every push to `main` that touches `docs/**` or
-  `mkdocs.yml` under the `dev` version, so docs-only fixes go live immediately without waiting
-  for a release. `dev` is never the default — it will not appear as `latest`.
-- **`.github/workflows/publish.yml`**, in its `docs` job (which runs only after the PyPI publish
-  succeeds), deploys the same commit under the release's own version number (e.g. `0.2.0`),
-  updates the `latest` alias to point to it, and sets `latest` as the site's default. This is what
-  keeps the docs shown at the bare site URL matching what is actually installable from PyPI —
-  `main` can be ahead of the latest release; the `latest` docs never are.
-
-Confirm the version selector on the deployed site shows the new version and that `latest` points
-to it.
-
-### 9. Announce
-
-Create a GitHub release from the tag, using the changelog section as the body. Link the
-documentation for the new version.
+Create a GitHub release from the tag, using the changelog section as the body.
 
 ---
 
 ## Post-release
 
-- [ ] `pip install depkeeper==0.2.0` works from a clean environment.
-- [ ] The documentation site shows the new version.
+- [ ] `pip install depkeeper==1.1.0` works from a clean environment.
 - [ ] The GitHub release exists and its notes match the changelog.
 - [ ] Open a follow-up issue for anything deferred from this release.
 

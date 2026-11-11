@@ -1,3 +1,5 @@
+"""Tests for :mod:`depkeeper.utils.filesystem`."""
+
 from __future__ import annotations
 
 import os
@@ -328,13 +330,13 @@ class TestAtomicWrite:
 
 @pytest.mark.unit
 class TestAtomicWriteHardening:
-    """M7/m5/m6 regressions for the atomic write helper."""
+    """Failure-mode tests for the atomic write helper."""
 
     def test_temp_file_removed_when_write_fails(self, temp_dir: Path) -> None:
-        """m5 regression: a failure before the rename must not leak a temp file.
+        """A failure before the rename must not leak a temp file.
 
-        The temp path used to be bound *after* the write, so a failure inside
-        the ``with`` block left an orphaned ``.<name>.*.tmp`` next to the target.
+        The temp path must be bound before the write; otherwise a failure inside
+        the ``with`` block leaves an orphaned ``.<name>.*.tmp`` next to the target.
         """
         target = temp_dir / "requirements.txt"
         target.write_text("original\n", encoding="utf-8")
@@ -385,7 +387,7 @@ class TestAtomicWriteHardening:
 
     @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes only")
     def test_preserves_existing_file_mode(self, temp_dir: Path) -> None:
-        """m6 regression: the temp file's 0600 mode must not leak to the target."""
+        """The temp file's 0600 mode must not leak to the target."""
         target = temp_dir / "requirements.txt"
         target.write_text("original\n", encoding="utf-8")
         target.chmod(0o644)
@@ -642,7 +644,7 @@ class TestSafeReadFile:
         assert exc_info.value.operation == "read"
 
     def test_strips_utf8_bom(self, temp_dir: Path) -> None:
-        """M3 regression: a leading UTF-8 BOM must not reach the caller.
+        """A leading UTF-8 BOM must not reach the caller.
 
         Files written by Notepad or PowerShell ``Set-Content`` start with
         ``\\xef\\xbb\\xbf``, which decodes to ``\\ufeff`` under plain UTF-8 and
@@ -1206,7 +1208,7 @@ class TestCreateTimestampedBackup:
     def test_backup_name_format(self, temp_file: Path) -> None:
         """Test backup follows naming convention.
 
-        Format should be: {stem}.{timestamp}.backup{suffix}
+        Format should be: {name}.{timestamp}_{uuid}.backup
         """
         backup = create_timestamped_backup(temp_file)
 
@@ -1216,8 +1218,9 @@ class TestCreateTimestampedBackup:
         # Should have .backup in name
         assert ".backup" in backup.name
 
-        # Should end with original suffix
-        assert backup.suffix == temp_file.suffix
+        # Ends in .backup so *.txt globs never mistake it for a live file
+        assert backup.name.startswith(temp_file.name + ".")
+        assert backup.suffix == ".backup"
 
     def test_backup_preserves_content(self, temp_file: Path) -> None:
         """Test backup contains original content.
@@ -1372,3 +1375,36 @@ class TestEdgeCases:
         safe_write_file(file_path, "pytest>=8.2.0\n", create_backup=False)
 
         assert file_path.exists()
+
+
+class TestAtomicWriteInterruptCleanup:
+    def test_keyboard_interrupt_cleans_temp_file(self, tmp_path: Path) -> None:
+        target = tmp_path / "f.txt"
+        with patch("os.fsync", side_effect=KeyboardInterrupt):
+            with pytest.raises(KeyboardInterrupt):
+                _atomic_write(target, "x")
+        assert list(tmp_path.iterdir()) == []
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
+    def test_mode_preserved(self, tmp_path: Path) -> None:
+        target = tmp_path / "f.txt"
+        target.write_text("a")
+        target.chmod(0o640)
+        _atomic_write(target, "b")
+        assert (target.stat().st_mode & 0o777) == 0o640
+
+    @pytest.mark.skipif(
+        os.name != "posix" or os.geteuid() == 0, reason="posix non-root"
+    )
+    def test_read_only_target_refused(self, tmp_path: Path) -> None:
+        target = tmp_path / "f.txt"
+        target.write_text("a")
+        target.chmod(0o444)
+        with pytest.raises(FileOperationError):
+            _atomic_write(target, "b")
+        assert target.read_text() == "a"
+
+    def test_read_keeps_crlf_with_newline_empty(self, tmp_path: Path) -> None:
+        target = tmp_path / "f.txt"
+        target.write_bytes(b"a\r\nb\r\n")
+        assert safe_read_file(target, newline="") == "a\r\nb\r\n"

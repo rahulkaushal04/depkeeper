@@ -18,12 +18,12 @@ from depkeeper.models import Requirement
 from tests.support.factories import make_requirement, specs
 
 # A real editable checkout line, used wherever a direct reference is needed.
-INTERNAL_SDK_URL = "git+ssh://git@github.com/acme/internal-sdk.git@main#egg=internal-sdk"
+INTERNAL_SDK_URL = (
+    "git+ssh://git@github.com/acme/internal-sdk.git@main#egg=internal-sdk"
+)
 
 # Real-length sha256 digests, so tests exercise realistic line lengths.
-CLICK_SHA256 = (
-    "sha256:ae74fb96c20a0277a1d615f1e4d73c8414f5a98db8b799a7931d1582f3390c28"
-)
+CLICK_SHA256 = "sha256:ae74fb96c20a0277a1d615f1e4d73c8414f5a98db8b799a7931d1582f3390c28"
 CLICK_SHA256_SDIST = (
     "sha256:ca9853ad459e787e2192211578cc907e7594e294c7ccc834310722b41b9ca6de"
 )
@@ -78,9 +78,9 @@ class TestConstruction:
 
     def test_differing_specs_are_not_equal(self) -> None:
         """Guard for the above: equality must still notice real differences."""
-        assert make_requirement("requests", specs=specs("==2.31.0")) != make_requirement(
-            "requests", specs=specs("==2.32.3")
-        )
+        assert make_requirement(
+            "requests", specs=specs("==2.31.0")
+        ) != make_requirement("requests", specs=specs("==2.32.3"))
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +211,7 @@ class TestToString:
 
 
 class TestDirectReferenceRendering:
-    """Regression C2: specifiers must never be appended to a direct reference.
+    """Specifiers must never be appended to a direct reference.
 
     PEP 508 direct references carry their version in the URL. Emitting
     ``git+https://...#egg=pkg==9.9.9`` produces a line pip cannot install, and
@@ -288,7 +288,7 @@ class TestDirectReferenceRendering:
 
 
 class TestUpdateVersionPreservesDeclaredRanges:
-    """Regression M5: an update moves the floor and nothing else.
+    """An update moves the floor and nothing else.
 
     Upper bounds, exclusions and wildcard bands are deliberate compatibility
     statements. Collapsing ``celery[redis]>=5.0,<6.0`` to ``celery[redis]==5.4.0``
@@ -318,7 +318,9 @@ class TestUpdateVersionPreservesDeclaredRanges:
             pytest.param(
                 "~=2.0.1", "2.3.3", "celery~=2.3.3", id="tilde-keeps-finer-precision"
             ),
-            pytest.param("==1.26.5", "1.26.18", "celery==1.26.18", id="pin-is-repinned"),
+            pytest.param(
+                "==1.26.5", "1.26.18", "celery==1.26.18", id="pin-is-repinned"
+            ),
             pytest.param(
                 # A cap-only requirement has no floor to move, so one is
                 # appended rather than inserted; the cap keeps its position.
@@ -383,7 +385,7 @@ class TestUpdateVersionPreservesDeclaredRanges:
             "2.3.3", preserve_trailing_newline=False
         )
         second_pass = make_requirement(
-            "flask", specs=specs(first_pass[len("flask"):])
+            "flask", specs=specs(first_pass[len("flask") :])
         ).update_version("2.3.3", preserve_trailing_newline=False)
 
         assert first_pass == second_pass == "flask~=2.3"
@@ -442,11 +444,11 @@ class TestUpdateVersionPreservesLineContent:
 
 
 class TestUpdateVersionHashGuard:
-    """Regression C3: a version bump must not silently strip ``--hash`` pins.
+    """A version bump must not silently strip ``--hash`` pins.
 
     Hashes are version-specific, so an update necessarily invalidates them.
     Dropping them turns a hash-verified install into an unverified one — a
-    supply-chain regression no diff reviewer would flag, because the line still
+    supply-chain downgrade no diff reviewer would flag, because the line still
     looks like a routine version bump.
     """
 

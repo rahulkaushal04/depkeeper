@@ -6,6 +6,7 @@ from a ``requirements.txt`` file.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
@@ -14,6 +15,17 @@ from depkeeper.utils.version_utils import (
     specs_allow_version,
     specs_to_string,
 )
+
+# ``[-e] ["]name[extras]`` at the start of a requirement line, as written.
+_LINE_HEAD = re.compile(
+    r"""^(?P<head>\s*(?:(?:-e|--editable)\s*=?\s*)?["']?\s*"""
+    r"""[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?(?:\s*\[[^\]]*\])?)"""
+)
+# End of the specifier text: marker, option, closing quote or comment.
+_SPEC_END = re.compile(r"\s*(?:;|--|[\"']|#|$)")
+_SPEC_TOKEN = re.compile(r"(?:===|==|!=|<=|>=|~=|<|>)(\s*)[^\s,;()]+")
+_COMMENT = re.compile(r"(?:^|\s+)#")
+_HASH_OPTION = re.compile(r"\s*--hash(?:=|\s+)\S+")
 
 
 @dataclass
@@ -37,6 +49,13 @@ class Requirement:
             update writer to rewrite the correct file. Excluded from equality
             comparison as it is provenance metadata, not part of the
             requirement's semantic identity.
+        constraint_specs: Specifiers imposed by ``-c`` constraint files
+            (informational; never rendered).
+        direct_reference: ``url`` came from a PEP 508 ``name @ url`` spec.
+        source_format: Adapter name that produced it (e.g. ``requirements.txt``).
+        span: Optional (start, end) character offsets in the source text.
+        approximate: The PyPI lookup is a best-effort match (conda packages).
+        series: Significant release components of a fuzzy conda spec, else None.
     """
 
     name: str
@@ -50,6 +69,22 @@ class Requirement:
     line_number: int = 0
     raw_line: Optional[str] = None
     source_file: Optional[str] = field(default=None, compare=False)
+    # Specs imposed by ``-c`` constraint files. Informational only: never
+    # rendered into the requirement line.
+    constraint_specs: List[Tuple[str, str]] = field(default_factory=list, compare=False)
+    # True when ``url`` came from a PEP 508 ``name @ url`` spec, so the name
+    # must be rendered alongside the URL.
+    direct_reference: bool = False
+    # Optional provenance for source adapters (see core/sources). ``span`` is
+    # (start, end) character offsets in the original text, for formats that
+    # are not line oriented; requirements.txt uses ``line_number`` instead.
+    source_format: Optional[str] = field(default=None, compare=False)
+    span: Optional[Tuple[int, int]] = field(default=None, compare=False)
+    # True when the name was matched on PyPI only approximately (conda packages).
+    approximate: bool = field(default=False, compare=False)
+    # Fuzzy conda specs (``numpy=1.24``) pin a *series*: the number of release
+    # components that are significant (2 for ``1.24``). None for exact specs.
+    series: Optional[int] = field(default=None, compare=False)
 
     def to_string(
         self,
@@ -75,13 +110,11 @@ class Requirement:
         if self.editable:
             parts.append("-e")
 
-        if self.url:
-            requirement = self.url
+        extras = f"[{','.join(self.extras)}]" if self.extras else ""
+        if self.url and self.direct_reference:
+            requirement = f"{self.name}{extras} @ {self.url}"
         else:
-            requirement = self.name
-
-        if self.extras:
-            requirement += f"[{','.join(self.extras)}]"
+            requirement = (self.url or self.name) + extras
 
         if self.specs and not self.url:
             requirement += ",".join(
@@ -167,6 +200,13 @@ class Requirement:
                 "version. Relax the constraint, or pass pin=True to replace it"
             )
 
+        if self.raw_line and not self.url:
+            spliced = self._splice_specs(new_specs)
+            if spliced is not None:
+                if preserve_trailing_newline and not spliced.endswith("\n"):
+                    spliced += "\n"
+                return spliced
+
         updated = Requirement(
             name=self.name,
             specs=new_specs,
@@ -178,6 +218,8 @@ class Requirement:
             comment=self.comment,
             line_number=self.line_number,
             source_file=self.source_file,
+            constraint_specs=list(self.constraint_specs),
+            direct_reference=self.direct_reference,
         )
 
         result = updated.to_string(
@@ -189,6 +231,70 @@ class Requirement:
             result += "\n"
 
         return result
+
+    def _splice_specs(self, new_specs: List[Tuple[str, str]]) -> Optional[str]:
+        """Rewrite only the specifier text of ``raw_line``, keeping the rest.
+
+        The name's spelling, extras, marker, quoting, spacing and comment are
+        left as the author wrote them. Returns ``None`` when the line cannot
+        be edited safely (the result is re-parsed to check), in which case the
+        caller renders the canonical form instead.
+        """
+        raw = self.raw_line or ""
+        comment_match = _COMMENT.search(raw)
+        body = raw[: comment_match.start()] if comment_match else raw
+        tail = ""
+        if self.comment:
+            written = raw[comment_match.start() :] if comment_match else ""
+            tail = (
+                written
+                if written.strip().lstrip("#").strip() == self.comment
+                else (f"  # {self.comment}")
+            )
+
+        head = _LINE_HEAD.match(body)
+        if head is None:
+            return None
+        rest = body[head.end() :]
+        region_end = _SPEC_END.search(rest).start()  # type: ignore[union-attr]
+        region, after = rest[:region_end], rest[region_end:]
+        after = _HASH_OPTION.sub("", after)
+
+        tokens = list(_SPEC_TOKEN.finditer(region))
+        if tokens and len(tokens) == len(new_specs):
+            pieces: List[str] = []
+            cursor = 0
+            for token, (operator, version) in zip(tokens, new_specs):
+                pieces.append(region[cursor : token.start()])
+                pieces.append(f"{operator}{token.group(1)}{version}")
+                cursor = token.end()
+            pieces.append(region[cursor:])
+            new_region = "".join(pieces)
+        else:
+            new_region = specs_to_string(new_specs)
+
+        candidate = f"{head.group('head')}{new_region}{after}{tail}"
+
+        # Imported here: the parser imports this module.
+        from depkeeper.core.parser import RequirementsParser
+
+        try:
+            check = RequirementsParser().parse_line(candidate, self.line_number or 1)
+        except Exception:
+            return None
+        if not isinstance(check, Requirement):
+            return None
+        same = (
+            check.name == self.name
+            and check.extras == self.extras
+            and check.markers == self.markers
+            and check.editable == self.editable
+            and check.url is None
+            and check.hashes == []
+            and check.specs == new_specs
+            and check.comment == self.comment
+        )
+        return candidate if same else None
 
     def __str__(self) -> str:
         """Return the rendered requirement string."""

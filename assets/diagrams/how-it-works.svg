@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 904 426" role="img">
+<title>depkeeper reads a file, fetches PyPI metadata, filters candidate versions down to one pick per package, cross-checks the picks, then reports or writes</title>
+<desc>Pipeline: Parse, Fetch, Pick, Cross-check, then Report or Write. Pick filters many candidate versions through major boundary (unless --allow-major), requires-python, your bounds, min-age, pre-release and yanked, and policy rules down to one recommendation. Report formats are table, simple, json, json-v2 and markdown. Write is atomic, with rollback and optional backup.</desc>
+<defs>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2563EB"/></marker>
+<marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#16A34A"/></marker>
+<marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#DC2626"/></marker>
+<marker id="as" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
+</defs>
+<rect x="0.5" y="0.5" width="903" height="425" rx="12" fill="#FFFFFF" stroke="#CBD5E1"/>
+<g font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#0F172A" text-anchor="middle">
+<rect x="16" y="60" width="72" height="52" rx="8" fill="#F1F5F9" stroke="#CBD5E1"/><text x="52" y="90" font-weight="600">Parse</text>
+<rect x="164" y="60" width="72" height="52" rx="8" fill="#F1F5F9" stroke="#CBD5E1"/><text x="200" y="90" font-weight="600">Fetch</text>
+<g font-size="11" fill="#475569"><text x="52" y="132">keeps comments,</text><text x="52" y="146">extras, markers</text><text x="200" y="132">PyPI JSON API,</text><text x="200" y="146">no disk cache</text><text x="632" y="372">picks checked</text><text x="632" y="386">against each other</text></g>
+<g stroke="#2563EB" stroke-width="1.5" fill="none"><path d="M90,86 H162" marker-end="url(#ah)"/><path d="M238,86 H310" marker-end="url(#ah)"/><path d="M462,324 H586" marker-end="url(#ah)"/><path d="M416,296 V308" marker-end="url(#ah)"/><path d="M676,324 H692 M692,276 V376"/><path d="M692,276 H730" marker-end="url(#ah)"/><path d="M692,376 H730" marker-end="url(#ah)"/></g>
+<g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" fill="#475569"><text x="126" y="66">Requirement</text><text x="126" y="79">list</text><text x="274" y="66">GET /pypi/</text><text x="274" y="79">&lt;name&gt;/json</text><text x="550" y="301">Package</text><text x="550" y="314">list</text><text x="712" y="268">rows</text><text x="712" y="368">edits</text></g>
+<rect x="312" y="20" width="200" height="334" rx="10" fill="#FFFFFF" stroke="#CBD5E1"/><text x="412" y="44" font-weight="600">Pick</text>
+<g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11"><rect x="327" y="75" width="44" height="22" rx="5" fill="#F1F5F9" stroke="#CBD5E1"/><text x="349" y="90">3.1.3</text><rect x="376" y="75" width="44" height="22" rx="5" fill="#F1F5F9" stroke="#CBD5E1"/><text x="398" y="90">3.0.1</text><rect x="425" y="75" width="24" height="22" rx="5" fill="#F1F5F9" stroke="#CBD5E1"/><text x="437" y="90">…</text><rect x="454" y="75" width="44" height="22" rx="5" fill="#F1F5F9" stroke="#CBD5E1"/><text x="476" y="90">2.28.0</text></g>
+<polygon points="325,110 507,110 477,296 355,296" fill="#FFFBEB" stroke="#F59E0B" stroke-width="1.5" stroke-linejoin="round"/>
+<g font-size="11.5" fill="#0F172A">
+<rect x="330" y="116" width="172" height="24" rx="6" fill="#FFFFFF" stroke="#CBD5E1"/><text x="416" y="132">major boundary</text><path d="M504,128 H518" stroke="#475569" stroke-width="1" stroke-dasharray="3 3"/><text x="522" y="132" text-anchor="start" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" fill="#475569">unless --allow-major</text>
+<rect x="336" y="146" width="160" height="24" rx="6" fill="#FFFFFF" stroke="#CBD5E1"/><text x="416" y="162">requires-python</text>
+<rect x="342" y="176" width="148" height="24" rx="6" fill="#FFFFFF" stroke="#CBD5E1"/><text x="416" y="192">your bounds</text>
+<rect x="348" y="206" width="136" height="24" rx="6" fill="#FFFFFF" stroke="#CBD5E1"/><text x="416" y="222">min-age</text>
+<rect x="354" y="236" width="124" height="24" rx="6" fill="#FFFFFF" stroke="#CBD5E1"/><text x="416" y="252">pre / yanked</text>
+<rect x="360" y="266" width="112" height="24" rx="6" fill="#FFFFFF" stroke="#CBD5E1"/><text x="416" y="282">policy</text></g>
+<rect x="372" y="310" width="88" height="28" rx="8" fill="#F59E0B"/><text x="416" y="329" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12" font-weight="700">2.32.3</text>
+<rect x="588" y="296" width="88" height="56" rx="8" fill="#F1F5F9" stroke="#CBD5E1"/><text x="632" y="328" font-weight="600">Cross-check</text>
+<rect x="732" y="240" width="156" height="70" rx="8" fill="#F1F5F9" stroke="#CBD5E1"/><text x="810" y="264" font-weight="600">Report</text><text x="810" y="282" font-size="11" fill="#475569">table · simple · json</text><text x="810" y="296" font-size="11" fill="#475569">json-v2 · markdown</text>
+<rect x="732" y="346" width="156" height="60" rx="8" fill="#F1F5F9" stroke="#16A34A" stroke-width="1.5"/><text x="810" y="372" font-weight="600">Write</text><text x="810" y="390" font-size="11" fill="#475569">atomic · rollback · backup</text>
+</g>
+</svg>

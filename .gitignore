@@ -151,9 +151,6 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
-# mkdocs documentation
-/site
-
 # mypy
 .mypy_cache/
 .dmypy.json
@@ -210,3 +207,6 @@ __marimo__/
 test_*.ipynb
 
 workspace/*
+
+# Local-only engineering notes
+.internal/

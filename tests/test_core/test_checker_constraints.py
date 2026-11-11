@@ -1,15 +1,8 @@
-"""Tests for constraint-aware recommendations in ``VersionChecker``.
-
-Primary purpose: guard against regression M5 — declared upper bounds and
-exclusions survive an update, so a recommendation that violates them would
-produce an unsatisfiable requirement line such as ``flask>=2.3.3,<2.3``.
-The checker must therefore never propose a version the requirements file
-itself forbids.
-"""
+"""Declared upper bounds and exclusions are never violated by a recommendation."""
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import pytest
 
@@ -40,10 +33,8 @@ class TestConstraintAwareRecommendation:
         )
         assert pkg.recommended_version == "2.3.3"
 
-    def test_upper_bound_caps_the_recommendation(
-        self, checker: VersionChecker
-    ) -> None:
-        """M5: ``<2.3`` must cap the recommendation at 2.2.5, not 2.3.3."""
+    def test_upper_bound_caps_the_recommendation(self, checker: VersionChecker) -> None:
+        """``<2.3`` must cap the recommendation at 2.2.5, not 2.3.3."""
         pkg = checker._build_package_from_data(
             _pkg_data("flask", VERSIONS), "2.0.0", [("<", "2.3")]
         )
@@ -167,6 +158,8 @@ class TestConstraintForwarding:
             name: str,
             current_version: Optional[str] = None,
             constraints: Optional[List[Tuple[str, str]]] = None,
+            series: Optional[int] = None,
+            floor_inferred: bool = False,
         ) -> None:
             captured.append(constraints)
 
@@ -184,3 +177,28 @@ class TestConstraintForwarding:
         asyncio.run(run())
 
         assert captured == [[("<", "6.0"), ("!=", "5.2.0")]]
+
+
+class TestSnapFloor:
+    """A floor that equals a real release keeps the user's spelling."""
+
+    @staticmethod
+    def _data(*versions: str) -> Any:
+        from depkeeper.core.data_store import PyPIPackageData
+
+        return PyPIPackageData(
+            name="x",
+            latest_version=versions[-1],
+            latest_requires_python=None,
+            latest_dependencies=[],
+            all_versions=list(versions),
+            python_requirements={},
+        )
+
+    def test_equal_by_value_is_left_alone(self) -> None:
+        assert VersionChecker._snap_floor(self._data("2.2.5", "2.3.0"), "2.3") == "2.3"
+
+    def test_missing_release_snaps_to_lowest_above(self) -> None:
+        assert (
+            VersionChecker._snap_floor(self._data("3.2.25", "4.2.0"), "3.2") == "3.2.25"
+        )

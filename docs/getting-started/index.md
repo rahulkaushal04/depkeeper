@@ -23,9 +23,9 @@ depkeeper uses internally, or to the [User Guide](../guides/index.md) for task-o
 
 | Requirement | Detail |
 |---|---|
-| Python | 3.8 or later. depkeeper filters candidate versions against **the interpreter it runs under**. |
+| Python | 3.8 or later. Candidate versions are filtered against the *target* Python: `--python-version`, else config `python_version`, else the file's `requires-python` (lowest supported minor), else the interpreter depkeeper runs under. |
 | Network | Outbound HTTPS to `pypi.org`. depkeeper has no offline mode; see [Operations](../guides/operations.md#network-requirements). |
-| Input file | A pip-style requirements file. `requirements.txt` is the default argument. |
+| Input file | A pip requirements file, `pyproject.toml` or conda `environment.yml`, or a directory containing them. `requirements.txt` is the default. |
 
 depkeeper never installs, uninstalls or imports the packages it analyses. It reads metadata from
 the PyPI JSON API only, so it is safe to run against a file describing an environment you do not
@@ -49,14 +49,14 @@ depkeeper update --backup       # write it, keeping a timestamped copy
 ## What depkeeper decides for you
 
 Before running it against a real project, understand the four rules that shape every
-recommendation. All four are enforced, not advisory:
+recommendation:
 
 | Rule | Effect | Reference |
 |---|---|---|
-| Major boundary | A package on `1.x` is never moved to `2.x`. | [Version recommendation](../concepts/version-recommendation.md#the-major-version-boundary) |
+| Major boundary | A package on `1.x` is not moved to `2.x` unless you opt in (`--allow-major PKG`, `allow_major`). | [Version recommendation](../concepts/version-recommendation.md#the-major-version-boundary) |
 | Python compatibility | Versions whose `requires_python` excludes your interpreter are skipped. | [Version recommendation](../concepts/version-recommendation.md#python-compatibility-filtering) |
 | Declared constraints | Upper bounds and exclusions you wrote are preserved and are never violated. | [Version recommendation](../concepts/version-recommendation.md#constraint-preservation) |
-| No pre-releases | Alpha/beta/rc versions are excluded from every candidate list. | [Version recommendation](../concepts/version-recommendation.md#pre-releases) |
+| No pre-releases | Alpha/beta/rc versions are excluded unless a package sets `allow_prerelease`. | [Version recommendation](../concepts/version-recommendation.md#pre-releases) |
 
 If any of these produce an unwanted result, that is a configuration or workflow question, not a
 bug. [Best practices](../guides/best-practices.md) covers how to work with them.

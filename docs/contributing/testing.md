@@ -11,7 +11,7 @@ python -m pytest --cov=depkeeper          # with coverage (also the default via 
 make test                                  # term + HTML + XML coverage, as CI runs it
 ```
 
-The suite is fast by design: no test performs real network I/O, and no test sleeps for real.
+The suite is fast by design: no test performs real network I/O except those marked `network`, and no test sleeps for real.
 
 ---
 
@@ -24,12 +24,13 @@ tests/
 │   ├── factories.py                make_requirement / make_package / make_conflict / specs
 │   ├── pypi.py                     ECOSYSTEM, FakePyPIStore, package_data, store_for
 │   └── datasets.py                 realistic requirements corpora + write_project
-├── test_core/                      parser, checker, data store, dependency analyzer
+├── test_core/                      parser, checker, data store, dependency analyzer, verify
+├── test_sources/                   source adapters (requirements.txt, pyproject.toml, conda)
 ├── test_models/                    Requirement, Package, Conflict
 ├── test_commands/                  check and update command behaviour
 ├── test_utils/                     http, console, logger, filesystem, naming, version utils
 ├── integration/                    parse → check → resolve → write workflows
-├── test_config.py                  configuration discovery, parsing, validation
+├── test_config*.py                 configuration discovery, parsing, validation
 ├── test_context.py                 CLI context object
 └── test_main.py                    entry points and exit codes
 ```
@@ -41,8 +42,7 @@ without installation tricks.
 
 ## Shared infrastructure
 
-Use these instead of hand-rolling fixtures. They exist because the suite previously took ~80
-seconds and 67% coverage; the current shape is ~10 seconds and ~88%.
+Use these instead of hand-rolling fixtures. They keep the suite fast and offline.
 
 ### `tests.support.factories`
 
@@ -75,16 +75,14 @@ Realistic requirements corpora and `write_project()` for building a temporary pr
 
 ### `instant_sleep`
 
-Records the delays passed to `asyncio.sleep` and never actually waits. Assert on the **backoff
+Returns a list that receives the delays passed to `asyncio.sleep`; it never actually waits. Assert on the **backoff
 schedule**, not on wall-clock time:
 
 ```python
 async def test_retries_use_exponential_backoff(instant_sleep):
     ...
-    assert instant_sleep.delays == pytest.approx([1.0, 2.0, 4.0], abs=0.3)
+    assert instant_sleep == pytest.approx([1.0, 2.0, 4.0], abs=0.3)
 ```
-
-Roughly 50 seconds of real backoff sleeps were removed from `test_http.py` this way.
 
 Also pass `verify_ssl=False` when constructing a fake `HTTPClient`: building a real `SSLContext`
 costs ~0.3 s per test.
@@ -138,18 +136,36 @@ Arrange / act / assert, with the phases visually separated. One behaviour per te
 async def test_package_is_fetched_once(instant_sleep):
     store = FakePyPIStore()
     await asyncio.gather(*(store.get_package_data("flask") for _ in range(5)))
-    assert store.fetch_count("flask") == 1
+    assert store.fetch_calls.count("flask") == 1
 ```
 
 ### Never hit the network
 
-Use `FakePyPIStore`, or `pytest-httpx` for tests of `HTTPClient` itself. A test that reaches
-`pypi.org` will be rejected.
+Unit tests use `FakePyPIStore`, or `pytest-httpx` for tests of `HTTPClient` itself, and never reach
+`pypi.org`. The few end-to-end tests that do (marked `network`, in `tests/robustness/` and
+`test_e2e_major_verify.py`) skip with one clear reason when PyPI is unreachable. Set
+`DEPKEEPER_REQUIRE_NETWORK=1` to turn that skip into a failure, for example in a release check.
+
+### Cross-platform tests
+
+CI runs Linux, macOS and Windows on Python 3.8 to 3.12, so a test must not depend on the platform
+or on the Python that runs it:
+
+- Write files whose exact bytes matter with `write_bytes`. `Path.write_text` turns `\n` into `\r\n` on
+  Windows (its `newline` argument needs Python 3.10).
+- Skip POSIX-only behaviour with `skipif(sys.platform == "win32")`: file modes, `geteuid`, `killpg`,
+  SIGINT, directory `fsync`.
+- When spawning Python, pass `{**os.environ, ...}`. A stripped environment breaks `import asyncio` on
+  Windows (`WinError 10106`).
+- Start the CLI with `[sys.executable, "-m", "depkeeper"]`, not a script path.
+- Tests that run pip need `pip` in the interpreter's environment; `uv venv` does not install it.
+- Pass `--python-version` when a test depends on which releases exist for a Python, so the result
+  does not depend on the host.
 
 ### Markers
 
 Declared in `pyproject.toml` with `--strict-markers`, so an undeclared marker is an error:
-`unit`, `slow`, `integration`, `e2e`, `network`, `asyncio`.
+`unit`, `slow`, `integration`, `e2e`, `network`, `asyncio`. Tests marked `network` (e.g. `test_e2e_major_verify.py`) also carry a `skipif` that skips them when PyPI is unreachable. Platform-specific tests use `skipif` on `sys.platform`.
 
 ---
 
@@ -186,8 +202,6 @@ without changing the documentation and the invariant it rests on.
 Asserted as *current* behaviour so a change is deliberate, and documented in
 [Known limitations](../reference/limitations.md):
 
-- Backslash line continuations are not joined
-  (`test_parser.py::test_line_continuations_are_not_joined`).
 - URL name inference is unreliable
   (`test_inference_from_an_archive_url_is_unreliable`).
 - `--allow-hash-removal` yields a partially hashed lockfile that `pip --require-hashes` rejects —
@@ -210,8 +224,7 @@ python -m pytest --cov=depkeeper --cov-report=html && open htmlcov/index.html
 ```
 
 There is no hard coverage gate, but a pull request should not reduce coverage of the module it
-touches. The weakest areas today are `commands/update.py` (CLI orchestration, preview, confirm)
-and `cli.py`.
+touches.
 
 ---
 
@@ -222,7 +235,6 @@ python -m pytest tests/test_core/test_parser.py -q --no-cov      # one module
 python -m pytest -k "boundary" --no-cov                          # by name
 python -m pytest -x --no-cov                                     # stop at the first failure
 python -m pytest --lf --no-cov                                   # last failed
-python -m pytest -q --no-cov -p no:randomly                      # if ordering is suspected
 python -m pytest --tb=long --no-cov                              # full tracebacks
 ```
 

@@ -32,7 +32,6 @@ help:
 	@echo "  install-dev      Install package with dev dependencies"
 	@echo "  test             Run tests with coverage"
 	@echo "  typecheck        Run mypy static type checks"
-	@echo "  docs             Build mkdocs documentation"
 	@echo "  clean            Remove cache and build artifacts"
 	@echo "  all              Run typecheck and test"
 	@echo ""
@@ -75,21 +74,6 @@ test:
 	       --cov-report=html \
 	       --cov-report=xml
 	@echo "$(GREEN)✓ Tests ran successfully$(RESET)"
-
-
-# ==========================================================
-# Documentation
-# ==========================================================
-
-.PHONY: docs
-docs:
-	mkdocs build
-	@echo "$(GREEN)✓ Documentation built$(RESET)"
-
-.PHONY: docs-serve
-docs-serve:
-	mkdocs serve
-	@echo "$(GREEN)✓ Documentation server running$(RESET)"
 
 
 # ==========================================================

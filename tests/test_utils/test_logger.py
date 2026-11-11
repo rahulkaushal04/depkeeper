@@ -1,3 +1,5 @@
+"""Tests for :mod:`depkeeper.utils.logger`."""
+
 from __future__ import annotations
 
 import io
@@ -234,15 +236,8 @@ class TestColoredFormatter:
             ):
                 assert ColoredFormatter._should_use_color() is False
 
-    def test_format_mutates_the_record_levelname(self) -> None:
-        """Documents a real hazard: colouring is applied in place.
-
-        ``format`` writes the ANSI escape back onto ``record.levelname`` rather
-        than onto a copy. A record handed to a second handler — or re-formatted
-        by ``caplog`` — therefore already carries escape codes, which is why
-        assertions on captured log text must match on the message rather than
-        the level name.
-        """
+    def test_format_leaves_the_record_levelname_intact(self) -> None:
+        """Colouring is applied to the output only, so other handlers see a clean record."""
         formatter = ColoredFormatter("%(levelname)s: %(message)s", use_color=True)
         record = logging.LogRecord(
             name="test",
@@ -255,10 +250,10 @@ class TestColoredFormatter:
         )
 
         with patch.object(ColoredFormatter, "_should_use_color", return_value=True):
-            formatter.format(record)
+            out = formatter.format(record)
 
-        assert record.levelname.startswith("\033[")
-        assert "ERROR" in record.levelname
+        assert out.startswith("\033[")
+        assert record.levelname == "ERROR"
 
     def test_format_with_exception_info(self) -> None:
         """Test formatting handles exception information correctly.

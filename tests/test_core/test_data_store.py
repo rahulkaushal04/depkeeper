@@ -1,3 +1,5 @@
+"""Tests for the PyPI data store: caching, coalescing and concurrency."""
+
 from __future__ import annotations
 
 import pytest
@@ -358,7 +360,7 @@ class TestPyPIDataStorePrefetch:
     async def test_prefetch_silences_errors(self, mock_http_client: MagicMock) -> None:
         """Test prefetch_packages continues despite individual failures."""
 
-        async def mock_get_package_data(name: str):
+        async def mock_get_package_data(name: str) -> PyPIPackageData:
             if name == "bad-package":
                 raise PyPIError("Not found", package_name=name)
             data = PyPIPackageData(name=name, latest_version="1.0.0")
@@ -450,7 +452,8 @@ class TestPyPIDataStoreGetVersionDependencies:
                 "requires_dist": [
                     "base-dep>=1.0",
                     "extra-dep>=2.0; extra == 'dev'",
-                    "platform-dep>=3.0; sys_platform == 'win32'",
+                    "platform-dep>=3.0; sys_platform != 'nonexistent-os'",
+                    "other-os-dep>=3.0; sys_platform == 'nonexistent-os'",
                 ],
             }
         }
@@ -468,6 +471,8 @@ class TestPyPIDataStoreGetVersionDependencies:
         assert not any("extra-dep" in d for d in deps)
         # Marker stripped
         assert not any("sys_platform" in d for d in deps)
+        # Inapplicable marker -> dependency dropped
+        assert not any("other-os-dep" in d for d in deps)
 
 
 @pytest.mark.unit
@@ -519,21 +524,9 @@ class TestPyPIDataStoreSyncAccessors:
         assert store.is_python_compatible("unknown", "1.0.0", "3.9.0") is True
 
 
-# ---------------------------------------------------------------------------
-# M8 regression: "at most one fetch per package" must actually hold
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.unit
 class TestPyPIDataStoreRequestCoalescing:
-    """Regression tests for M8 (semaphore was used as a mutex).
-
-    A counting ``Semaphore(n)`` admits *n* coroutines at once, so the old
-    "double check inside the semaphore" allowed up to *n* duplicate
-    fetches of the same package.  These tests pin the real contract: one
-    concurrent fetch per key, no matter how many callers or how large the
-    concurrency limit.
-    """
+    """At most one concurrent fetch per key, however many callers or slots."""
 
     @pytest.mark.asyncio
     async def test_many_waiters_share_a_single_fetch(
@@ -743,7 +736,7 @@ class TestPyPIDataStoreRequestCoalescing:
 
 @pytest.mark.unit
 class TestPyPIDataStorePrefetchDeduplication:
-    """Regression tests for M8's secondary finding (duplicate prefetch names)."""
+    """Duplicate names passed to prefetch are fetched once."""
 
     @pytest.mark.asyncio
     async def test_prefetch_deduplicates_repeated_and_variant_names(
@@ -820,3 +813,82 @@ class TestPyPIDataStoreConstructorValidation:
     def test_accepts_limit_of_one(self, mock_http_client: MagicMock) -> None:
         store = PyPIDataStore(mock_http_client, concurrent_limit=1)
         assert store._semaphore._value == 1
+
+
+def _resp(status: int, payload: Any = None) -> MagicMock:
+    r = MagicMock()
+    r.status_code = status
+    r.json.return_value = payload
+    return r
+
+
+@pytest.mark.unit
+class TestFetchEdgeCases:
+    """Yanked releases, failure caching, markers and URL quoting."""
+
+    def test_all_yanked_release_is_skipped(self, mock_http_client: MagicMock) -> None:
+        store = PyPIDataStore(mock_http_client)
+        data = store._parse_package_data(
+            "pkg",
+            {
+                "info": {"version": "2.0"},
+                "releases": {
+                    "2.0": [{"yanked": True}, {"yanked": True}],
+                    "1.0": [{"yanked": False}],
+                    "0.9": [{"yanked": True}, {}],  # partially yanked: kept
+                },
+            },
+        )
+        assert data.all_versions == ["1.0", "0.9"]
+        assert "2.0" not in data.python_requirements
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure", ["503", "exception"])
+    async def test_failed_dependency_fetch_not_cached(
+        self, mock_http_client: MagicMock, failure: str
+    ) -> None:
+        ok = _resp(200, {"info": {"requires_dist": ["dep>=1"]}})
+        first: Any = _resp(503) if failure == "503" else OSError("boom")
+        mock_http_client.get = AsyncMock(side_effect=[first, ok])
+
+        store = PyPIDataStore(mock_http_client)
+        assert await store.get_version_dependencies("pkg", "1.0") == []
+        assert await store.get_version_dependencies("pkg", "1.0") == ["dep>=1"]
+        assert mock_http_client.get.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_404_dependency_fetch_is_cached_as_empty(
+        self, mock_http_client: MagicMock
+    ) -> None:
+        mock_http_client.get = AsyncMock(return_value=_resp(404))
+        store = PyPIDataStore(mock_http_client)
+        assert await store.get_version_dependencies("pkg", "1.0") == []
+        assert await store.get_version_dependencies("pkg", "1.0") == []
+        assert mock_http_client.get.call_count == 1
+
+    def test_markers_evaluated_against_environment(
+        self, mock_http_client: MagicMock
+    ) -> None:
+        deps = PyPIDataStore(mock_http_client)._extract_dependencies(
+            {
+                "requires_dist": [
+                    "always>=1",
+                    'win>=1; sys_platform == "nonexistent-os"',
+                    'old>=1; python_version < "2.7"',
+                    'new>=1; python_version >= "3.0"',
+                    "extra1>=1; extra  ==  'dev'",
+                    'extra2>=1;extra=="dev"',
+                ]
+            }
+        )
+        assert deps == ["always>=1", "new>=1"]
+
+    @pytest.mark.asyncio
+    async def test_name_and_version_are_quoted_in_url(
+        self, mock_http_client: MagicMock
+    ) -> None:
+        mock_http_client.get = AsyncMock(return_value=_resp(404))
+        store = PyPIDataStore(mock_http_client)
+        await store.get_version_dependencies("a/b?x=1#y", "1.0/../x")
+        url = mock_http_client.get.call_args[0][0]
+        assert url.startswith("https://pypi.org/pypi/a%2Fb%3Fx%3D1%23y/1.0%2F..%2Fx/")

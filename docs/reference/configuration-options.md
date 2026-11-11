@@ -35,7 +35,7 @@ check_conflicts = true
 |---|---|
 | Type | boolean |
 | Default | `false` |
-| CLI override | `--strict-version-matching` (no negative form) |
+| CLI override | `--strict-version-matching` (`check` also has `--no-strict-version-matching`) |
 | Applies to | `check`, `update` |
 
 When `true`, only a requirement whose **sole** specifier is `==` yields a current version. Ranges
@@ -47,6 +47,21 @@ changes the reported status to `install`.
 strict_version_matching = false
 ```
 
+### `fail_on`
+
+`"none"` (default), `"updates"`, `"minor"` or `"major"`. Equivalent of `check --fail-on`. Any other value: `fail_on must be one of none, updates, minor, major, got 'x'`.
+
+### `ignore`
+
+List of strings (package names) that `check` and `update` skip, e.g. `ignore = ["django"]`. `--ignore` adds to it. Otherwise: `ignore must be a list of package names`.
+
+### `python_version` and `min_age`
+
+`python_version = "3.9"` and `min_age = "7d"` are the config equivalents of `--python-version` and
+`--min-age`; the flags win. `python_version` must be a string `X.Y` (or `X.Y.Z`), else `python_version must look like '3.9', got '3'`. `min_age` is a number of days (`7`) or a string with a `s`/`m`/`h`/`d`/`w` suffix (`"12h"`, `"2w"`; a bare numeric string is days); negative or unparseable values fail with `min_age: invalid duration 'soon' (use e.g. '7d', '12h', '2w')`. Without either, the target Python comes from the file's own `requires-python` /
+conda pin (lowest supported minor), then the running interpreter. See
+[`check`](cli-commands.md#target-python).
+
 ### Unknown keys
 
 Any other key is a hard error:
@@ -55,8 +70,23 @@ Any other key is a hard error:
 [ERROR] Unknown configuration keys: check_conflict (config_path=/path/depkeeper.toml)
 ```
 
-Exit code `1`. Keys are validated against the exact set `{check_conflicts,
-strict_version_matching}`. Nested tables are not supported.
+Exit code `1`. Keys are validated against the set `{check_conflicts, strict_version_matching,
+fail_on, ignore, python_version, min_age, versioning, packages}`; `versioning` must be one of `auto, semver, calver`. `packages` is the only nested
+table (`[depkeeper.packages.<name>]`, see below).
+
+### `versioning` and `[packages.<name>]`
+
+`versioning` is `"auto"` (default), `"semver"` or `"calver"`: how version change types are
+classified; `auto` detects calver from the most recent releases (see [Calendar versions](../concepts/version-recommendation.md#calendar-versions)). Per-package policy lives in `[depkeeper.packages.<name>]` (`[tool.depkeeper.packages.<name>]`
+in `pyproject.toml`) with `hold`, `ignore`, `allow_prerelease` (booleans, default `false`), `max_update` (`patch`/`minor`/`major`), `allow_major` (boolean) and `versioning`. Package keys are matched in PEP 503 form (two entries that normalise to the same name are an error); unknown keys fail with `Unknown keys in packages.<name>: foo`, wrong types with `packages.<name>.hold must be a boolean, got str`, bad values with `packages.<name>.max_update must be one of patch, minor, major, got 'x'`. `allow_prerelease = true` makes pre-releases candidates for that package (no global equivalent).
+`max_update` is only a cap: `max_update = "major"` permits a major but does not cross one. Set
+`allow_major = true` (same as `--allow-major <name>`) to let the package move to a higher major, within
+the bounds your requirement declares.
+A top-level `[packages.x]` outside the `depkeeper` table is ignored.
+
+For calver packages the change labels are `year`, `month` and `patch`. **By design** a calver
+`year` change counts as `minor` for `--fail-on`, `--max-update` and `fail_on`, so `--fail-on major`
+never trips on a year-only bump (use `minor` or `updates`).
 
 ### Type validation
 
@@ -70,21 +100,21 @@ TOML booleans only: `true` / `false`, unquoted.
 
 ## File formats
 
-=== "depkeeper.toml"
+**depkeeper.toml**
 
-    ```toml
-    [depkeeper]
-    check_conflicts = true
-    strict_version_matching = false
-    ```
+```toml
+[depkeeper]
+check_conflicts = true
+strict_version_matching = false
+```
 
-=== "pyproject.toml"
+**pyproject.toml**
 
-    ```toml
-    [tool.depkeeper]
-    check_conflicts = true
-    strict_version_matching = false
-    ```
+```toml
+[tool.depkeeper]
+check_conflicts = true
+strict_version_matching = false
+```
 
 ---
 
@@ -92,18 +122,18 @@ TOML booleans only: `true` / `false`, unquoted.
 
 | Order | Source | Condition |
 |---|---|---|
-| 1 | `--config` / `-c`, or `DEPKEEPER_CONFIG` | Must exist and be a file, otherwise `ConfigError`. |
-| 2 | `./depkeeper.toml` | Must exist in the **current working directory**. |
-| 3 | `./pyproject.toml` | Adopted **only if** it contains a `[tool.depkeeper]` table. |
+| 1 | `--config` / `-c`, or `DEPKEEPER_CONFIG` | Must exist and be a file; the CLI rejects a missing path with a usage error (exit `2`). `load_config()` / `discover_config_file()` raise `ConfigError` instead. |
+| 2 | `depkeeper.toml` | Current directory, then each parent, stopping at the repository root (a directory containing `.git`). Without a `.git` the walk never goes above your home directory (outside the home directory it runs to the filesystem root). |
+| 3 | `pyproject.toml` | Same search; adopted **only if** it contains a `[tool.depkeeper]` table. |
 | 4 | Built-in defaults | Always. |
 
 Notes:
 
-- Discovery is not recursive; parent directories are not searched.
+- An explicit `--config` file lacking its `[depkeeper]` / `[tool.depkeeper]` table is an error.
 - A `pyproject.toml` whose parse fails during the `[tool.depkeeper]` probe is treated as "no
   depkeeper section" and skipped silently, so a malformed unrelated `pyproject.toml` cannot break
   a depkeeper run.
-- A discovered file with an empty or absent depkeeper section is valid and yields the defaults,
+- A discovered file with an empty depkeeper section is valid and yields the defaults,
   with `source_path` recorded.
 
 ### Encoding
@@ -128,8 +158,8 @@ TOML parsing is always performed by `tomli`, a hard runtime dependency, so Pytho
 built-in defaults  <  configuration file  <  command-line flag
 ```
 
-Both `--strict-version-matching` and `--check-conflicts` default to an internal "unset" value, so
-omitting them means "use the configuration value".
+`--strict-version-matching`, `--check-conflicts` and `--fail-on` default to an internal "unset" value, so
+omitting them means "use the configuration value". `--python-version` and `--min-age` fall back to `python_version` / `min_age` the same way; `--ignore` is merged with `ignore`.
 
 | Config | CLI | Effective |
 |---|---|---|
@@ -138,7 +168,8 @@ omitting them means "use the configuration value".
 | `check_conflicts = false` | `--check-conflicts` | `true` |
 | `check_conflicts = true` | `--no-check-conflicts` | `false` |
 | `strict_version_matching = true` | *(none)* | `true` |
-| `strict_version_matching = true` | *(no negative form exists)* | `true` |
+| `strict_version_matching = true` | `check --no-strict-version-matching` | `false` |
+| `strict_version_matching = true` | `update` (no negative form) | `true` |
 
 ---
 
@@ -151,6 +182,7 @@ omitting them means "use the configuration value".
 | `NO_COLOR` | `rich`, `click`, `depkeeper.utils.logger` | Any non-empty value disables colour. depkeeper **sets** it when `--no-color` is resolved and **clears** it when `--color` is resolved, so downstream libraries follow the flag. |
 | `CI` | `depkeeper.utils.logger` | Any non-empty value disables ANSI colour in log records. |
 | `HTTPS_PROXY` / `HTTP_PROXY` / `NO_PROXY` | `httpx` | Proxy configuration. |
+| `PIP_INDEX_URL`, ... | `pip` (only `update --verify`) | Honoured by the pip subprocess; depkeeper's own queries always use pypi.org. |
 | `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` | `httpx` / `certifi` | Custom CA bundle for TLS interception. |
 
 Colour is probed **per stream**, so a piped stdout does not disable colour on an interactive
@@ -160,7 +192,7 @@ stderr.
 
 ## Values that are not configurable
 
-The following are module constants in 0.1.x and cannot be changed from a file, an environment
+The following are module constants in 1.x and cannot be changed from a file, an environment
 variable or a flag:
 
 | Constant | Value | Module |
@@ -188,9 +220,9 @@ depkeeper -vv check 2>&1 | head -n 5
 ```
 
 ```text
-DEBUG: depkeeper v0.1.1
+DEBUG: depkeeper v1.0.0
 DEBUG: Config path: /path/to/depkeeper.toml
-DEBUG: Loaded configuration: {'check_conflicts': True, 'strict_version_matching': False}
+DEBUG: Loaded configuration: {'check_conflicts': True, 'strict_version_matching': False, 'fail_on': 'none', 'ignore': []}
 DEBUG: Verbosity: 2 | Color: True
 ```
 

@@ -1,6 +1,9 @@
+"""Tests for the ``python -m depkeeper`` entry point."""
+
 from __future__ import annotations
 
 import sys
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -84,7 +87,7 @@ class TestPrintStartupError:
         """Test _print_startup_error handles version import failure gracefully."""
         test_error = ImportError("Test error message")
 
-        def mock_import(name, *args, **kwargs):
+        def mock_import(name: str, *args: Any, **kwargs: Any) -> Any:
             if "depkeeper.__version__" in name or name == "depkeeper.__version__":
                 raise ImportError("Cannot import version")
             return __import__(name, *args, **kwargs)

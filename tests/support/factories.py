@@ -171,7 +171,7 @@ def specs(*pairs: str) -> List[Spec]:
     for pair in pairs:
         for operator in operators:
             if pair.startswith(operator):
-                parsed.append((operator, pair[len(operator):]))
+                parsed.append((operator, pair[len(operator) :]))
                 break
         else:
             raise ValueError(f"Not a version specifier: {pair!r}")

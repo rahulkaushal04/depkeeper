@@ -5,8 +5,7 @@ description: Typing, docstrings, comments and naming conventions enforced in dep
 
 # Code Style
 
-These conventions are enforced by review, by `mypy --strict`, and by the documentation build
-(`mkdocs.yml` sets `docstring_style: google`).
+These conventions are enforced by review, `mypy --strict`, and `ruff format` / `ruff check --select E9,F` in CI.
 
 ---
 
@@ -28,15 +27,14 @@ from typing import Dict, List, Optional, Sequence, Tuple
 | `Optional[X]` rather than `X | None` in runtime positions. | 3.8 compatibility. |
 | Public constants are `Final`. | See `constants.py`. |
 
-The project baseline is exactly one known mypy error (`data_store.py`, `no-any-return`). A pull
-request must not add a second.
+The mypy baseline is zero errors. A pull request must not add one.
 
 ---
 
 ## Docstrings
 
-**Google style**, without exception. This is what `mkdocstrings` is configured to parse, so a
-deviation degrades the generated [Python API](../reference/python-api.md) page.
+**Google style**, without exception. This keeps docstrings consistent and easy to scan, and the
+[Python API](../reference/python-api.md) reference follows the same shape.
 
 ```python
 def rewrite_version_specs(specs: Sequence[Spec], new_version: str) -> List[Spec]:
@@ -64,19 +62,15 @@ def rewrite_version_specs(specs: Sequence[Spec], new_version: str) -> List[Spec]
 | Summary on the **same line** as the opening `"""`. | PEP 257. Never open with a blank line. |
 | Imperative mood for the summary. | "Return the …", not "Returns the …". |
 | `Args:` documents **callable parameters only**. | |
-| Dataclasses and NamedTuples document fields under `Attributes:`. | `merge_init_into_class: true` folds `__init__` into the class, so constructor arguments belong under the class's `Args:`. |
+| Dataclasses and NamedTuples document fields under `Attributes:`. | Constructor arguments belong under the class's `Args:`. |
 | `Raises:` lists every exception a caller can reasonably catch. | |
 | American English throughout. | normalize, behavior, color, initialize, canonicalize. |
 
 ### Referencing other symbols
 
 Use a plain Markdown code span — `` `Requirement` ``, `` `_find_updates` `` — never a Sphinx
-role such as `:class:` or `:meth:`. This project's `mkdocs.yml` uses
-`docstring_style: google` without the `autorefs` plugin, so Sphinx interpreted-text roles are
-not resolved by `mkdocstrings`: they render as literal, broken text (`:meth:reset` instead of a
-link or even a code span). A prior revision of the codebase used them throughout; they were
-mechanically converted to plain code spans after the defect was found on the generated
-[Python API](../reference/python-api.md) page.
+role such as `:class:` or `:meth:`. Nothing in this project resolves those roles, so they show
+up as literal, broken text.
 
 ### Doctest examples
 
@@ -85,8 +79,7 @@ blocks are unverified prose.
 
 - Keep them only on the **public** API, and only when you have actually executed them.
 - Do not add them to private helpers.
-- A wrong example is worse than no example: earlier revisions carried fabricated output such as
-  `<Requirement requests>=2.25.0>`, which is not the real `__repr__`.
+- A wrong example is worse than no example.
 
 ---
 
@@ -163,8 +156,7 @@ logger = get_logger("module_name")
 __all__ = ["PublicThing"]     # when the module has a curated public surface
 ```
 
-Within a class, order members: public API first, then private helpers, then dunders. `mkdocs.yml`
-sets `members_order: source`, so source order is what readers of the API page see.
+Within a class, order members: public API first, then private helpers, then dunders.
 
 ---
 
@@ -212,7 +204,7 @@ Level guidance:
 | Network I/O is `async`. | All of it goes through `HTTPClient`. |
 | Do not create an event loop in library code. | Commands own `asyncio.run`. |
 | Share the `PyPIDataStore`. | This is what guarantees one fetch per package. |
-| Bound concurrency with a semaphore, deduplicate with the in-flight map. | A semaphore alone cannot deduplicate. See [D2](../concepts/architecture.md#d2-request-coalescing-not-just-a-semaphore). |
+| Bound concurrency with a semaphore, deduplicate with the in-flight map. | A semaphore alone cannot deduplicate. See [D2](../concepts/architecture.md#d2--request-coalescing-not-just-a-semaphore). |
 | Use `asyncio.gather(..., return_exceptions=True)` for per-item work that must not abort the batch. | |
 
 ---
@@ -220,7 +212,7 @@ Level guidance:
 ## Formatting
 
 - 4-space indentation, no tabs.
-- Target ~88 columns; do not reflow unrelated lines to satisfy it.
+- Line length 88 (`ruff format`); do not reflow unrelated lines.
 - LF line endings in the repository (enforced by pre-commit).
 - One blank line between methods, two between top-level definitions.
 - Trailing commas in multi-line literals and call sites.

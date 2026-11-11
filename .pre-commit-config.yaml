@@ -13,7 +13,6 @@ repos:
       - id: mixed-line-ending
         args: ["--fix=lf"]
       - id: check-yaml
-        exclude: ^mkdocs\.yml$
       - id: check-json
       - id: check-toml
       - id: check-added-large-files

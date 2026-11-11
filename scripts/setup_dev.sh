@@ -133,7 +133,7 @@ info "Running initial tests..."
 if pytest -q --disable-warnings 2>/dev/null; then
     success "Initial tests passed"
 else
-    warn "No tests found or some tests failed (expected in early development phases)"
+    warn "No tests found or some tests failed"
 fi
 
 

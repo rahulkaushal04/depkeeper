@@ -1,9 +1,4 @@
-"""Tests for requirement source-file provenance in the parser.
-
-These tests guard against regression C1: requirements pulled in through
-``-r`` includes must retain the *included* file's path (and line numbers),
-so the update writer can rewrite the correct file.
-"""
+"""Requirements keep the path and line numbers of the file that declared them."""
 
 from __future__ import annotations
 
@@ -19,7 +14,9 @@ def parser() -> RequirementsParser:
     return RequirementsParser()
 
 
-def test_source_file_set_for_flat_file(tmp_path: Path, parser: RequirementsParser) -> None:
+def test_source_file_set_for_flat_file(
+    tmp_path: Path, parser: RequirementsParser
+) -> None:
     """Every requirement records the file it was parsed from."""
     req_file = tmp_path / "requirements.txt"
     req_file.write_text("click==8.0.0\nrich==13.0.0\n", encoding="utf-8")

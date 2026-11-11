@@ -52,14 +52,20 @@ django>=3.2,<5.0
 ```
 
 - The major anchor is `3`, so depkeeper caps at the newest `3.x` — it will **not** move you to
-  `4.2.x` even though your own range allows it.
-- To take the major step, edit the floor yourself, then let depkeeper continue from there:
+  `4.2.x` even though your own range allows it. It reports `major available: django 4.2.30 (use
+  --allow-major django)` instead.
+- To take the major step, either opt in per package, or edit the floor yourself:
+
+```bash
+depkeeper update -p django --allow-major django --verify --dry-run
+```
 
 ```text
 django>=4.2,<5.0
 ```
 
-Plan major upgrades deliberately. depkeeper is not the tool that performs them.
+`--allow-major` stays inside your own upper bounds (`<5.0` means the newest `4.x`). Plan major
+upgrades deliberately: opt in one package at a time, use `--verify`, and run your tests.
 
 ---
 
@@ -78,18 +84,18 @@ with other libraries almost impossible.
 
 ## Split by purpose, compose with `-r`
 
-```text title="requirements/base.txt"
+```text
 django>=4.2,<5.0
 psycopg[binary]>=3.1,<4.0
 ```
 
-```text title="requirements/dev.txt"
+```text
 -r base.txt
 pytest>=8.0,<9.0
 mypy>=1.8,<2.0
 ```
 
-```text title="requirements/prod.txt"
+```text
 -r base.txt
 gunicorn>=21.2,<22.0
 ```
@@ -121,7 +127,7 @@ recorded reason becomes indistinguishable from an accidental one after six month
 
 ```bash
 depkeeper update --dry-run       # what would change
-depkeeper update --backup        # apply
+depkeeper update --backup --verify  # apply, after pip has dry-run-resolved the plan
 pip install -r requirements.txt  # does it resolve?
 pytest                            # does it work?
 git diff requirements.txt         # review before committing
@@ -164,16 +170,16 @@ werkzeug>=2.3.7,<3.0
 
 ## Handle hash-pinned files deliberately
 
-Do not run plain `depkeeper update` against a `--require-hashes` file and hope for the best. The
-supported sequence is:
+Plain `depkeeper update` refuses a file with `--hash` entries. Use:
 
 ```bash
-depkeeper update --allow-hash-removal -y
-pip-compile --generate-hashes requirements.in
+depkeeper update --refresh-hashes -y
 ```
 
+It regenerates the `--hash=sha256:` lines for each updated requirement from PyPI's file digests.
 `--allow-hash-removal` strips digests only from the lines it changes, producing a partially hashed
-file that `pip --require-hashes` rejects. Regenerating hashes is not optional.
+file that `pip --require-hashes` rejects, so regenerate them afterwards
+(`pip-compile --generate-hashes requirements.in`). The two flags are mutually exclusive.
 
 ---
 
@@ -203,8 +209,10 @@ python -m pip install depkeeper
 pipx install --python python3.12 depkeeper
 ```
 
-Compatibility filtering uses the interpreter depkeeper runs on. A mismatch makes recommendations
-silently conservative and is very hard to notice.
+Unless told otherwise, compatibility filtering uses the interpreter depkeeper runs on, and a
+mismatch makes recommendations silently conservative. Make the target explicit instead: declare
+`requires-python` in `pyproject.toml` (the lowest supported minor is used), set `python_version`
+in the config, or pass `--python-version 3.9`.
 
 ---
 
@@ -213,9 +221,9 @@ silently conservative and is very hard to notice.
 | Cadence | Action |
 |---|---|
 | Weekly | `check --format json` drift report published as a build artefact. |
-| Weekly | Automated `update -y` pull request, verified by the full test suite. |
+| Weekly | Automated `update -y --verify` pull request, verified by the full test suite. |
 | Per release | `update --pin` for applications, followed by a full verification run. |
-| Quarterly | Deliberate review of major upgrades, which depkeeper will never propose. |
+| Quarterly | Deliberate review of major upgrades, which depkeeper only applies with `--allow-major`. |
 
 Never merge an automated dependency pull request that has not run `pip install` and the test
 suite.
@@ -227,7 +235,8 @@ suite.
 | Anti-pattern | Why it hurts |
 |---|---|
 | `depkeeper update -y` in a deploy pipeline, unreviewed | Applies downgrades and floor changes with no human in the loop. |
-| Treating `check`'s exit code as a drift signal | It is always `0` on success. Parse the JSON. |
+| Treating `check`'s exit code as a drift signal without `--fail-on` | It is `0` on success. Use `--fail-on` (exit `3`) or parse the JSON; remember `4` means a lookup failed. |
+| Updating freshly published releases | Add `--min-age 7d` (or `min_age`) so new releases settle first. |
 | Unpinned depkeeper in CI | Behaviour changes without a repository change. |
 | Using `--pin` on a library | Forces pins onto every consumer. |
 | Relying on `--backup` as version control | Backups accumulate, are never cleaned up, and carry no history. |

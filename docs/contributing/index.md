@@ -8,39 +8,11 @@ description: How to contribute to depkeeper — orientation, workflow and standa
 Contributions are welcome. This section documents the standards a change must meet before it can
 be merged.
 
-<div class="grid cards" markdown>
-
-- :material-tools:{ .lg .middle } **[Development setup](development-setup.md)**
-
-    ---
-
-    Environment, tooling, verification commands and the change workflow.
-
-- :material-format-align-left:{ .lg .middle } **[Code style](code-style.md)**
-
-    ---
-
-    Typing, docstrings, comments and naming conventions — all enforced.
-
-- :material-test-tube:{ .lg .middle } **[Testing](testing.md)**
-
-    ---
-
-    Suite layout, shared fixtures, isolation traps and what must be tested.
-
-- :material-puzzle:{ .lg .middle } **[Extending depkeeper](extending.md)**
-
-    ---
-
-    Where to add a flag, a format, a check or a parser, and the invariants you must not break.
-
-- :material-tag:{ .lg .middle } **[Release process](release-process.md)**
-
-    ---
-
-    Versioning, changelog, build and publish steps.
-
-</div>
+- **[Development setup](development-setup.md)** — Environment, tooling, verification commands and the change workflow.
+- **[Code style](code-style.md)** — Typing, docstrings, comments and naming conventions — all enforced.
+- **[Testing](testing.md)** — Suite layout, shared fixtures, isolation traps and what must be tested.
+- **[Extending depkeeper](extending.md)** — Where to add a flag, a format, a check or a parser, and the invariants you must not break.
+- **[Release process](release-process.md)** — Versioning, changelog, build and publish steps.
 
 ---
 
@@ -74,6 +46,7 @@ A change is ready to merge when all of the following hold:
 - [ ] `python -m pytest tests -q --no-cov` passes.
 - [ ] `python -m mypy depkeeper --python-version 3.13` reports no new errors.
 - [ ] `python -m compileall -q depkeeper` succeeds.
+- [ ] `python -m ruff format --check depkeeper tests` and `python -m ruff check --select E9,F depkeeper tests` are clean.
 - [ ] `pre-commit run --all-files` passes.
 - [ ] New behaviour has tests; fixed bugs have regression tests.
 - [ ] Public API changes are reflected in the docstrings **and** in the affected
@@ -86,18 +59,15 @@ A change is ready to merge when all of the following hold:
 
 ## Commit convention
 
-Conventional Commits:
+Short, imperative subject lines with no required prefix:
 
 ```text
-feat(update): add --pin to replace declared ranges with exact pins
-fix(parser): join backslash line continuations
-docs(reference): document the JSON schema
-test(analyzer): pin cumulative-conflict behaviour
-refactor(core): extract the alternative search from the resolution loop
-chore(deps): bump httpx floor
+Fix duplicate-requirement resolution
+Add --allow-major for opt-in major upgrades
+Document the JSON schema
 ```
 
-The scope is the module or subsystem. The body should state *why*, not what — the diff already
+Squash-merged PRs end with the PR number. The body should state *why*, not what — the diff already
 says what.
 
 ---

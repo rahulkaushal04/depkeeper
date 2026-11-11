@@ -17,7 +17,7 @@ Enabled by default. Disable with `--no-check-conflicts` or `check_conflicts = fa
 
 For every package *P* at its proposed version *V*, depkeeper fetches *V*'s `requires_dist` and,
 for each dependency *D* **that also appears in your requirements file**, verifies that *D*'s
-proposed version satisfies *P*'s specifier.
+proposed version satisfies *P*'s specifier. A package's requirement on itself is ignored.
 
 ## What is not checked
 
@@ -25,8 +25,8 @@ proposed version satisfies *P*'s specifier.
 |---|---|
 | Dependencies absent from your file | depkeeper cannot adjust what you did not declare, so it cannot be a resolvable conflict. |
 | Transitive dependencies | Only direct `requires_dist` of the proposed versions is read; the graph is not expanded. |
-| Extra-conditional dependencies | Entries carrying a `; extra == "..."` marker are stripped. |
-| Environment-marker-conditional dependencies | The marker is stripped and the base requirement is always considered. A dependency that applies only on Windows is evaluated everywhere. |
+| Extra-conditional dependencies | Entries carrying a `; extra == "..."` marker evaluate false with `extra` empty and are skipped. |
+| Environment-marker-conditional dependencies | Markers are evaluated with `python_version` / `python_full_version` set to the **target Python** (`X.Y` and `X.Y.0`) and every other marker (platform, etc.) taken from the host, with `extra` empty; a dependency whose marker is false there is skipped, so a Windows-only dependency is ignored on Linux. The marker is then stripped. |
 | Build-time requirements | `requires_dist` only. |
 
 **depkeeper is not a substitute for `pip`'s resolver.** Always install and test the result.
@@ -35,55 +35,9 @@ proposed version satisfies *P*'s specifier.
 
 ## Algorithm
 
-<figure>
-<svg viewBox="0 0 700 700" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Build the update set, prefetch metadata, then loop: scan for cross-conflicts, record them, and resolve within major boundaries until converged or stalled, then compute and selectively adopt advisory alternatives before annotating packages">
-<defs><marker id="cr-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
-<g font-family="var(--md-text-font-family, sans-serif)" fill="currentColor">
-<rect x="170" y="20" width="260" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
-<text x="300" y="41" text-anchor="middle" font-size="14">Build update set</text>
-<text x="300" y="58" text-anchor="middle" font-size="11">name → recommended or current</text>
-<line x1="300" y1="70" x2="300" y2="98" stroke="currentColor" stroke-width="1.5" marker-end="url(#cr-arrow)"/>
-<rect x="170" y="100" width="260" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
-<text x="300" y="121" text-anchor="middle" font-size="14">Prefetch metadata</text>
-<text x="300" y="138" text-anchor="middle" font-size="11">one concurrent round-trip</text>
-<line x1="300" y1="150" x2="300" y2="173" stroke="currentColor" stroke-width="1.5" marker-end="url(#cr-arrow)"/>
-<polygon points="300,175 430,225 300,275 170,225" fill="none" stroke="currentColor" stroke-width="1.5"/>
-<text x="300" y="220" text-anchor="middle" font-size="14">Cross-conflicts</text>
-<text x="300" y="236" text-anchor="middle" font-size="14">found?</text>
-<path d="M430,225 H468" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#cr-arrow)"/>
-<text x="449" y="217" text-anchor="middle" font-size="11" font-style="italic">no</text>
-<path d="M300,275 V298" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#cr-arrow)"/>
-<text x="316" y="290" text-anchor="start" font-size="11" font-style="italic">yes</text>
-<rect x="170" y="300" width="260" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
-<text x="300" y="321" text-anchor="middle" font-size="14">Record conflicts</text>
-<text x="300" y="338" text-anchor="middle" font-size="11">deduplicated</text>
-<line x1="300" y1="350" x2="300" y2="373" stroke="currentColor" stroke-width="1.5" marker-end="url(#cr-arrow)"/>
-<rect x="170" y="375" width="260" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
-<text x="300" y="396" text-anchor="middle" font-size="14">Resolve within major</text>
-<text x="300" y="413" text-anchor="middle" font-size="11">boundaries</text>
-<path d="M430,400 H468" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#cr-arrow)"/>
-<text x="450" y="392" text-anchor="middle" font-size="11" font-style="italic">stalled</text>
-<path d="M170,400 H100 V225 H172" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#cr-arrow)"/>
-<text x="90" y="312" text-anchor="middle" font-size="11" font-style="italic" transform="rotate(-90 90 312)">version changed</text>
-<rect x="470" y="175" width="170" height="250" rx="6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 3"/>
-<text x="555" y="285" text-anchor="middle" font-size="14">Loop exit</text>
-<text x="555" y="303" text-anchor="middle" font-size="11">converged, stalled,</text>
-<text x="555" y="318" text-anchor="middle" font-size="11">or 100 passes</text>
-<path d="M555,425 V440 H300 V468" fill="none" stroke="currentColor" stroke-width="1.5" marker-end="url(#cr-arrow)"/>
-<rect x="170" y="470" width="260" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
-<text x="300" y="491" text-anchor="middle" font-size="14">Compute advisory</text>
-<text x="300" y="508" text-anchor="middle" font-size="11">alternatives</text>
-<line x1="300" y1="520" x2="300" y2="543" stroke="currentColor" stroke-width="1.5" marker-end="url(#cr-arrow)"/>
-<rect x="170" y="545" width="260" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
-<text x="300" y="566" text-anchor="middle" font-size="14">Adopt alternative where a</text>
-<text x="300" y="583" text-anchor="middle" font-size="11">live conflict remains</text>
-<line x1="300" y1="595" x2="300" y2="618" stroke="currentColor" stroke-width="1.5" marker-end="url(#cr-arrow)"/>
-<rect x="170" y="620" width="260" height="50" rx="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
-<text x="300" y="641" text-anchor="middle" font-size="14">Annotate packages,</text>
-<text x="300" y="658" text-anchor="middle" font-size="11">build ResolutionResult</text>
-</g></svg>
-<figcaption>Up to 100 passes; a pass that changes nothing stops the loop early (stalled).</figcaption>
-</figure>
+<p align="center"><img src="../../assets/diagrams/conflict-resolution.svg" alt="The resolver loops up to 100 passes of scan, record and resolve within major boundaries, then adopts an advisory alternative only where a conflict stays live." width="640"></p>
+
+*Up to 100 passes; a pass that changes nothing stops the loop early (stalled).*
 
 ### Phase 1 — Initialise
 
@@ -107,19 +61,27 @@ dotted-name conflicts are detected at all.
 ### Phase 3 — Resolve, within boundaries
 
 For each unique **source** package in the conflict list, two strategies are tried in order.
-Only one conflict per source package is processed per pass.
+Only one conflict per source package is processed per pass, and sources are visited in name order, so the
+result does not depend on the order of the files.
 
 **Strategy 1 — step the source back.** Walk the source's releases newest-first, within its
-current major, and stop at the first version whose requirement on the target is satisfied by the
-target's proposed version (or which does not depend on the target at all). Bounded at 50
-evaluated candidates; pre-releases are skipped and do not consume the budget.
+boundary, and stop at the first version whose requirement on the target is satisfied by the
+target's proposed version (or which does not depend on the target at all). The walk honours the
+source's own retained specs, the target Python, and the checker's policy (hold, `max_update`,
+`min_age`, pre-release rule), stops below the installed version, and evaluates at most 50 candidates. A candidate must also satisfy its
+requirements on every *other* proposed package, so a step back cannot trade one conflict for another.
 
-**Strategy 2 — constrain the target.** Find the highest stable release of the target, within the
-target's current major, that satisfies the source's specifier, and revert the source to its
-current version.
+**Strategy 2 — constrain the target.** Find the highest release of the target, within the
+target's boundary and under the same retained-spec and policy filters, that satisfies the source's
+specifier, and revert the source to its current version. The candidate must also satisfy what
+every other proposed package requires of the target, and the target's own requirements on the proposals.
+A package that is **held** or **ignored** is never lowered this way.
 
-**Fallback.** If neither succeeds, **both** packages revert to their current versions and a
-`WARNING` is logged:
+The *boundary* is the current major for semver packages, and unbounded for calver packages and
+for packages opted in with `--allow-major`.
+
+**Fallback.** If neither succeeds, **both** packages revert to their current versions (those that
+have one) and a `WARNING` is logged:
 
 ```text
 No compatible version found for flask ↔ werkzeug within major boundaries; reverting both
@@ -132,15 +94,21 @@ Reverting is the safe outcome: it produces no change rather than a change that m
 | Condition | Outcome |
 |---|---|
 | No conflicts detected in a pass | `converged = True` |
-| A pass changes nothing | Loop stops early (`stalled`); further passes would repeat the same conflict set. |
-| 100 passes elapse | `converged = False`; a `WARNING` is logged. |
+| A pass moves the update set back to a state already seen | Loop stops early (`cycling`) with a `WARNING`. |
+| A pass changes nothing | Loop stops early (`stalled`) with a `WARNING`; `converged = False`, since conflicts remained. |
+| 100 passes elapse | A `WARNING` is logged. |
+
+`converged` is decided on the **final** set: it is `True` exactly when no package in it violates a
+requirement of another, even if the loop stalled, cycled or ran out of passes and an advisory
+alternative (below) repaired the rest.
 
 `iterations_used` and `converged` are reported in the Resolution Summary.
 
 ### Phase 5 — Advisory alternatives
 
-`conflict_tracking` is **cumulative**: it holds every conflict seen in any pass, including ones a
-later pass resolved. For each package with recorded conflicts, depkeeper computes the highest
+`conflict_tracking` is **cumulative** and internal: it holds every conflict seen in any pass,
+including ones a later pass resolved. (The conflicts shown to you per package are the live subset
+for the final update set, each listed once.) For each package with recorded conflicts, depkeeper computes the highest
 version — within its major, not below its current version — that satisfies *all* recorded
 specifiers intersected together. This is `compatible_alternative`.
 
@@ -148,7 +116,8 @@ It is **advisory**. It is adopted into the applied version only when:
 
 1. the package still has a **live** conflict, and
 2. the alternative satisfies every live conflict, and
-3. it differs from the currently proposed version.
+3. it differs from the currently proposed version, and
+4. adopting it introduces no conflict the current set does not already have.
 
 A conflict is *live* when the source package is still headed for the recorded `source_version`
 **and** the target's final version still fails the required specifier. Conflicts a later pass
@@ -190,53 +159,62 @@ Each package receives a `ResolutionStatus`:
 
 ## Worked example
 
-```text title="conflict.txt"
+```text
 flask>=2.3,<3.0
 werkzeug>=2.2,<2.3
 ```
 
-`flask 2.3.3` requires `Werkzeug>=2.3.7`, but your file caps `werkzeug` below `2.3`.
+`flask 2.3.3` requires `Werkzeug>=2.3.0`, but your file caps `werkzeug` below `2.3`.
 
 ```bash
 depkeeper check conflict.txt
 ```
 
+Real output (the table trimmed of its `Python Support` column):
+
 ```text
+WARNING: No compatible version found for flask ↔ werkzeug within major boundaries; reverting both
+WARNING: No compatible version found for flask ↔ werkzeug within major boundaries; reverting both
+WARNING: Conflict resolution stalled after 2 iteration(s)
+
 Resolution Summary:
 ==================================================
 Total packages: 2
 Packages with conflicts: 1
-Packages changed: 1
-Converged: Yes (2 iterations)
+Packages changed: 2
+Converged: No (stopped after 2 iterations)
 
 Version changes:
-  • flask: 2.3.3 → 2.2.5 (constrained)
+  • flask: 2.3.3 → 2.3 (kept_current)
+  • werkzeug: 2.2.3 → 2.2 (kept_current)
 
 ┏━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃   Status   ┃ Package  ┃ Current ┃ Latest ┃ Recommended ┃ Update Type ┃ Conflicts             ┃
 ┡━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━┩
-│  [INCOMP]  │ flask    │   2.3   │ 3.1.3  │    2.2.5    │  downgrade  │ -                     │
-│[OUTDATED]  │ werkzeug │   2.2   │ 3.1.8  │    2.2.3    │    patch    │ ⚠ flask needs >=2.3.7 │
+│    [OK]    │ flask    │   2.3   │ 3.1.3  │      -      │      -      │ -                     │
+│ [CONFLICT] │ werkzeug │   2.2   │ 3.1.9  │      -      │   blocked   │ ⚠ flask needs >=2.3.0 │
 └────────────┴──────────┴─────────┴────────┴─────────────┴─────────────┴───────────────────────┘
-[WARNING] 1 package(s) have unresolved conflicts — see 'Conflicts' column
 ```
 
 Read this carefully:
 
-- `flask` was **constrained down** to `2.2.5` — below the `>=2.3` floor you declared. The retained
-  spec `<3.0` is still satisfied, so the write is permitted and `update` will produce
-  `flask>=2.2.5,<3.0`. This is intentional (the alternative is a set that does not install) but it
-  silently relaxes your floor. Review downgrades before accepting them.
-- `werkzeug` still shows the conflict `flask needs >=2.3.7` even though `flask` has since moved to
-  `2.2.5`, which does not require it. Conflict lists are cumulative by design: they are the audit
-  trail of what was considered, not the list of currently live problems. `packages_with_conflicts`
-  counts the same way.
+- Each package's inferred current version is its floor: `flask 2.3`, `werkzeug 2.2`. The initial
+  proposals were `flask 2.3.3` (the newest 2.x allowed) and `werkzeug 2.2.3`.
+- Strategy 1 found no `flask` release at or above `2.3` that accepts `werkzeug 2.2.3`; strategy 2
+  found no `werkzeug` below `2.3` that satisfies `>=2.3.0`. So **both reverted** to their current
+  versions. `Version changes` therefore prints `2.3.3 → 2.3` (original proposal to the reverted
+  current version) with status `kept_current`: nothing will be written.
+- The pass that changed nothing made the loop stop as stalled, so `Converged: No`. No update is
+  applied, but your file itself is in conflict (`flask>=2.3` needs `werkzeug>=2.3.0`; you capped it at `<2.3`). The `Conflicts`
+  column keeps `⚠ flask needs >=2.3.0` as the audit trail.
+- The `Version changes` arrow can look odd for this reason. It shows proposal to outcome, not
+  declared to outcome.
 
-To keep `flask` at `2.3.x`, raise the werkzeug cap yourself:
+To let `flask` move, raise the werkzeug cap yourself:
 
 ```text
 flask>=2.3,<3.0
-werkzeug>=2.3.7,<3.0
+werkzeug>=2.3.0,<3.0
 ```
 
 ---
@@ -246,7 +224,7 @@ werkzeug>=2.3.7,<3.0
 A downgrade is proposed when the declared version cannot be used:
 
 - another package in the file requires an older release, or
-- the declared version is not compatible with the running interpreter.
+- the declared version is not compatible with the target Python.
 
 Downgrades render as `[INCOMP]` in the table, `downgrade` in JSON, and `downgrade` in the update
 plan's `Change` column. They **are** applied by `update`. If you do not want that, run with
@@ -262,17 +240,18 @@ plan's `Change` column. They **are** applied by `update`. If you do not want tha
 | Malformed `requires_dist` entry | Logged at DEBUG, skipped. |
 | Unparseable required specifier | Treated as satisfied. Malformed upstream metadata can never veto a version on its own. |
 | Source package has several conflicts | Only one is processed per pass. A source whose first conflict is unresolvable can hide a second, satisfiable one. |
-| Resolution does not converge in 100 passes | `converged: No` in the summary; the current update set is applied as-is. |
-| A package has no current version | It has no major anchor, so it cannot be constrained by the boundary-aware searches; it keeps the checker's cross-major recommendation. |
+| Resolution does not converge in 100 passes | The final set is rescanned; remaining conflicts are reported and `converged: No` is shown. The update set is applied as-is. |
+| A package has no current version | It has no major anchor, so both boundary-aware searches return nothing for it; it keeps the checker's recommendation. |
 
 The negative cache exists to prevent a retry storm: without it, an unreachable package would be
 re-requested — with full retry and backoff — on each of up to 100 passes.
 
-!!! note "Negative caching is analyzer-local"
-
-    The `PyPIDataStore` itself never caches failures, because `prefetch_packages` swallows errors
-    and the checker legitimately retries afterwards. Sticky failures there would regress recovery
-    from transient errors.
+> [!NOTE]
+> **Negative caching is analyzer-local**
+>
+> The `PyPIDataStore` itself never caches failures, because `prefetch_packages` swallows errors
+> and the checker legitimately retries afterwards. Sticky failures there would regress recovery
+> from transient errors.
 
 ---
 

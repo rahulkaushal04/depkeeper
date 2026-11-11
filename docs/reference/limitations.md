@@ -1,11 +1,11 @@
 ---
 title: Known Limitations
-description: Documented behaviours that are surprising, constrained or not yet implemented in 0.1.x
+description: Documented behaviours that are surprising, constrained or not yet implemented in 1.x
 ---
 
 # Known Limitations
 
-Every entry here is verified against the 0.1.x implementation. They are documented rather than
+Every entry here is verified against the 1.x implementation. They are documented rather than
 hidden, because each one has bitten someone and each has a workaround.
 
 ---
@@ -16,23 +16,28 @@ hidden, because each one has bitten someone and each has a workaround.
 
 It cross-validates the packages **you declared** against each other, using the direct
 `requires_dist` of the proposed versions. It does not expand the transitive graph. A plan that
-looks clean can still fail `pip install`.
+looks clean can still fail `pip install`. `update --verify` asks pip's resolver about the final plan (including transitive dependencies) before anything is written, but it is skipped with a warning when pip is missing/older than 22.2, offline, or the release is source-only, and it never builds sdists.
 
-**Workaround:** always run `pip install -r requirements.txt` and your test suite after an update.
+Transitive conflicts and conflicts through extras are therefore **not detected** by `check` or by
+the update plan. For example, `celery[redis]` 5.7.0 together with `redis==4.6.0` passes `check`,
+but `update --verify` aborts because `kombu[redis]` (pulled in by the extra) is incompatible with
+that `redis`. `update --verify` is the safeguard.
+
+**Workaround:** use `update --verify`, and always run `pip install -r requirements.txt` and your test suite after an update.
 In automated pipelines this step is mandatory.
 
 ### Only `pypi.org` is queried
 
 `--index-url`, `--extra-index-url`, `-i` and `--find-links` lines are recognised and ignored.
-Packages published only to a private index always report as `[ERROR]`.
+Packages published only to a private index cannot be looked up: they are reported as `no-update` / `could not be checked` and make the run exit `4`.
 
-**Workaround:** none in 0.1.x. Split private packages into a separate file that you do not run
-depkeeper against, or accept the error rows.
+**Workaround:** none in 1.x. Split private packages into a separate file that you do not run
+depkeeper against, or use `--ignore` / the `ignore` config key for them.
 
-### Only pip requirements files are supported
+### Supported file formats
 
-No `pyproject.toml` dependency tables, `Pipfile`, `poetry.lock`, `setup.py` or `setup.cfg`. The
-parser is intentionally monolithic and pip-shaped; there is no format plugin system.
+`requirements*.txt`, `pyproject.toml` (PEP 621, PEP 735, build-system, Poetry) and conda
+`environment.yml`. Not supported: `Pipfile`, `poetry.lock`, `setup.py`, `setup.cfg`.
 
 ### No security advisory scanning
 
@@ -42,34 +47,37 @@ depkeeper reports version drift, not vulnerabilities. Use `pip-audit` or `safety
 
 ## Version selection
 
-### Calendar versioning hits the major boundary
+### Calendar versioning heuristics
 
-The boundary rule compares `release[0]`, so for `certifi 2023.7.22` the "major" is `2023` and
-`2024.x` is a boundary crossing that will never be proposed.
+Calver packages (such as `certifi 2023.7.22`) are detected automatically and updated across years;
+the change is labelled `year`. Detection is heuristic (it reads the latest releases, so a semver project whose major reaches 18+
+with minors of 12 or less can look like calver): force it with `versioning = "calver"` (or
+`"semver"`) per package. A calver `year` counts as `minor` for gating (`--fail-on`, `--max-update`).
 
 **Workaround:** leave date-versioned packages unversioned so there is no anchor, or bump the pin
 by hand.
 
-### An inferred floor caps the upgrade inside your own range
+### Major upgrades are opt-in
 
-`django>=3.2,<5.0` anchors on major `3`, so depkeeper caps at the newest `3.x` even though your
-range permits `4.x`.
+`django>=3.2,<5.0` anchors on major `3`, so depkeeper stays on the newest `3.x` even though your
+range permits `4.x`. The newer major is reported as `major available`, never applied by default.
 
-**Workaround:** raise the floor yourself (`django>=4.2,<5.0`) and let depkeeper continue from
-there. Major upgrades are a deliberate human decision.
+**Workaround:** opt in per package with `--allow-major django` (or `allow_major = true` in the package
+policy). depkeeper then moves to the newest `4.x`; your own upper bound (`<5.0`) is never violated, and
+`--max-update` still caps the result. Run `update --verify` and your tests afterwards.
 
-### No target-Python override
+### Target Python defaults to the running interpreter
 
-Compatibility filtering uses the interpreter **depkeeper runs on**, not the interpreter your
-project targets. There is no flag to change this.
+Without `--python-version`, a `python_version` config key, or a `requires-python` /
+conda `python=` declaration in the file, compatibility filtering uses the interpreter
+**depkeeper runs on**.
 
-**Workaround:** install depkeeper into the project's environment, or
-`pipx install --python python3.12 depkeeper`.
+**Fix:** pass `--python-version 3.9` (or set `python_version`), or install depkeeper into the
+project's environment.
 
-### No pre-release support
+### Pre-releases are opt-in per package
 
-Pre-releases are excluded from every candidate list, and there is no `--pre` flag. A `--pre` line
-in the requirements file has no effect on depkeeper.
+Pre-releases are excluded from candidate lists and from the reported `latest` by default. There is no global `--pre` flag, and a `--pre` line in the requirements file has no effect on depkeeper. To consider pre-releases for one package, set `allow_prerelease = true` in `[depkeeper.packages.<name>]`. Releases whose files are all yanked on PyPI are never recommended.
 
 ### `requires_python` is read from one file per release
 
@@ -89,16 +97,6 @@ renderer falls through to its up-to-date branch: `[OK]`. The machine formats cor
 **Workaround:** trust `--format json` / `--format simple`; give every requirement at least a
 floor.
 
-### Unavailable packages look up to date in JSON
-
-With conflict checking enabled (the default), the resolver seeds its update set with
-`recommended_version or current_version`, so an unavailable stub acquires a recommendation equal
-to its current version and serialises as `"status": "latest"` with no `error` field.
-
-**Workaround:** detect unreachable packages with `--no-check-conflicts`, which yields
-`"status": "no-update"` plus `"error": "Package information unavailable"`, or key on the `error`
-field.
-
 ### Conflict lists are cumulative
 
 `conflicts` (JSON), the `Conflicts` column and `packages_with_conflicts` include conflicts that a
@@ -106,14 +104,6 @@ later resolution pass resolved. They are an audit trail, not a list of live prob
 
 The applied version is always correct — the [result invariant](../concepts/conflict-resolution.md#result-invariant)
 guarantees it. Only the annotation is historical.
-
-### `Python Requires` can be stale after resolution
-
-The update plan's `Python Requires` column shows the `requires_python` recorded for the version
-the **checker** proposed. If the resolver subsequently moved the package, the column is not
-refreshed.
-
-**Workaround:** verify with `pip install`.
 
 ### The simple format's arrow points at `latest`
 
@@ -139,12 +129,11 @@ which some requirements have hashes and others do not.
 
 **Workaround:** regenerate hashes afterwards with `pip-compile --generate-hashes` or `hashin`.
 
-### Backslash line continuations are not joined
+### Hashes are only refreshed on request
 
-The default output of `pip-compile --generate-hashes` wraps hashes onto continuation lines and is
-therefore unparseable.
-
-**Workaround:** use single-line hash form, or do not run depkeeper against generated hash files.
+Backslash-continued files (`pip-compile --generate-hashes`) are parsed. Updating a hashed
+requirement is refused unless you pass `--refresh-hashes` (regenerate sha256 hashes for the new
+version) or `--allow-hash-removal` (drop them).
 
 ### URL package-name inference is unreliable
 
@@ -188,26 +177,43 @@ variable.
 **Workaround:** use the [Python API](python-api.md) and construct `HTTPClient` /
 `PyPIDataStore` yourself.
 
+### Conflict check can be partial
+
+When PyPI is partly unreachable, a package's dependency metadata may be missing during conflict
+resolution. depkeeper reports this (`Conflict check incomplete: ...` on stderr,
+`summary.conflict_check_complete: false` in `json-v2`) but still prints the recommendations it
+could compute. The HTTP client's circuit breaker is per host: 3 consecutive connection failures
+to `pypi.org` stop requests to it for 30 s, then one probe decides whether to resume.
+
+### Windows treats the null device as a terminal
+
+`depkeeper update < NUL` looks interactive to depkeeper, so it shows the prompt and ends with
+`Aborted.` (exit `130`) instead of asking for `--yes`.
+
+**Workaround:** pass `--yes` or `--dry-run` in scripts.
+
 ### No file locking
 
-depkeeper reads once and writes once. A concurrent edit between those points is lost.
+depkeeper reads once and writes once. If a file changes between those points the run fails
+(`<path> was modified while depkeeper was running`) rather than overwriting it, but there is no lock
+against writers in the same instant.
 
-### `Ctrl+C` during a multi-file commit skips rollback
+### A failure mid-way through a multi-file commit
 
-Each individual file is atomic, but a batch interrupted between commits is not rolled back.
-
-**Workaround:** use `--backup` for multi-file updates.
+Each file is replaced atomically and a failed or Ctrl-C-interrupted batch restores the files already
+written. If a restore itself fails depkeeper reports `Could not restore <path>`; use `--backup` for
+multi-file updates.
 
 ### Discovery is not recursive
 
-`depkeeper.toml` / `pyproject.toml` are looked for in the current working directory only; parent
-directories are not searched.
+`depkeeper.toml` / `pyproject.toml` are looked for in the current directory and then in parent
+directories up to the repository root (the first directory containing `.git`; without a `.git`, never above your home directory).
 
 **Workaround:** pass `--config`, or run from the directory containing the file.
 
-### `--strict-version-matching` has no negative form
+### `update --strict-version-matching` has no negative form
 
-If a configuration file enables it, it cannot be disabled for a single invocation.
+If a configuration file enables `strict_version_matching`, `update` cannot disable it for one invocation (`check` has `--no-strict-version-matching`).
 
 **Workaround:** point `--config` at a different file.
 

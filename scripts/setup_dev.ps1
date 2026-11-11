@@ -137,7 +137,7 @@ pytest -q --disable-warnings 2>$null
 if ($LASTEXITCODE -eq 0) {
     Success "Initial tests passed"
 } else {
-    Warn "No tests found or some tests failed (expected in early development phases)"
+    Warn "No tests found or some tests failed"
 }
 
 

@@ -9,8 +9,6 @@ Guidelines:
 - print_table / confirm: structured or interactive CLI output
 - Logging should never go through this module
 
-Stream separation
------------------
 Every helper accepts a ``stderr`` keyword that selects the target stream.
 Commands that emit machine-readable payloads (``--format json`` /
 ``--format simple``) must keep **stdout** reserved for the payload and send
@@ -23,15 +21,15 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import unicodedata
 from typing import IO, Any, Callable, Dict, List, Optional
 
+from rich import box
+from rich.markup import escape
+from rich.measure import Measurement
 from rich.table import Table
 from rich.theme import Theme
 from rich.console import Console
-
-# ---------------------------------------------------------------------------
-# Theme configuration
-# ---------------------------------------------------------------------------
 
 DEPKEEPER_THEME = Theme(
     {
@@ -44,11 +42,51 @@ DEPKEEPER_THEME = Theme(
     }
 )
 
-# ---------------------------------------------------------------------------
-# Console lifecycle management
-# ---------------------------------------------------------------------------
+# Unicode categories removed from terminal text: control characters (ESC/CSI/OSC 8,
+# BEL, backspace, CR, C1), format characters (zero-width, bidi overrides, tag
+# characters, BOM) and the line and paragraph separators. Newline and tab are kept.
+_STRIPPED_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp"})
+_KEPT_CONTROLS = "\n\t"
 
-# Keyed by ``stderr`` flag: False -> stdout console, True -> stderr console.
+
+def strip_controls(value: object) -> str:
+    """Return ``str(value)`` without terminal control or invisible format characters."""
+    text = str(value)
+    if text.isascii() and text.isprintable():
+        return text
+    return "".join(
+        ch
+        for ch in text
+        if ch in _KEPT_CONTROLS or unicodedata.category(ch) not in _STRIPPED_CATEGORIES
+    )
+
+
+def safe_text(value: object) -> str:
+    """Make externally sourced text safe to interpolate into Rich markup.
+
+    Strips terminal control characters and escapes ``[`` markup, so PyPI
+    metadata, file names and exception text can neither style the output,
+    inject hyperlinks, nor drive the terminal.
+    """
+    return escape(strip_controls(value))
+
+
+class _SafeConsole(Console):
+    """Console that strips control characters from every string it prints."""
+
+    def print(self, *objects: Any, **kwargs: Any) -> None:
+        super().print(
+            *(strip_controls(o) if isinstance(o, str) else o for o in objects),
+            **kwargs,
+        )
+
+    def on_broken_pipe(self) -> None:
+        """Surface a closed pipe as `BrokenPipeError` (Rich would exit with 1)."""
+        self.quiet = True
+        raise BrokenPipeError
+
+
+# Keyed by the ``stderr`` flag: False is the stdout console, True the stderr one.
 _consoles: Dict[bool, Console] = {}
 _console_lock = threading.Lock()
 
@@ -61,6 +99,9 @@ def _target_stream(stderr: bool) -> IO[str]:
 def _should_use_color(*, stderr: bool = False) -> bool:
     """Return True if colored output should be enabled for the given stream.
 
+    ``NO_COLOR`` beats ``FORCE_COLOR``; otherwise ``FORCE_COLOR`` forces color
+    on a non-TTY and a TTY is colored by default.
+
     Args:
         stderr: Check ``sys.stderr`` instead of ``sys.stdout``. Each stream is
             evaluated independently because one may be a TTY while the other
@@ -68,6 +109,8 @@ def _should_use_color(*, stderr: bool = False) -> bool:
     """
     if os.environ.get("NO_COLOR"):
         return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
     try:
         return _target_stream(stderr).isatty()
     except (AttributeError, OSError):
@@ -87,10 +130,12 @@ def _get_console(*, stderr: bool = False) -> Console:
             console = _consoles.get(stderr)
             if console is None:
                 use_color = _should_use_color(stderr=stderr)
-                console = Console(
+                console = _SafeConsole(
                     theme=DEPKEEPER_THEME,
                     stderr=stderr,
-                    no_color=not use_color,
+                    # color_system=None drops every SGR code (bold/dim too);
+                    # no_color would only drop the colors.
+                    color_system="auto" if use_color else None,
                     highlight=use_color,
                 )
                 _consoles[stderr] = console
@@ -108,14 +153,13 @@ def reconfigure_console() -> None:
         _consoles.clear()
 
 
-# ---------------------------------------------------------------------------
-# Status message helpers
-# ---------------------------------------------------------------------------
+def _labelled(prefix: str, message: str) -> str:
+    """Return ``prefix message`` with leading blank lines kept before the prefix."""
+    body = message.lstrip("\n")
+    return f"{message[: len(message) - len(body)]}{prefix} {safe_text(body)}"
 
 
-def print_success(
-    message: str, *, prefix: str = "[OK]", stderr: bool = False
-) -> None:
+def print_success(message: str, *, prefix: str = "[OK]", stderr: bool = False) -> None:
     """Print a success message.
 
     Args:
@@ -124,7 +168,7 @@ def print_success(
         stderr: Write to stderr instead of stdout. Use this whenever stdout
             carries machine-readable output.
     """
-    _get_console(stderr=stderr).print(f"{prefix} {message}", style="success")
+    _get_console(stderr=stderr).print(_labelled(prefix, message), style="success")
 
 
 def print_error(message: str, *, prefix: str = "[ERROR]", stderr: bool = True) -> None:
@@ -137,7 +181,7 @@ def print_error(message: str, *, prefix: str = "[ERROR]", stderr: bool = True) -
         prefix: Label rendered before the message.
         stderr: Write to stderr (default) or stdout.
     """
-    _get_console(stderr=stderr).print(f"{prefix} {message}", style="error")
+    _get_console(stderr=stderr).print(_labelled(prefix, message), style="error")
 
 
 def print_warning(
@@ -151,12 +195,7 @@ def print_warning(
         stderr: Write to stderr instead of stdout. Use this whenever stdout
             carries machine-readable output.
     """
-    _get_console(stderr=stderr).print(f"{prefix} {message}", style="warning")
-
-
-# ---------------------------------------------------------------------------
-# Structured output
-# ---------------------------------------------------------------------------
+    _get_console(stderr=stderr).print(_labelled(prefix, message), style="warning")
 
 
 def print_table(
@@ -188,37 +227,49 @@ def print_table(
     if headers is None:
         headers = list(data[0].keys())
 
-    table = Table(
-        title=title,
-        caption=caption,
-        show_header=True,
-        header_style="bold",
-        show_lines=show_row_lines,
-    )
-
     column_styles = column_styles or {}
-    for header in headers:
-        config = column_styles.get(header, {})
-        table.add_column(
-            header,
-            style=config.get("style"),
-            justify=config.get("justify", "default"),
-            no_wrap=config.get("no_wrap", False),
-            width=config.get("width"),
-            overflow=config.get("overflow", "fold"),
+    rows = [
+        (
+            tuple(strip_controls(row.get(h, "")) for h in headers),
+            row_styler(row) if row_styler else None,
         )
+        for row in data
+    ]
 
-    for row in data:
-        values = [str(row.get(h, "")) for h in headers]
-        style = row_styler(row) if row_styler else None
-        table.add_row(*values, style=style)
+    def build(compact: bool) -> Table:
+        table = Table(
+            title=title,
+            caption=caption,
+            show_header=True,
+            header_style="bold",
+            show_lines=show_row_lines,
+            box=box.SIMPLE_HEAD if compact else box.HEAVY_HEAD,
+            pad_edge=not compact,
+        )
+        for header in headers:
+            config = column_styles.get(header, {})
+            table.add_column(
+                header,
+                style=config.get("style"),
+                justify=config.get("justify", "default"),
+                # Compact layout lets every column shrink; fixed columns would
+                # otherwise be cropped or squeezed to nothing.
+                no_wrap=False if compact else config.get("no_wrap", False),
+                width=None if compact else config.get("width"),
+                min_width=None if compact else config.get("min_width"),
+                overflow="fold" if compact else config.get("overflow", "fold"),
+            )
+        for values, style in rows:
+            table.add_row(*values, style=style)
+        return table
 
-    _get_console(stderr=stderr).print(table)
-
-
-# ---------------------------------------------------------------------------
-# User interaction
-# ---------------------------------------------------------------------------
+    console = _get_console(stderr=stderr)
+    table = build(False)
+    # The regular layout is kept whenever it can fit; only a table whose
+    # fixed-width columns cannot shrink to the terminal switches to compact.
+    if Measurement.get(console, console.options, table).minimum > console.width:
+        table = build(True)
+    console.print(table)
 
 
 def confirm(message: str, *, default: bool = False) -> bool:
@@ -263,11 +314,6 @@ def confirm(message: str, *, default: bool = False) -> bool:
     return default
 
 
-# ---------------------------------------------------------------------------
-# Advanced / internal helpers
-# ---------------------------------------------------------------------------
-
-
 def get_raw_console(*, stderr: bool = False) -> Console:
     """Return the underlying Rich Console instance.
 
@@ -295,6 +341,8 @@ def colorize_update_type(update_type: str) -> str:
         "new": "cyan",
         "downgrade": "red",
         "update": "yellow",
+        "year": "red",
+        "month": "yellow",
     }
 
     color = color_map.get(update_type.lower())

@@ -1,3 +1,5 @@
+"""Tests for :mod:`depkeeper.utils.version_utils`."""
+
 from __future__ import annotations
 
 import pytest
@@ -686,11 +688,11 @@ class TestGetUpdateTypeIntegration:
         for invalid in invalid_versions:
             result = get_update_type("1.0.0", invalid)
             # Should return unknown, not crash
-            assert (
-                result == "unknown"
-            ), f"Expected 'unknown' for invalid version '{invalid}', got '{result}'"
+            assert result == "unknown", (
+                f"Expected 'unknown' for invalid version '{invalid}', got '{result}'"
+            )
 
             result = get_update_type(invalid, "1.0.0")
-            assert (
-                result == "unknown"
-            ), f"Expected 'unknown' for invalid version '{invalid}', got '{result}'"
+            assert result == "unknown", (
+                f"Expected 'unknown' for invalid version '{invalid}', got '{result}'"
+            )

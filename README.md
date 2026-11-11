@@ -1,417 +1,378 @@
-# depkeeper
+<p align="center"><img src="assets/logo.svg" width="120" alt="depkeeper logo"></p>
 
-[![Tests](https://github.com/rahulkaushal04/depkeeper/actions/workflows/tests.yml/badge.svg)](https://github.com/rahulkaushal04/depkeeper/actions/workflows/tests.yml)
-[![Coverage](https://codecov.io/gh/rahulkaushal04/depkeeper/branch/main/graph/badge.svg)](https://codecov.io/gh/rahulkaushal04/depkeeper)
-[![PyPI](https://img.shields.io/pypi/v/depkeeper.svg)](https://pypi.org/project/depkeeper/)
-[![Python versions](https://img.shields.io/pypi/pyversions/depkeeper.svg)](https://pypi.org/project/depkeeper/)
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Docs](https://img.shields.io/badge/docs-github.io-blue)](https://rahulkaushal04.github.io/depkeeper/)
+<h1 align="center">depkeeper</h1>
 
-**Safe, conflict-aware dependency updates for pip requirements files.**
+<p align="center"><strong>Safe dependency updates for requirements.txt, pyproject.toml and conda environment.yml.</strong></p>
 
-depkeeper analyses `requirements.txt`-style files, computes a safe upgrade target for every
-requirement, cross-validates those targets against each other, and rewrites the file in place —
-without discarding the constraints you authored.
+<p align="center">
+  <a href="https://github.com/rahulkaushal04/depkeeper/actions/workflows/tests.yml"><img src="https://github.com/rahulkaushal04/depkeeper/actions/workflows/tests.yml/badge.svg" alt="Tests"></a>
+  <a href="https://codecov.io/gh/rahulkaushal04/depkeeper"><img src="https://codecov.io/gh/rahulkaushal04/depkeeper/branch/main/graph/badge.svg" alt="Coverage"></a>
+  <a href="https://pypi.org/project/depkeeper/"><img src="https://img.shields.io/pypi/v/depkeeper.svg" alt="PyPI"></a>
+  <a href="https://pypi.org/project/depkeeper/"><img src="https://img.shields.io/pypi/pyversions/depkeeper.svg" alt="Python versions"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
+  <a href="https://github.com/rahulkaushal04/depkeeper/blob/main/docs/index.md"><img src="https://img.shields.io/badge/docs-in_repo-blue" alt="Docs"></a>
+</p>
 
-It is a single-purpose CLI. It does not manage virtual environments, install packages, replace
-`pip`, or introduce a lock file format.
-
----
-
-## Contents
-
-- [Why depkeeper](#why-depkeeper) · [What it guarantees](#what-it-guarantees)
-- [Install](#install) · [Quick start](#quick-start) · [Commands](#commands)
-- [Configuration](#configuration) · [Common workflows](#common-workflows)
-- [Architecture](#architecture) · [Limitations](#limitations)
-- [Troubleshooting](#troubleshooting) · [Documentation](#documentation) · [Contributing](#contributing)
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#commands">Commands</a> ·
+  <a href="#configuration">Configuration</a> ·
+  <a href="#use-it-in-ci">CI</a> ·
+  <a href="#limitations">Limitations</a> ·
+  <a href="https://github.com/rahulkaushal04/depkeeper/blob/main/docs/index.md">Docs</a>
+</p>
 
 ---
 
-## Why depkeeper
+depkeeper is a command-line tool. It reads your dependency file, asks PyPI what is newer, and picks the
+newest version that is **safe** for each package. Then it edits the file in place.
 
-`pip list --outdated` reports the **latest** version, which is frequently a major release that
-will break your build. Lock-file tools solve this properly but require adopting a new workflow and
-file format.
+It keeps the ranges you wrote. It never jumps a major version. It does not install anything.
 
-depkeeper fills the gap. It answers one question, precisely:
+## Why
 
-> What is the largest upgrade I can take for each requirement **without** crossing a major
-> version, **without** breaking Python compatibility, **without** violating the constraints I
-> declared, and **without** conflicting with the other packages in my file?
+`pip list --outdated` shows the latest release. That is often a new major version that breaks your build.
 
-Then it applies the answer to the file you already have.
+depkeeper answers one question:
 
-|  | pip | pip-tools | Poetry | depkeeper |
-|---|---|---|---|---|
-| Reports available updates | latest only | no | yes | yes, with a *safe* target |
-| Enforces major-version boundaries | no | no | no | **yes** |
-| Preserves your declared ranges on write | n/a | regenerates | rewrites | **yes** |
-| Full transitive resolution | at install time | yes | yes | no — see [Limitations](#limitations) |
-| Requires a new file format | no | `.in` files | `pyproject.toml` + lock | **no** |
+> What is the newest version of each dependency I can take without crossing a major version, without
+> breaking Python compatibility, without violating the constraints I wrote, and without conflicting with
+> the other packages in my file?
 
----
+|  | `pip list --outdated` | pip-tools | depkeeper |
+|---|---|---|---|
+| Shows newer versions | ✓ (latest only) | – | ✓ (latest and a safe target) |
+| Respects major-version boundaries | – | – | ✓ |
+| Edits your existing file, keeps your ranges | – | regenerates from `.in` | ✓ |
+| Needs a new file format or lock file | no | `.in` files | no |
+| Resolves the full transitive graph | at install time | ✓ | – (see [Limitations](#limitations)) |
 
-## What it guarantees
+depkeeper does not replace a resolver. Run `pip install` and your tests after every update.
 
-These are enforced in code, not advisory:
+## Features
 
-| Guarantee | Meaning |
+**Safe recommendations**
+- Stays inside the current major version (`1.x` is never moved to `2.x`).
+- Skips releases whose `requires_python` excludes your target Python.
+- Keeps upper bounds, exclusions and `~=` ranges. Only the lower bound moves.
+- Never recommends yanked releases. Pre-releases are excluded unless a package sets `allow_prerelease = true` in config.
+- Calendar-versioned packages (such as `certifi`) are detected and labelled `year`, `month` or `patch`.
+- Cross-checks the recommended versions against each other and backs off on conflicts.
+
+**File formats**
+- `requirements*.txt` (including `-r` and `-c` files)
+- `pyproject.toml` (PEP 621, PEP 735 dependency groups, `build-system.requires`, Poetry), edited without touching comments or formatting
+- conda `environment.yml` (`dependencies:` and `pip:` lists)
+
+**Policy and cooldown**
+- `--min-age 7d` skips versions released too recently.
+- `hold`, `ignore`, `max_update`, `allow_major`, `allow_prerelease` and `versioning` per package, in config.
+- `--ignore PKG` and `--max-update {patch,minor,major}` on the command line.
+- `--allow-major PKG` opts a package into a major upgrade (default: never crosses a major; newer majors are reported).
+
+**CI gating**
+- `check --fail-on {none,updates,minor,major}` exits `3` when updates at that level exist.
+- Exit `4` when a package could not be looked up. A failed lookup is never reported as "up to date".
+
+**Safe writes**
+- Atomic file replacement, with rollback for multi-file updates.
+- `--backup` saves a timestamped copy of every file it changes.
+- Refuses to drop `--hash` lines unless you say so. `--refresh-hashes` regenerates them from PyPI digests.
+- Aborts if a file changed on disk since it was read.
+
+**Verify before writing**
+- `update --verify` asks pip's resolver whether the new set resolves for your target Python (wheels only, nothing is built). On a conflict, nothing is written, and success states what was checked.
+
+**Output formats** (`check --format`)
+
+| Format | Use it for |
 |---|---|
-| **Major-version boundary** | A package on `1.x` is never moved to `2.x`. |
-| **Python compatibility** | Releases whose `requires_python` excludes your interpreter are never proposed. |
-| **Constraint preservation** | Upper bounds, exclusions and `~=` bands are preserved verbatim and never violated. |
-| **No pre-releases** | Alpha/beta/rc versions are excluded from every candidate list. |
-| **Atomic, reversible writes** | Multi-file updates are all-or-nothing, with rollback and optional backups. |
-| **Hash integrity** | Updates that would strip `--hash` entries are refused unless explicitly allowed. |
-| **Clean stdout** | `--format json` puts the payload on stdout and every diagnostic on stderr. |
-| **Idempotency** | Re-running produces no change. Safe to run on a schedule. |
+| `table` | Reading in a terminal (default) |
+| `simple` | Plain lines, easy to grep |
+| `json` | Bare array of packages |
+| `json-v2` | Versioned envelope with file, line, age and links |
+| `markdown` | A report for a PR body or CI summary |
 
-The trade-off is explicit: depkeeper is deliberately conservative. It will never propose the major
-upgrade you eventually need.
-
----
+For `simple`, `json`, `json-v2` and `markdown`, only the payload goes to stdout. Logs and warnings go to
+stderr, so `depkeeper -v check -f json | jq` works.
 
 ## Install
 
 ```bash
-python -m pip install depkeeper     # into the project's environment (recommended)
-pipx install depkeeper              # isolated global tool
+python -m pip install depkeeper    # into your project's environment
+pipx install depkeeper             # or as an isolated tool
 ```
 
-Requires **Python 3.8+**.
+Requires Python 3.8 or newer.
 
 > [!IMPORTANT]
-> depkeeper filters candidate versions against **the interpreter it runs on**, not your project's.
-> Installing it on 3.8 while your service targets 3.12 makes recommendations silently
-> conservative. Install it into the project environment, or use
-> `pipx install --python python3.12 depkeeper`.
-
-Verify:
+> depkeeper only proposes versions that support your **target Python**. It picks that version in this
+> order: `--python-version X.Y`, the `python_version` config key, the file's own `requires-python` (or
+> conda `python` pin), then the Python that runs depkeeper. If your project targets 3.12 and none of the
+> first three is set, run depkeeper on 3.12 or pass `--python-version 3.12`.
 
 ```bash
-depkeeper --version        # depkeeper 0.1.1
-python -m depkeeper --help # equivalent module entry point
+depkeeper --version
 ```
-
----
 
 ## Quick start
 
-Given this file:
+Start with a small `requirements.txt`:
 
 ```text
 requests==2.28.0
 flask>=2.0,<2.3
-celery[redis]>=5.0,<6.0
 click~=8.0
-certifi
 urllib3==1.26.0
 ```
 
-**1. Inspect (read-only, never writes):**
+**1. Look (read-only).** The output below is real, captured on the date of writing. Versions and ages will
+differ when you run it.
 
 ```console
-$ depkeeper check
-┏━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━┓
-┃   Status   ┃ Package  ┃ Current ┃  Latest   ┃ Recommended ┃ Update Type ┃ Conflicts ┃
-┡━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━┩
-│ [OUTDATED] │ requests │ 2.28.0  │  2.34.2   │   2.34.2    │    minor    │ -         │
-│ [OUTDATED] │ flask    │   2.0   │   3.1.3   │    2.2.5    │    minor    │ -         │
-│ [OUTDATED] │ celery   │   5.0   │   5.6.3   │    5.6.3    │    minor    │ -         │
-│ [OUTDATED] │ click    │   8.0   │   8.4.2   │    8.4.2    │    minor    │ -         │
-│    [OK]    │ certifi  │    -    │ 2026.7.22 │      -      │      -      │ -         │
-│ [OUTDATED] │ urllib3  │ 1.26.0  │   2.7.0   │   1.26.20   │    patch    │ -         │
-└────────────┴──────────┴─────────┴───────────┴─────────────┴─────────────┴───────────┘
-[WARNING] 5 package(s) have updates available
+$ depkeeper check --format simple
+[OUTDATED]   requests             2.28.0     → 2.34.2
+       released 175 days ago
+       Python: installed: >=3.7, <4, latest: >=3.10, recommended: >=3.10
+[OUTDATED]   flask                2.0        → 3.1.3      (recommended: 2.2.5)
+       released 1283 days ago
+       Python: latest: >=3.9, recommended: >=3.7
+[OUTDATED]   click                8.0        → 8.5.0
+       released 72 days ago
+       Python: latest: >=3.10, recommended: >=3.10
+[OUTDATED]   urllib3              1.26.0     → 2.8.0      (recommended: 1.26.20)
+       released 798 days ago
+       Python: installed: >=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, <4, latest: >=3.10, recommended: !=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,>=2.7
 ```
 
-**2. Preview the exact write:**
+Read `recommended` as "what depkeeper will write". `flask` stays on 2.2.5 because of your `<2.3` cap.
+`urllib3` stays on 1.x because 2.x is a major jump.
 
-```bash
-depkeeper update --dry-run
-```
-
-**3. Apply:**
+**2. Preview the write.**
 
 ```console
-$ depkeeper update --backup
-Update 6 packages? (y, n) [y]: y
-[OK] ✓ Successfully updated 6 package(s)
+$ depkeeper update --dry-run
+[WARNING] major available: urllib3 2.8.0 (use --allow-major urllib3)
+                                       Update Plan (Dry Run)
+┏━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Package  ┃ Current ┃ New Version ┃ Change ┃ Python Requires                                      ┃
+┡━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ requests │ 2.28.0  │   2.34.2    │ minor  │ >=3.10                                               │
+│ flask    │   2.0   │    2.2.5    │ minor  │ >=3.7                                                │
+│ click    │   8.0   │    8.5.0    │ minor  │ >=3.10                                               │
+│ urllib3  │ 1.26.0  │   1.26.20   │ patch  │ !=3.0.*,!=3.1.*,!=3.2.*,!=3.3.*,!=3.4.*,!=3.5.*,>=2. │
+└──────────┴─────────┴─────────────┴────────┴──────────────────────────────────────────────────────┘
+Dry run mode - no changes applied
+```
+
+(The real table also prints a `175d old`-style age under each new version. It is trimmed here.)
+
+**3. Apply.**
+
+```console
+$ depkeeper update --backup --yes
+[OK] Backup saved: requirements.txt.20261106_182111_458701_7f45f023.backup
+[OK] Successfully updated 4 package(s)
 ```
 
 ```text
 requests==2.34.2
-flask>=2.2.5,<2.3          # your <2.3 cap held — latest is 3.1.3
-celery[redis]>=5.6.3,<6.0  # extra and upper bound preserved
-click~=8.4                 # compatible-release form preserved
-certifi==2026.7.22         # unversioned requirement gained a pin
-urllib3==1.26.20           # major boundary held — latest is 2.7.0
+flask>=2.2.5,<2.3
+click~=8.5
+urllib3==1.26.20
 ```
 
-**4. Verify — this step is not optional:**
+Only the lower bounds moved. `<2.3` stayed. `~=` stayed. Add `--pin` if you want exact `==` pins instead.
+
+**4. Test.**
 
 ```bash
 python -m pip install -r requirements.txt && pytest
 ```
 
-depkeeper validates the packages you declared against each other. It does not expand the
-transitive graph, so `pip` remains the authority on whether the set installs.
+## Supported files
 
----
+| File | Read | Written | Notes |
+|---|---|---|---|
+| `requirements*.txt` | ✓ | ✓ | `-r` includes are followed and rewritten. `-c` constraint files are read, never rewritten. |
+| `pyproject.toml` | ✓ | ✓ | PEP 621, PEP 735 groups, `build-system.requires`, Poetry. Comments and layout are kept. |
+| conda `environment.yml` | ✓ | ✓ | Conda packages are looked up on PyPI by name. This is approximate. |
+| `Pipfile`, `poetry.lock`, `setup.py`, `setup.cfg` | – | – | Not supported. |
+
+Editable installs, VCS URLs, direct URLs and local paths are reported but never changed.
 
 ## Commands
 
-### `depkeeper check [FILE]`
+```text
+depkeeper [-c FILE] [-v|-vv] [--color|--no-color] COMMAND [FILE]
+```
 
-Read-only analysis. Never modifies the filesystem. Exits `0` on success regardless of findings.
+Global options go before the command: `depkeeper -v check`. `FILE` defaults to `requirements.txt`.
 
-| Option | Description |
+| Command | What it does |
 |---|---|
-| `--outdated-only` | Show only packages with an update or a conflict |
-| `-f`, `--format table\|simple\|json` | Output format (default `table`) |
-| `--strict-version-matching` | Only a sole `==` pin counts as a current version |
-| `--check-conflicts` / `--no-check-conflicts` | Cross-package conflict resolution (default on) |
+| `depkeeper check` | Report available updates. Never writes. |
+| `depkeeper check --outdated-only` | Hide packages that are up to date. |
+| `depkeeper check -f json` | Machine-readable output (`simple`, `json`, `json-v2`, `markdown`, `table`). |
+| `depkeeper check --fail-on minor` | Exit `3` if a minor or major update exists. |
+| `depkeeper check --min-age 7d` | Ignore versions released in the last 7 days. |
+| `depkeeper check --python-version 3.12` | Pick versions that support Python 3.12. |
+| `depkeeper check --ignore PKG` | Skip a package (repeatable). |
+| `depkeeper update --allow-major django` | Let `django` cross its major, within your declared bounds. |
+| `depkeeper update --dry-run` | Show the plan. Write nothing. |
+| `depkeeper update -y` | Apply without the confirmation prompt. |
+| `depkeeper update --backup` | Save a timestamped backup of every file first. |
+| `depkeeper update --verify` | Check with pip's resolver before writing. |
+| `depkeeper update --pin` | Write exact `==` pins. |
+| `depkeeper update -p NAME` | Update only these packages (repeatable). |
+| `depkeeper update --ignore NAME` | Never update these packages (repeatable). |
+| `depkeeper update --max-update minor` | Skip updates larger than `minor`. |
+| `depkeeper update --refresh-hashes` | Regenerate `--hash` lines for the new version. |
+| `depkeeper update --allow-hash-removal` | Update hashed requirements and drop their hashes. |
+| `depkeeper update -f markdown` | Print a PR description of the changes (needs `--yes` or `--dry-run`). |
 
-### `depkeeper update [FILE]`
+Both commands also accept `--strict-version-matching` and `--check-conflicts / --no-check-conflicts`.
+`--refresh-hashes` and `--allow-hash-removal` cannot be used together.
 
-Applies recommended versions in place.
-
-| Option | Description |
-|---|---|
-| `--dry-run` | Run the full pipeline, print the plan, write nothing |
-| `-y`, `--yes` | Skip the confirmation prompt |
-| `--backup` | Timestamped backup of **every** affected file before writing |
-| `--pin` | Replace every specifier with an exact `==` pin |
-| `--allow-hash-removal` | Permit updating `--hash`-pinned requirements (removes the digests) |
-| `-p`, `--packages NAME` | Restrict to specific packages (repeatable) |
-| `--strict-version-matching` | As above |
-| `--check-conflicts` / `--no-check-conflicts` | As above |
-
-### Global options
-
-`-c/--config PATH` · `-v` / `-vv` (INFO / DEBUG, always on stderr) · `--color/--no-color` ·
-`--version` · `-h/--help`
-
-Global options must precede the subcommand: `depkeeper -v check`, not `depkeeper check -v`.
-
-Full specification: **[CLI reference](https://rahulkaushal04.github.io/depkeeper/reference/cli-commands/)**.
+Full flag reference: [CLI commands](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/reference/cli-commands.md).
 
 ### Exit codes
 
 | Code | Meaning |
 |---|---|
-| `0` | Success — **including** "updates are available" |
-| `1` | Application error (parse, config, write, refused hash removal) |
-| `2` | Usage error (unknown option, missing file) |
-| `130` | Interrupted (`Ctrl+C`) |
-
-Gate automation on the JSON payload, never on `check`'s exit code.
-
----
+| `0` | Success. Updates being available is **not** an error. |
+| `1` | Error (bad file, bad config, write failed, `--verify` found a conflict, hash removal refused). `update` also exits `1` if you decline the prompt or `--packages` matches nothing. |
+| `2` | Usage error. |
+| `3` | `check --fail-on`: updates at or above the chosen level exist. |
+| `4` | A package could not be looked up on PyPI. |
+| `130` | Interrupted. |
 
 ## Configuration
 
-Two settings are persistable, in `depkeeper.toml` or `pyproject.toml`. Everything else is a
-per-invocation flag, deliberately — options that change what gets *written* stay visible in the
-command line.
+Put settings in `depkeeper.toml` (table `[depkeeper]`) or in `pyproject.toml` (table `[tool.depkeeper]`).
+depkeeper looks in the current directory, then its parents up to the repository root. A command-line flag
+always beats the config file.
 
 ```toml
 # depkeeper.toml
 [depkeeper]
-check_conflicts = true            # cross-package conflict resolution
-strict_version_matching = false   # treat only `==` as a current version
-```
-
-```toml
-# pyproject.toml
-[tool.depkeeper]
+min_age = "7d"             # cooldown: skip releases newer than 7 days
+fail_on = "minor"          # `check` exits 3 on minor or major updates
+python_version = "3.12"    # target Python for compatibility filtering
+ignore = ["boto3"]         # never touch these
 check_conflicts = true
-strict_version_matching = false
+
+[depkeeper.packages.django]
+max_update = "patch"       # django: patch updates only
+
+[depkeeper.packages.flask]
+hold = true                # flask: report, but do not update
 ```
 
-Precedence: **defaults < config file < CLI flag**. Unknown keys and wrong types are hard errors.
-Discovery is limited to the current working directory (not recursive).
+Keys: `check_conflicts`, `strict_version_matching`, `fail_on`, `ignore`, `python_version`, `min_age`,
+`versioning`, `packages`. Unknown keys are an error. Details:
+[Configuration options](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/reference/configuration-options.md).
 
-Environment: `DEPKEEPER_CONFIG`, `DEPKEEPER_COLOR`, `NO_COLOR`, `CI`, plus `httpx`'s
-`HTTPS_PROXY` / `SSL_CERT_FILE`.
+## Use it in CI
 
----
+`check` exits `0` even when updates exist. Use `--fail-on` to make a pipeline fail on drift. A scheduled
+job that fails when a minor or major update is waiting:
 
-## Common workflows
+```yaml
+# .github/workflows/dependency-drift.yml
+name: Dependency drift
+on:
+  schedule:
+    - cron: "0 6 * * 1"     # Mondays, 06:00 UTC
+  workflow_dispatch:
 
-**Daily**
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install "depkeeper==X.Y.Z"   # pin to a release you have tested: recommendations are behaviour
+      - run: depkeeper check --fail-on minor --min-age 7d
+```
+
+The job fails on exit `3` (updates found) and on exit `4` (a lookup failed). To publish a report instead of
+failing, drop `--fail-on` and add `--format markdown >> "$GITHUB_STEP_SUMMARY"`.
+
+<details>
+<summary>Open an update PR instead</summary>
+
+`update --format markdown` prints a PR body. Pair it with any pull-request action.
 
 ```bash
-depkeeper check --outdated-only
-depkeeper update --dry-run
-depkeeper update --backup && pip install -r requirements.txt && pytest
+depkeeper update --yes --verify --format markdown > pr-body.md
+python -m pip install -r requirements.txt && pytest
 ```
 
-**One package at a time** (keeps regressions bisectable)
+`--verify` aborts with exit `1` and writes nothing if pip's resolver rejects the new set.
+More patterns: [CI/CD integration](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/guides/ci-cd-integration.md).
 
-```bash
-depkeeper update -p django -y && pytest
-```
+</details>
 
-**Application release — freeze to exact versions**
+## How it works
 
-```bash
-depkeeper update --pin --backup
-```
+<p align="center"><img src="assets/diagrams/how-it-works.svg" alt="depkeeper parses your dependency file, fetches PyPI metadata, filters each package down to one safe version (staying within its major unless --allow-major), cross-checks the picks, then reports or writes." width="900"></p>
 
-**CI drift report** — stdout stays parseable even with `-v`
+<p align="center"><em>Candidate versions pass through six named rules to one pick; only the write branch touches your files.</em></p>
 
-```bash
-depkeeper -v check --format json --no-check-conflicts > report.json 2> depkeeper.log
-jq '[.[] | select(.status == "outdated")] | length' report.json
-```
-
-**Multi-file projects** — `-r` includes are followed and rewritten
-
-```bash
-depkeeper update requirements/dev.txt --dry-run   # also writes base.txt
-```
-
-**Hash-pinned files** — depkeeper refuses these by default
-
-```bash
-depkeeper update --allow-hash-removal -y
-pip-compile --generate-hashes requirements.in     # regenerate; not optional
-```
-
-More: **[User guide](https://rahulkaushal04.github.io/depkeeper/guides/)** ·
-**[CI/CD integration](https://rahulkaushal04.github.io/depkeeper/guides/ci-cd-integration/)**
-
----
-
-## Architecture
-
-Synchronous CLI around an asynchronous core. No daemon, no persistent state, no cache directory.
-
-```text
-requirements.txt
-      │
-      ▼
-RequirementsParser ──► PyPIDataStore ──► VersionChecker ──► DependencyAnalyzer ──┐
-  (text → model)      (one HTTP call     (per-package      (cross-package         │
-                       per package)       target version)   consistency)          │
-                                                                                  ▼
-                                                             renderer (table/simple/json)
-                                                             writer (atomic, rollback-safe)
-```
-
-| Component | Responsibility |
-|---|---|
-| `core/parser.py` | Requirements text → `Requirement` objects, `-r`/`-c` resolution, provenance |
-| `core/data_store.py` | PyPI metadata cache with per-key request coalescing |
-| `core/checker.py` | Per-package recommendation under boundary, Python and constraint filters |
-| `core/dependency_analyzer.py` | Iterative conflict resolution within major boundaries |
-| `commands/` | User interaction, rendering, the write pipeline, exit codes |
-| `utils/` | HTTP, console, logging, atomic filesystem, naming, version algebra |
-
-See **[ARCHITECTURE.md](ARCHITECTURE.md)** for the contributor-facing map, or the
-**[architecture deep dive](https://rahulkaushal04.github.io/depkeeper/concepts/architecture/)**
-for design decisions, concurrency model and error propagation.
-
----
+depkeeper is a synchronous CLI around an async core. It keeps no cache and no state between runs.
+Design notes: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Limitations
 
-Honest, verified, and documented in full at
-**[Known limitations](https://rahulkaushal04.github.io/depkeeper/reference/limitations/)**.
-The ones most likely to affect you:
+- **Not a full resolver.** depkeeper cross-checks the packages you declared using each version's direct
+  dependencies. It does not expand the transitive graph. `update --verify` and `pip install` are the
+  real test.
+- **PyPI only.** `--index-url`, `--extra-index-url` and `--find-links` are parsed and ignored.
+  Packages that exist only on a private index show up as errors.
+- **Major upgrades are opt-in.** A floor of `django>=3.2,<5.0` stays on the newest `3.x` and reports the
+  newer major. Use `--allow-major django` to move to the newest `4.x` (your `<5.0` is still respected).
+- **conda is approximate.** Conda-channel packages are matched to PyPI by name. A missing match is a
+  warning, not a failure.
+- **Pre-releases are off by default.** There is no `--pre` flag; opt in per package with `allow_prerelease = true`.
+- **No security scanning.** Use `pip-audit` or similar next to depkeeper.
+- **No cache.** Every run fetches metadata again.
+- **Hash removal leaves a partly hashed file.** `pip install --require-hashes` rejects that. Prefer
+  `--refresh-hashes`.
+- **Direct references are never updated.** VCS, URL, local path and editable requirements are reported only.
 
-- **Not a resolver.** The transitive graph is not expanded. Always `pip install` and test.
-- **Only `pypi.org` is queried.** `--index-url` lines are parsed and ignored; private packages
-  report as errors.
-- **Calendar versions hit the major boundary.** `certifi 2023.x` never auto-bumps to `2024.x`.
-- **Major upgrades are yours to make.** Raise the floor by hand, then let depkeeper continue.
-- **Backslash line continuations are not parsed**, so default
-  `pip-compile --generate-hashes` output is unreadable to depkeeper.
-- **No runtime tuning.** Timeouts, retries and concurrency are constants; override them via the
-  Python API if you must.
-
----
-
-## Troubleshooting
-
-Start here:
-
-```bash
-depkeeper -vv check --format json > report.json 2> debug.log
-```
-
-`debug.log` names the file parsed, the effective configuration, every HTTP retry and every
-resolution decision.
-
-| Symptom | Cause |
-|---|---|
-| Recommendation far below `Latest` | Your declared cap, the major boundary, a conflict, or `requires_python` |
-| Recommendations differ between laptop and CI | Different Python versions running depkeeper |
-| `✗ ERROR` rows | Package not on public PyPI, network/proxy failure, or TLS interception |
-| `update` changed a package `check` showed as `✓ OK` | Unversioned requirement — it received a pin |
-| A proposed **downgrade** | Declared version is unusable; review before accepting |
-
-Full guide: **[Troubleshooting](https://rahulkaushal04.github.io/depkeeper/guides/troubleshooting/)**
-
----
+Full list: [Known limitations](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/reference/limitations.md).
 
 ## Documentation
 
-Published at **[rahulkaushal04.github.io/depkeeper](https://rahulkaushal04.github.io/depkeeper/)**.
+Full docs: **[docs/](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/index.md)**
 
-| Section | Contents |
-|---|---|
-| [Getting started](https://rahulkaushal04.github.io/depkeeper/getting-started/) | Install, quick start, reading the output |
-| [Concepts](https://rahulkaushal04.github.io/depkeeper/concepts/) | Architecture, version recommendation, conflict resolution, parsing, write safety |
-| [User guide](https://rahulkaushal04.github.io/depkeeper/guides/) | Checking, updating, configuration, CI/CD, operations, best practices, troubleshooting |
-| [Reference](https://rahulkaushal04.github.io/depkeeper/reference/) | CLI, config, exit codes, file formats, JSON schema, errors, limitations, Python API |
-| [Contributing](https://rahulkaushal04.github.io/depkeeper/contributing/) | Setup, code style, testing, extending, releases |
-
-Repository documents: [ARCHITECTURE.md](ARCHITECTURE.md) ·
-[CONTRIBUTING.md](CONTRIBUTING.md) · [CHANGELOG.md](CHANGELOG.md) ·
-[SECURITY.md](SECURITY.md) · [SUPPORT.md](SUPPORT.md) ·
-[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
-
----
-
-## Project status
-
-Version **0.1.1**, classified `Development Status :: 4 - Beta`.
-
-The write path is defensive — atomic replacement, two-phase commit, rollback, optional backups —
-and behaviour is documented and covered by tests across Linux, macOS and Windows on Python
-3.8–3.12. Pin the version in automation: recommendation logic is a behavioural contract, and a
-version bump can legitimately change an update plan.
-
----
+- [Getting started](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/getting-started/index.md)
+- [Concepts](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/concepts/index.md): how versions are recommended, how conflicts are resolved, write safety
+- [Guides](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/guides/index.md): checking, updating, configuration, CI/CD, troubleshooting
+- [Reference](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/reference/index.md): CLI, config, exit codes, file formats, JSON output
+- [CHANGELOG.md](CHANGELOG.md)
 
 ## Contributing
 
-Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), and read the
-[system invariants](https://rahulkaushal04.github.io/depkeeper/concepts/#non-negotiable-invariants)
-before changing anything in `core/`.
+Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
 git clone https://github.com/rahulkaushal04/depkeeper.git
 cd depkeeper
-pip install -e ".[dev,docs]"
-pre-commit install
-
+pip install -e ".[dev]"
 python -m pytest tests -q --no-cov
-python -m mypy depkeeper --python-version 3.13
 ```
 
-Report vulnerabilities privately — see [SECURITY.md](SECURITY.md), never a public issue.
-
----
+Report security problems privately. See [SECURITY.md](SECURITY.md). Please follow the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
 [Apache License 2.0](LICENSE). Copyright 2025-2026 Rahul Kaushal.
-
-Built with [Click](https://click.palletsprojects.com/),
-[Rich](https://rich.readthedocs.io/), [httpx](https://www.python-httpx.org/) and
-[packaging](https://packaging.pypa.io/) — the last of which is why depkeeper agrees with `pip`
-about what a version means.

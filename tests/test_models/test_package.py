@@ -27,11 +27,17 @@ from tests.support.factories import make_conflict, make_package
 
 # Conflicts constraining urllib3, reused wherever conflict rendering matters.
 REQUESTS_CONSTRAINT = make_conflict(
-    "requests", "<3,>=1.21.1", "urllib3", source_version="2.31.0",
+    "requests",
+    "<3,>=1.21.1",
+    "urllib3",
+    source_version="2.31.0",
     conflicting_version="1.20.0",
 )
 SDK_CONSTRAINT = make_conflict(
-    "internal-sdk", "<2.0", "urllib3", source_version="4.2.0",
+    "internal-sdk",
+    "<2.0",
+    "urllib3",
+    source_version="4.2.0",
     conflicting_version="2.2.2",
 )
 
@@ -66,7 +72,15 @@ class TestVersionParsing:
 
     @pytest.mark.parametrize(
         "version",
-        ["2.31.0", "1.26.18", "6.4.post2", "2.0.0rc1", "1!2.0.0", "3.6.4.0", "1.0-alpha"],
+        [
+            "2.31.0",
+            "1.26.18",
+            "6.4.post2",
+            "2.0.0rc1",
+            "1!2.0.0",
+            "3.6.4.0",
+            "1.0-alpha",
+        ],
         ids=["release", "patch", "post", "rc", "epoch", "four-part", "legacy-alpha"],
     )
     def test_valid_pep440_versions_parse(self, version: str) -> None:
@@ -115,14 +129,18 @@ class TestStatusClassification:
         ("pkg", "status", "has_update", "requires_downgrade"),
         [
             pytest.param(
-                make_package("requests", current="2.28.2", latest="2.32.3", recommended="2.32.3"),
+                make_package(
+                    "requests", current="2.28.2", latest="2.32.3", recommended="2.32.3"
+                ),
                 "outdated",
                 True,
                 False,
                 id="outdated-newer-recommended",
             ),
             pytest.param(
-                make_package("requests", current="2.32.3", latest="2.32.3", recommended="2.32.3"),
+                make_package(
+                    "requests", current="2.32.3", latest="2.32.3", recommended="2.32.3"
+                ),
                 "latest",
                 False,
                 False,
@@ -130,7 +148,9 @@ class TestStatusClassification:
             ),
             pytest.param(
                 # A conflict forced urllib3 back below its published latest.
-                make_package("urllib3", current="2.2.2", latest="2.2.2", recommended="1.26.18"),
+                make_package(
+                    "urllib3", current="2.2.2", latest="2.2.2", recommended="1.26.18"
+                ),
                 "downgrade",
                 False,
                 True,
@@ -230,8 +250,8 @@ class TestConflicts:
     def test_resolved_version_overrides_the_recommendation(self) -> None:
         """Legacy escape hatch: the resolver may hand back the reconciled version.
 
-        Regression M10 was caused by this override firing on a *stale* conflict,
-        so the parameter is kept but callers in the resolver no longer use it.
+        The resolver itself no longer passes it, since it could fire on a stale
+        conflict.
         """
         pkg = make_package("urllib3", current="1.26.18", recommended="2.2.2")
         pkg.set_conflicts([SDK_CONSTRAINT], resolved_version="1.26.18")
@@ -282,7 +302,8 @@ class TestPythonRequirements:
         )
 
     @pytest.mark.parametrize(
-        "key", ["current", "latest", "recommended"],
+        "key",
+        ["current", "latest", "recommended"],
     )
     def test_each_version_slot_is_readable(self, pandas: Package, key: str) -> None:
         assert pandas.get_version_python_req(key) is not None
@@ -321,7 +342,7 @@ class TestPythonRequirements:
         """Its only purpose is to warn that *taking the update* needs a newer
         interpreter; on an up-to-date package that line is noise.
         """
-        assert "Recommended:>=3.9" in pandas.render_python_compatibility()
+        assert "Recommended: >=3.9" in pandas.render_python_compatibility()
 
         pandas.current_version = "2.2.2"
         assert "Recommended:" not in pandas.render_python_compatibility()

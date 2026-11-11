@@ -4,7 +4,7 @@ Re-exports all core data models to provide a stable, convenient public API,
 so callers can import from ``depkeeper.models`` instead of individual
 submodules.
 
-Example:
+Example::
     >>> from depkeeper.models import Package, Requirement, Conflict
 """
 

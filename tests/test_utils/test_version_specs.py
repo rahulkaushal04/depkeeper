@@ -1,6 +1,6 @@
 """Tests for the PEP 440 specifier-set helpers in ``utils.version_utils``.
 
-Primary purpose: guard against regression M5 — a version update must move
+Primary purpose: a version update must move
 only the *lower bound* of a declared range. Upper bounds, exclusions and
 wildcard bands are deliberate compatibility statements and must survive.
 """
@@ -95,42 +95,37 @@ class TestSpecsAllowVersion:
 
 @pytest.mark.unit
 class TestRewriteVersionSpecs:
-    """M5 regression tests for ``rewrite_version_specs``."""
+    """Tests for ``rewrite_version_specs``."""
 
     def test_range_keeps_upper_bound(self) -> None:
-        """The audit's exact scenario: ``>=5.0,<6.0`` must keep ``<6.0``."""
+        """``>=5.0,<6.0`` must keep ``<6.0``."""
         assert rewrite_version_specs([(">=", "5.0"), ("<", "6.0")], "5.5.3") == [
             (">=", "5.5.3"),
             ("<", "6.0"),
         ]
 
     def test_exclusions_are_preserved(self) -> None:
-        assert rewrite_version_specs(
-            [(">=", "2.0"), ("!=", "2.5.0")], "2.31.0"
-        ) == [(">=", "2.31.0"), ("!=", "2.5.0")]
+        assert rewrite_version_specs([(">=", "2.0"), ("!=", "2.5.0")], "2.31.0") == [
+            (">=", "2.31.0"),
+            ("!=", "2.5.0"),
+        ]
 
     def test_strict_greater_widens_to_inclusive(self) -> None:
         """``>2.0`` must become ``>=X`` so ``X`` itself stays installable."""
-        assert rewrite_version_specs([(">", "2.0")], "2.2.28") == [
-            (">=", "2.2.28")
-        ]
+        assert rewrite_version_specs([(">", "2.0")], "2.2.28") == [(">=", "2.2.28")]
 
     def test_compatible_release_keeps_author_precision(self) -> None:
         """``~=2.0`` (two components) stays two components."""
         assert rewrite_version_specs([("~=", "2.0")], "2.3.3") == [("~=", "2.3")]
 
     def test_compatible_release_three_components(self) -> None:
-        assert rewrite_version_specs([("~=", "2.0.0")], "2.3.3") == [
-            ("~=", "2.3.3")
-        ]
+        assert rewrite_version_specs([("~=", "2.0.0")], "2.3.3") == [("~=", "2.3.3")]
 
     def test_compatible_release_pads_short_target(self) -> None:
         assert rewrite_version_specs([("~=", "2.0.0")], "3") == [("~=", "3.0.0")]
 
     def test_compatible_release_preserves_epoch(self) -> None:
-        assert rewrite_version_specs([("~=", "1!2.0")], "1!2.3.3") == [
-            ("~=", "1!2.3")
-        ]
+        assert rewrite_version_specs([("~=", "1!2.0")], "1!2.3.3") == [("~=", "1!2.3")]
 
     def test_exact_pin_is_repinned(self) -> None:
         assert rewrite_version_specs([("==", "1.26.0")], "1.26.18") == [
@@ -161,9 +156,7 @@ class TestRewriteVersionSpecs:
         ) == [(">=", "1.9.0"), ("<", "2")]
 
     def test_unparseable_compatible_release_falls_back(self) -> None:
-        assert rewrite_version_specs([("~=", "bogus")], "1.2.3") == [
-            ("~=", "1.2.3")
-        ]
+        assert rewrite_version_specs([("~=", "bogus")], "1.2.3") == [("~=", "1.2.3")]
 
     def test_original_specs_are_not_mutated(self) -> None:
         specs = [(">=", "5.0"), ("<", "6.0")]

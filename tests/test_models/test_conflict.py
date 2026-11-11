@@ -91,9 +91,7 @@ class TestConflictRendering:
 
     def test_display_string_names_the_source_version_when_known(self) -> None:
         """Without the version the user cannot tell which release imposed it."""
-        conflict = make_conflict(
-            "flask", ">=2.3.7", "werkzeug", source_version="2.3.3"
-        )
+        conflict = make_conflict("flask", ">=2.3.7", "werkzeug", source_version="2.3.3")
 
         assert conflict.to_display_string() == "flask==2.3.3 requires werkzeug>=2.3.7"
 
@@ -223,9 +221,15 @@ class TestMaxCompatibleVersionAcrossRealGraphs:
         conflict_set = make_conflict_set(
             "urllib3",
             [
-                make_conflict("requests", "<3,>=1.21.1", "urllib3", source_version="2.31.0"),
-                make_conflict("internal-sdk", "<2.0", "urllib3", source_version="4.2.0"),
-                make_conflict("legacy-client", ">=1.26.0", "urllib3", source_version="1.9.0"),
+                make_conflict(
+                    "requests", "<3,>=1.21.1", "urllib3", source_version="2.31.0"
+                ),
+                make_conflict(
+                    "internal-sdk", "<2.0", "urllib3", source_version="4.2.0"
+                ),
+                make_conflict(
+                    "legacy-client", ">=1.26.0", "urllib3", source_version="1.9.0"
+                ),
             ],
         )
 
@@ -260,7 +264,9 @@ class TestMaxCompatibleVersionAcrossRealGraphs:
         conflict_set = make_conflict_set(
             "kombu",
             [
-                make_conflict("celery", ">=5.3.4,<6.0", "kombu", source_version="5.3.6"),
+                make_conflict(
+                    "celery", ">=5.3.4,<6.0", "kombu", source_version="5.3.6"
+                ),
                 make_conflict(
                     "acme-broker", ">=5.3.4,<5.3.7", "kombu", source_version="2.1.0"
                 ),
@@ -314,7 +320,9 @@ class TestMaxCompatibleVersionAcrossRealGraphs:
             pytest.param(">2.0.7", "2.2.2", id="exclusive-floor-skips-it"),
             pytest.param("==1.26.18", "1.26.18", id="exact-pin"),
             pytest.param("!=2.2.2", "2.0.7", id="exclusion-falls-back-one-release"),
-            pytest.param("~=1.26.5", "1.26.18", id="compatible-release-stays-in-series"),
+            pytest.param(
+                "~=1.26.5", "1.26.18", id="compatible-release-stays-in-series"
+            ),
         ],
     )
     def test_boundary_conditions(self, spec: str, expected: str) -> None:
@@ -423,8 +431,12 @@ class TestMaxCompatibleVersionRobustness:
     @pytest.mark.parametrize(
         ("available", "expected"),
         [
-            pytest.param(["1.4.0", "1.4.2", "1.4.9", "1.5.0"], "1.4.9", id="four-part-floor"),
-            pytest.param(["1.2.3.3", "1.2.3.4", "1.2.4.0"], "1.2.4.0", id="four-part-history"),
+            pytest.param(
+                ["1.4.0", "1.4.2", "1.4.9", "1.5.0"], "1.4.9", id="four-part-floor"
+            ),
+            pytest.param(
+                ["1.2.3.3", "1.2.3.4", "1.2.4.0"], "1.2.4.0", id="four-part-history"
+            ),
         ],
     )
     def test_multi_segment_versions_compare_numerically(
@@ -459,7 +471,9 @@ class TestConflictSetWorkflow:
             make_conflict("internal-sdk", "<2.0", "urllib3", source_version="4.2.0")
         )
         conflict_set.add_conflict(
-            make_conflict("legacy-client", ">=1.26.0", "urllib3", source_version="1.9.0")
+            make_conflict(
+                "legacy-client", ">=1.26.0", "urllib3", source_version="1.9.0"
+            )
         )
 
         assert conflict_set.get_max_compatible_version(URLLIB3_VERSIONS) == "1.26.18"

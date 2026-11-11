@@ -1,4 +1,4 @@
-"""Regression tests for simple-format rendering in ``check`` command."""
+"""Tests for simple-format rendering in the ``check`` command."""
 
 from __future__ import annotations
 
@@ -29,10 +29,12 @@ def _capture_simple_output(packages: list[Package]) -> str:
 
 
 def test_display_simple_preserves_status_labels_verbatim() -> None:
-    """M4 regression: status labels must not be swallowed by Rich markup."""
+    """Status labels must not be swallowed by Rich markup."""
     packages = [
         Package(name="pkg-no-update", current_version="1.0.0"),
-        Package(name="pkg-install", latest_version="2.0.0", recommended_version="2.0.0"),
+        Package(
+            name="pkg-install", latest_version="2.0.0", recommended_version="2.0.0"
+        ),
         Package(
             name="pkg-downgrade",
             current_version="3.0.0",

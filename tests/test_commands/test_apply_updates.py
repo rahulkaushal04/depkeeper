@@ -1,17 +1,11 @@
-"""Tests for the requirements update writer (``_apply_updates``).
-
-Primary purpose: guard against regression C1 — requirements pulled in via
-``-r`` includes retain the *included* file's line numbers, so matching on
-line number alone rewrites unrelated lines in the parent file, destroying the
-``-r`` directive and corrupting the dependency graph.
-"""
+"""Tests for the requirements update writer (``_apply_updates``)."""
 
 from __future__ import annotations
 
 import codecs
 import sys
 from pathlib import Path
-from typing import List, Tuple
+from typing import Any, List, Tuple
 from unittest.mock import patch
 
 import pytest
@@ -40,9 +34,7 @@ def _update_tuple(
 def test_update_simple_flat_file(tmp_path: Path) -> None:
     """Baseline: a single flat file updates in place, preserving other lines."""
     req_file = tmp_path / "requirements.txt"
-    req_file.write_text(
-        "click==8.0.0\n# keep me\nrich==13.0.0\n", encoding="utf-8"
-    )
+    req_file.write_text("click==8.0.0\n# keep me\nrich==13.0.0\n", encoding="utf-8")
 
     reqs = RequirementsParser().parse_file(req_file)
     click = next(r for r in reqs if r.name == "click")
@@ -55,20 +47,12 @@ def test_update_simple_flat_file(tmp_path: Path) -> None:
 
 
 def test_include_directive_not_overwritten(tmp_path: Path) -> None:
-    """C1 regression: updating an included package must not clobber the parent.
-
-    Reproduces the exact audit scenario:
-      requirements.txt -> ``-r base.txt`` / ``# comment`` / ``rich==13.0.0``
-      base.txt         -> ``click==8.0.0``
-    Updating ``click`` must rewrite base.txt only and leave the ``-r`` intact.
-    """
+    """Updating an included package rewrites only the included file."""
     base = tmp_path / "base.txt"
     base.write_text("click==8.0.0\n", encoding="utf-8")
 
     root = tmp_path / "requirements.txt"
-    root.write_text(
-        "-r base.txt\n# comment line\nrich==13.0.0\n", encoding="utf-8"
-    )
+    root.write_text("-r base.txt\n# comment line\nrich==13.0.0\n", encoding="utf-8")
 
     reqs = RequirementsParser().parse_file(root)
     click = next(r for r in reqs if r.name == "click")
@@ -162,11 +146,9 @@ def test_missing_provenance_falls_back_to_primary_file(tmp_path: Path) -> None:
 
 
 def test_hashed_requirement_update_refused_by_default(tmp_path: Path) -> None:
-    """C3 regression: updates must not silently strip --hash pins by default."""
+    """Updates must not silently strip --hash pins by default."""
     req_file = tmp_path / "requirements.txt"
-    req_file.write_text(
-        "requests==2.28.0 --hash=sha256:abc123\n", encoding="utf-8"
-    )
+    req_file.write_text("requests==2.28.0 --hash=sha256:abc123\n", encoding="utf-8")
 
     reqs = RequirementsParser().parse_file(req_file)
     requests_req = next(r for r in reqs if r.name == "requests")
@@ -183,9 +165,7 @@ def test_hashed_requirement_update_refused_by_default(tmp_path: Path) -> None:
 def test_hashed_requirement_update_allowed_with_opt_in(tmp_path: Path) -> None:
     """Explicit opt-in permits update and removes stale hash pins."""
     req_file = tmp_path / "requirements.txt"
-    req_file.write_text(
-        "requests==2.28.0 --hash=sha256:abc123\n", encoding="utf-8"
-    )
+    req_file.write_text("requests==2.28.0 --hash=sha256:abc123\n", encoding="utf-8")
 
     reqs = RequirementsParser().parse_file(req_file)
     requests_req = next(r for r in reqs if r.name == "requests")
@@ -201,7 +181,7 @@ def test_hashed_requirement_update_allowed_with_opt_in(tmp_path: Path) -> None:
 
 
 def test_bom_preserved_when_first_line_updated(tmp_path: Path) -> None:
-    """M3 regression: rewriting line 1 must keep the file's UTF-8 BOM."""
+    """Rewriting line 1 must keep the file's UTF-8 BOM."""
     req_file = tmp_path / "requirements.txt"
     req_file.write_bytes("click==8.0.0\nrich==13.0.0\n".encode("utf-8-sig"))
 
@@ -211,9 +191,7 @@ def test_bom_preserved_when_first_line_updated(tmp_path: Path) -> None:
     _apply_updates(req_file, reqs, [_update_tuple(click, "8.1.7")])
 
     assert req_file.read_bytes().startswith(codecs.BOM_UTF8)
-    assert req_file.read_text(encoding="utf-8-sig") == (
-        "click==8.1.7\nrich==13.0.0\n"
-    )
+    assert req_file.read_text(encoding="utf-8-sig") == ("click==8.1.7\nrich==13.0.0\n")
 
 
 def test_bom_preserved_when_later_line_updated(tmp_path: Path) -> None:
@@ -228,10 +206,8 @@ def test_bom_preserved_when_later_line_updated(tmp_path: Path) -> None:
 
     raw = req_file.read_bytes()
     assert raw.startswith(codecs.BOM_UTF8)
-    assert not raw[len(codecs.BOM_UTF8):].startswith(codecs.BOM_UTF8)
-    assert req_file.read_text(encoding="utf-8-sig") == (
-        "click==8.0.0\nrich==13.7.0\n"
-    )
+    assert not raw[len(codecs.BOM_UTF8) :].startswith(codecs.BOM_UTF8)
+    assert req_file.read_text(encoding="utf-8-sig") == ("click==8.0.0\nrich==13.7.0\n")
 
 
 def test_bom_not_added_to_plain_utf8_file(tmp_path: Path) -> None:
@@ -272,13 +248,8 @@ def test_bom_preserved_across_included_files(tmp_path: Path) -> None:
     assert root.read_text(encoding="utf-8") == "-r base.txt\nrich==13.7.0\n"
 
 
-# ---------------------------------------------------------------------------
-# M5 — declared version ranges must survive an update
-# ---------------------------------------------------------------------------
-
-
 def test_range_upper_bound_is_preserved(tmp_path: Path) -> None:
-    """M5 regression: ``celery[redis]>=5.0,<6.0`` must keep its ``<6.0`` cap."""
+    """``celery[redis]>=5.0,<6.0`` must keep its ``<6.0`` cap."""
     req_file = tmp_path / "requirements.txt"
     req_file.write_text("celery[redis]>=5.0,<6.0\n", encoding="utf-8")
 
@@ -376,17 +347,8 @@ def test_update_is_idempotent(tmp_path: Path) -> None:
     assert req_file.read_text(encoding="utf-8") == "celery>=5.5.3,<6.0,!=5.2.0\n"
 
 
-# ---------------------------------------------------------------------------
-# M7 — writes must be atomic, all-or-nothing, and byte-faithful
-# ---------------------------------------------------------------------------
-
-
 def test_write_failure_leaves_original_file_intact(tmp_path: Path) -> None:
-    """M7 regression: a failed write must not truncate the requirements file.
-
-    The previous implementation used ``open(file, "w")`` + ``writelines()``,
-    so any failure between truncation and flush destroyed the file.
-    """
+    """A failed write must not truncate the requirements file."""
     req_file = tmp_path / "requirements.txt"
     req_file.write_bytes(b"click==8.0.0\n# keep me\nrich==13.0.0\n")
 
@@ -429,7 +391,7 @@ def test_multi_file_write_failure_rolls_back(tmp_path: Path) -> None:
     real_write = update_module.safe_write_file
     calls: List[Path] = []
 
-    def flaky_write(file_path, content, **kwargs):  # type: ignore[no-untyped-def]
+    def flaky_write(file_path: Any, content: str, **kwargs: Any) -> Any:
         calls.append(Path(file_path))
         # Fail on the second file, after the first has already been committed.
         if len(calls) == 2:
@@ -478,7 +440,7 @@ def test_nothing_written_when_one_line_is_rejected(tmp_path: Path) -> None:
 
 
 def test_crlf_line_endings_preserved(tmp_path: Path) -> None:
-    """m8 regression: a CRLF file stays CRLF on every platform."""
+    """A CRLF file stays CRLF on every platform."""
     req_file = tmp_path / "requirements.txt"
     req_file.write_bytes(b"click==8.0.0\r\n# keep me\r\nrich==13.0.0\r\n")
 
@@ -491,7 +453,7 @@ def test_crlf_line_endings_preserved(tmp_path: Path) -> None:
 
 
 def test_lf_line_endings_preserved(tmp_path: Path) -> None:
-    """m8 regression: an LF file must not be converted to CRLF on Windows."""
+    """An LF file must not be converted to CRLF on Windows."""
     req_file = tmp_path / "requirements.txt"
     req_file.write_bytes(b"click==8.0.0\n# keep me\nrich==13.0.0\n")
 
@@ -519,9 +481,7 @@ def test_missing_trailing_newline_is_not_added(tmp_path: Path) -> None:
 def test_bom_and_crlf_preserved_together(tmp_path: Path) -> None:
     """A Windows-authored (BOM + CRLF) file survives byte-for-byte."""
     req_file = tmp_path / "requirements.txt"
-    req_file.write_bytes(
-        codecs.BOM_UTF8 + b"click==8.0.0\r\nrich==13.0.0\r\n"
-    )
+    req_file.write_bytes(codecs.BOM_UTF8 + b"click==8.0.0\r\nrich==13.0.0\r\n")
 
     reqs = RequirementsParser().parse_file(req_file)
     click = next(r for r in reqs if r.name == "click")
@@ -553,7 +513,7 @@ def test_writes_go_through_the_atomic_helper(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes only")
 def test_file_permissions_preserved(tmp_path: Path) -> None:
-    """m6 regression: an update must not tighten the file's mode to 0600."""
+    """An update must not tighten the file's mode to 0600."""
     req_file = tmp_path / "requirements.txt"
     req_file.write_text("click==8.0.0\n", encoding="utf-8")
     req_file.chmod(0o644)
@@ -564,3 +524,57 @@ def test_file_permissions_preserved(tmp_path: Path) -> None:
     _apply_updates(req_file, reqs, [_update_tuple(click, "8.1.7")])
 
     assert (req_file.stat().st_mode & 0o777) == 0o644
+
+
+def test_external_modification_aborts_without_overwriting(tmp_path: Path) -> None:
+    req_file = tmp_path / "requirements.txt"
+    req_file.write_text("click==8.0.0\n", encoding="utf-8")
+    reqs = RequirementsParser().parse_file(req_file)
+    click = next(r for r in reqs if r.name == "click")
+    real = update_module._read_exact
+
+    def edited(path: Any) -> Any:
+        req_file.write_text("click==8.0.0\n# edited\n", encoding="utf-8")
+        return real(path)
+
+    with patch.object(update_module, "_read_exact", side_effect=edited):
+        with pytest.raises(DepKeeperError, match="modified"):
+            _apply_updates(req_file, reqs, [_update_tuple(click, "8.1.7")])
+    assert req_file.read_text(encoding="utf-8") == "click==8.0.0\n# edited\n"
+
+
+def test_keyboard_interrupt_between_files_rolls_back(tmp_path: Path) -> None:
+    base = tmp_path / "base.txt"
+    base.write_bytes(b"click==8.0.0\n")
+    root = tmp_path / "requirements.txt"
+    root.write_bytes(b"-r base.txt\nrich==13.0.0\n")
+    reqs = RequirementsParser().parse_file(root)
+    click = next(r for r in reqs if r.name == "click")
+    rich = next(r for r in reqs if r.name == "rich")
+    real_write = update_module.safe_write_file
+    calls: List[Path] = []
+
+    def interrupt(file_path: Any, content: str, **kw: Any) -> Any:
+        calls.append(Path(file_path))
+        if len(calls) == 2:
+            raise KeyboardInterrupt
+        return real_write(file_path, content, **kw)
+
+    with patch.object(update_module, "safe_write_file", side_effect=interrupt):
+        with pytest.raises(KeyboardInterrupt):
+            _apply_updates(
+                root,
+                reqs,
+                [_update_tuple(click, "8.1.7"), _update_tuple(rich, "13.7.0")],
+            )
+    assert base.read_bytes() == b"click==8.0.0\n"
+    assert root.read_bytes() == b"-r base.txt\nrich==13.0.0\n"
+
+
+def test_confirm_without_tty_gives_clean_error() -> None:
+    import click as click_mod
+
+    with patch.object(update_module.click, "prompt", side_effect=click_mod.Abort()):
+        with patch.object(update_module.sys.stdin, "isatty", return_value=False):
+            with pytest.raises(DepKeeperError, match="--yes"):
+                update_module._confirm_update(1)

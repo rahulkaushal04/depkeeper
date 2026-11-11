@@ -1,28 +1,103 @@
 # Changelog
 
-All notable changes to depkeeper are documented here.
+All notable changes to depkeeper are listed here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
-adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-> [!IMPORTANT]
-> **Recommendation logic is a behavioural contract.** A change that makes the same requirements
-> file produce a different update plan is at minimum a **minor** release, even when it looks like
-> a bug fix — consumers gate pipelines on that output. Such entries are marked **Impact** so you
-> know what to re-verify before upgrading.
-
-Sections used: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
+**Impact** marks a change that can alter an update plan, an exit code or written output. Check
+your CI and scripts for these before upgrading.
 
 ---
 
 ## [Unreleased]
 
-### Planned
+---
 
-- Security advisory scanning against a vulnerability database
-- Configurable package index for private repositories
-- A flag to override the target Python version used for compatibility filtering
-- Backslash line-continuation support in the parser
+## [1.0.0] - 2026-11-11
+
+First stable release. It adds `pyproject.toml` and conda support, opt-in major upgrades, calendar versions,
+per-package policy and `--verify`, and hardens parsing, writes and networking.
+
+### Added
+
+- **More file types:** `pyproject.toml` (project dependencies, optional extras, dependency groups, build requirements, Poetry, uv/PDM/Hatch dev dependencies) and conda `environment.yml`. Pass a directory to check every supported file at once. Edits change only the version text, so comments and formatting stay. Conda packages are matched to PyPI by name, so results are approximate.
+- **Opt-in major upgrades:** `--allow-major PKG` (repeatable, `'*'` for all) or `allow_major = true` per package. Your own upper bounds, including the one implied by `~=`, still apply. A newer major that was not applied shows as "major available".
+- **Calendar versions** (`2024.8.30`, `24.1`) are detected automatically. Updates are labelled `year`, `month` or `patch`. Override with `versioning = "calver"` or `"semver"`.
+- **Per-package policy** in config: `max_update`, `hold`, `ignore`, `allow_prerelease`, `allow_major`, `versioning`.
+- `--python-version X.Y` picks the target Python. Order: flag, config `python_version`, the file's `requires-python` (or Poetry `python`, conda `python=`), then the running Python.
+- `--min-age 7d` skips releases newer than the given age.
+- `check --fail-on {none,updates,minor,major}` exits `3` when the threshold is met.
+- `--ignore PKG` on `check` and `update`. `update --max-update {patch,minor,major}` caps the update size.
+- `update --refresh-hashes` rewrites `--hash` lines for the new version from PyPI digests.
+- `update --verify` asks pip's resolver, for the target Python, whether the plan installs together before writing. A conflict exits `1`.
+- `--format markdown` (`check`, `update`) and `--format json-v2` (`check`). `check --no-strict-version-matching`.
+- Config is found by walking up to the repository root (`.git`), or to `$HOME` without one.
+
+### Changed
+
+- **Impact:** `check` and `update` exit `4` when a PyPI lookup fails, and no longer print "All packages are up to date!" in that case.
+- **Impact:** declining the update prompt, or `-p` matching nothing, exits `1` (was `0`).
+- **Impact:** `update` no longer pins unversioned names in `pyproject.toml` and `environment.yml` unless `--pin` is given. `requirements.txt` is unchanged.
+- **Impact:** `--max-update` now caps the chosen version for every package. `requests==2.25.0 --max-update patch` gets `2.25.1`.
+- **Impact:** a line whose own Python marker is false for the target Python (`python_version<"3.9"` on 3.12) is left unchanged and reported as "not applicable".
+- **Impact:** calendar-version detection looks at recent releases, so `pip`, `packaging` and `attrs` are now treated as calver and can move across years.
+- **Impact:** conflict resolution follows `min_age` and per-package policy, no longer flips between two states, and no longer depends on file order. Plans for conflicting files can differ.
+- **Impact:** `~=X.Y` lines no longer show "outdated" forever after `update`. A newer release inside the series the line can express is not an update.
+- Backups are named `<name>.<timestamp>_<uuid>.backup`. The old name matched `requirements*.txt`, so a later directory run could rewrite the backup.
+- Minimum versions raised: `packaging>=26.2`, `rich>=14.3.4`, `tomli>=2.5.0`, and `setuptools>=75.3.4` to build.
+- Table output is shorter: one Python requirement per row, and the resolution summary shows only when something changed or conflicted.
+
+### Fixed
+
+- **Writes:**
+  - `update` aborts if a file changed since it was read.
+  - Ctrl-C between files rolls back every file already written.
+  - `update` could edit the wrong line when a file contained form feeds or Unicode line separators.
+  - `update` now changes only the version text and keeps the name's spelling, extras, marker, quotes and comment.
+  - Duplicate packages across files are updated consistently.
+  - `update --pin` works when the version does not change.
+  - `update` without a terminal and without `--yes` gives a clear message, not a traceback.
+  - Ctrl-C or Ctrl-D at the confirmation prompt prints "Aborted." and exits `130`, instead of "Unexpected error".
+- **Parsing:**
+  - Backslash continuations (pip-compile `--hash` files), `-rfile`, `-c=file`, `-e.`, quoted `-r` paths, `ftp://` and `git+file://` URLs and markers on URL lines are read correctly.
+  - Comment lines ending in `\` no longer swallow the next requirement.
+  - Editable, VCS and URL requirements are never looked up on PyPI.
+  - A Poetry `python` constraint now sets the target Python.
+  - Non-ASCII digits no longer crash version parsing.
+  - A local path requirement that does not exist yet no longer crashes on Windows with Python 3.8 or 3.9.
+  - Conda packages such as `cuda-python` and `librosa` are no longer skipped as conda-only.
+- **Recommendations:**
+  - Yanked-only releases are never recommended.
+  - Dependency markers are evaluated for the target Python.
+  - A package PyPI could not serve gets no recommendation.
+  - A package already up to date no longer shows its own version as withheld by `--min-age`.
+  - One malformed specifier no longer switches off the others.
+  - A lower bound that is not a real release is read as the lowest real release above it.
+- **Conflicts:**
+  - Each conflict is shown once, against the final recommendation.
+  - A held or ignored package is never lowered to satisfy another.
+  - A failed dependency lookup is reported as "Conflict check incomplete", never as "no conflicts".
+- **Network:**
+  - With the network down, 7 packages take about 1.5 s (was about 111 s).
+  - The circuit breaker is per host.
+  - Oversized, truncated or malformed responses give clear errors.
+  - Closing the output early (`| head -1`) exits `141` quietly.
+- **`--verify`:**
+  - Source-only packages are skipped with a warning instead of blocking.
+  - A release that needs a newer Python than the one running pip is no longer reported as missing.
+  - Constraints and `-p` selections are included in the checked plan.
+  - Ctrl-C stops pip at once.
+- **Output:**
+  - `--format simple` no longer wraps lines.
+  - A broken `[depkeeper]` config value is an error, not a crash.
+  - `NO_COLOR` is respected.
+  - Messages that start with a newline keep their label on the text line.
+
+### Security
+
+- Text from PyPI, file names and error messages can no longer inject Rich markup, hyperlinks, terminal control sequences or invisible Unicode characters (bidi, zero-width, tag) into output. Markdown reports drop non-http(s) links and escape cell text.
+- Credentials in URLs, query strings and requirement lines are masked in errors, logs and `--verify` output by one shared redaction. pip option lines are never logged.
+- `--verify` never builds source distributions, and refuses requirement strings that carry pip options such as `--index-url` or `-r`.
+- HTTP: responses are capped at 64 MB, requests have a total deadline, and redirects are followed only over https to PyPI hosts.
 
 ---
 
@@ -30,162 +105,44 @@ Sections used: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`.
 
 ### Changed
 
-- **Impact:** Duplicate declarations of the same package — for example the same distribution
-  pulled in via two `-r` includes with different constraints — are now resolved independently
-  instead of collapsing to one shared recommendation. A name-level adjustment made during
-  conflict resolution only reaches a given declaration's `recommended_version` when a real
-  conflict was recorded for that declaration.
-- **Impact:** PEP 440 wildcard version bands (`pkg==2.*`) are now parsed leniently, resolving to
-  their release-prefix floor. A wildcard-pinned requirement now participates correctly in
-  major-boundary and update-availability checks instead of being treated as unparseable.
-- `depkeeper check`'s table output changed its status badges from Unicode symbols (`✓`, `⬆`,
-  `⚠`, `✗`) to bracketed text labels (`[OK]`, `[OUTDATED]`, `[CONFLICT]`, `[INCOMP]`,
-  `[ERROR]`), so the table renders identically regardless of terminal font, and matches
-  `--format simple`'s existing label style. Scripts that pattern-match on the old symbols must
-  be updated; scripts that already match on `--format json` or `--format simple` are unaffected.
-- `tomli` is now used unconditionally for TOML parsing on every supported Python version,
-  rather than preferring the standard-library `tomllib` on 3.11+. Configuration parsing behaves
-  identically across Python 3.8–3.12.
-- A configuration file carrying a leading byte-order mark is now decoded correctly instead of
-  failing TOML parsing.
+- **Impact:** duplicate declarations of one package (for example from two `-r` includes) are resolved separately instead of sharing one recommendation.
+- **Impact:** wildcard bands (`pkg==2.*`) now take part in major-boundary and update checks.
+- **Impact:** `check` table badges changed from symbols to text: `[OK]`, `[OUTDATED]`, `[CONFLICT]`, `[INCOMP]`, `[ERROR]`. `--format json` and `simple` are unchanged.
+- `tomli` is used for TOML on every Python version. Config files with a byte-order mark now parse.
 
 ### Fixed
 
-- A `Retry-After` header on a `429` response is now clamped to a maximum of 120 seconds, and
-  both the delay-seconds and HTTP-date header forms are parsed correctly, so a misconfigured or
-  slow-to-recover upstream cannot stall a run indefinitely.
-- The interactive confirmation prompt's `[y/N]` / `[Y/n]` suffix is no longer swallowed by Rich
-  markup interpretation.
-- `_find_updates` no longer risks pairing a requirement with an unrelated package when the
-  parsed requirements and checked packages lists fall out of step; the mismatch is now logged
-  and the affected entries are skipped.
+- `Retry-After` on a `429` is capped at 120 s and both header forms are parsed.
+- The `[y/N]` prompt suffix is no longer swallowed by Rich markup.
+- `update` no longer pairs a requirement with an unrelated package when the lists fall out of step. The entry is logged and skipped.
 
 ---
 
 ## [0.1.0]
 
-Initial public release.
+First public release.
 
-### Added — commands
+### Added
 
-- `depkeeper check [FILE]` — read-only analysis. Options: `--outdated-only`,
-  `-f/--format table|simple|json`, `--strict-version-matching`,
-  `--check-conflicts/--no-check-conflicts`.
-- `depkeeper update [FILE]` — in-place rewriting. Options: `--dry-run`, `-y/--yes`, `--backup`,
-  `--pin`, `--allow-hash-removal`, `-p/--packages`, `--strict-version-matching`,
-  `--check-conflicts/--no-check-conflicts`.
-- Global options `-c/--config`, `-v/--verbose` (repeatable), `--color/--no-color`, `--version`,
-  `-h/--help`, with `DEPKEEPER_CONFIG` and `DEPKEEPER_COLOR` environment variables.
-- Both `depkeeper` and `python -m depkeeper` entry points.
-- Exit codes: `0` success, `1` application error, `2` usage error, `130` interrupted.
-
-### Added — version recommendation
-
-- **Major-version boundary enforcement.** A recommendation never crosses a major version when a
-  current version is known — applied at candidate-selection time in three independent places, so
-  no code path can circumvent it.
-- **Python compatibility filtering** using each release's `requires_python`, evaluated against the
-  interpreter running depkeeper. Absent or unparseable metadata is treated as compatible, matching
-  pip.
-- **Pre-release exclusion** from every candidate list.
-- **Current-version inference** from range specifiers (`>=`, `>`, `~=`), disabled by
-  `--strict-version-matching`.
-- **Constraint preservation.** Only the floor of a requirement is rewritten; upper bounds,
-  exclusions and wildcard bands are preserved verbatim and fed back into candidate selection, so
-  an unsatisfiable line can never be produced. `>` is widened to `>=`; `~=` keeps the author's
-  precision.
-- `--pin` to opt into exact `==` pins instead.
-- **Convergence.** A target already covered by the declared floor is skipped, making repeated runs
-  idempotent.
-
-### Added — conflict resolution
-
-- Iterative cross-package resolution bounded at 100 passes, with two boundary-respecting
-  strategies (step the source back; constrain the target) and a "revert both" fallback.
-- `ResolutionResult` reporting per-package `original → resolved`, resolution status, cumulative
-  conflict records, iteration count and convergence.
-- **Invariant:** `Package.recommended_version` always equals the resolver's `resolved` value, so
-  the version reported is the version written.
-- Advisory compatible alternatives, adopted only where a conflict is still live, computed from a
-  single pre-adoption snapshot so the outcome is order-independent.
-- Graceful degradation when PyPI metadata is unavailable, with a per-run negative cache that
-  prevents retry storms across resolution passes.
-
-### Added — parsing
-
-- PEP 440/508 requirements, extras, environment markers and inline comments.
-- `-r`/`--requirement` includes with cycle detection and **per-requirement provenance**, so the
-  correct file is rewritten in multi-file projects.
-- `-c`/`--constraint` constraint files.
-- `-e`/`--editable`, VCS URLs (`git+`, `hg+`, `bzr+`, `svn+`), HTTP(S) URLs, `file://` URIs and
-  local paths — reported, never updated.
-- `--hash=X` and `--hash X` forms.
-- Recognition and skipping of pip global options (`--index-url`, `-i`, `--extra-index-url`,
-  `--find-links`, `-f`, `--trusted-host`, `--no-binary`, `--only-binary`, `--use-feature`,
-  `--pre`, `--prefer-binary`).
-- UTF-8 byte-order-mark handling on read and write.
-- Deterministic, source-faithful specifier ordering.
-
-### Added — write safety
-
-- **Two-phase commit.** All affected files are rendered in memory before any is written, with
-  rollback of committed files if a later write fails.
-- **Atomic replacement** via temporary file, `fsync` and `os.replace`, with file-mode
-  preservation, symlink following, directory `fsync` on POSIX, and bounded retries for transient
-  Windows lock errors.
-- **Byte-preserving output.** Each rewritten line re-attaches its own terminator, so CRLF stays
-  CRLF, LF stays LF, and a missing final newline is not added.
-- Timestamped backups of every affected file with `--backup`, restored automatically on failure.
-
-### Added — output
-
-- Rich table, line-based simple, and JSON output formats.
-- **Stream separation.** Machine-readable formats reserve stdout exclusively for the payload; all
-  status messages, warnings and errors go to stderr, so `depkeeper -v check -f json | jq` is
-  correct.
-- `--format json` always emits a document, including `[]` for an empty result set.
-- Per-stream colour detection: a piped stdout does not disable colour on an interactive stderr.
-
-### Added — configuration
-
-- `depkeeper.toml` (`[depkeeper]`) and `pyproject.toml` (`[tool.depkeeper]`) support for
-  `check_conflicts` and `strict_version_matching`.
-- Strict validation: unknown keys and wrong value types are errors, not warnings.
-- Precedence: defaults < configuration file < command-line flag.
-- `utf-8-sig` decoding so BOM-carrying configuration files parse.
-
-### Added — performance and reliability
-
-- Shared `PyPIDataStore` guaranteeing at most one PyPI request per package per process, with
-  per-key request coalescing and cancellation-safe waiters.
-- Async HTTP with HTTP/2, bounded concurrency, exponential backoff with jitter, and separate
-  `429` handling that honours `Retry-After`.
-- Structured exception hierarchy carrying diagnostic metadata.
+- `depkeeper check` (read-only) and `depkeeper update` (in-place). Options include `--dry-run`, `-y`, `--backup`, `--pin`, `-p`, `--allow-hash-removal`, `--outdated-only`, `-f table|simple|json`, `--check-conflicts`, `--strict-version-matching`.
+- Global `-c/--config`, `-v`, `--color/--no-color`, `--version`. Exit codes `0`, `1`, `2`, `130`.
+- **Safe recommendations:** never crosses a major version, respects each release's `requires_python`, skips pre-releases, keeps your upper bounds and exclusions, and only moves the floor.
+- **Conflict resolution** across packages: iterative, boundary-respecting, with a "revert both" fallback and advisory alternatives.
+- **Parsing:** extras, markers, `-r` includes with per-file provenance, `-c` constraints, editable, VCS and URL requirements (reported, never changed), `--hash`, and byte-order marks.
+- **Safe writes:** all files are rendered first, written atomically, and rolled back if a later write fails. CRLF, LF and file mode are preserved. `--backup` keeps copies.
+- **Output:** table, simple and JSON, with JSON on stdout and everything else on stderr.
+- **Config:** `depkeeper.toml` or `[tool.depkeeper]` with strict validation.
+- **Performance:** one PyPI request per package, async HTTP/2, bounded concurrency, backoff and `Retry-After`.
 
 ### Security
 
-- **Hashed requirements are refused by default.** Updating a `--hash`-pinned requirement requires
-  the explicit `--allow-hash-removal` opt-in, preventing silent integrity regressions.
-- depkeeper never imports, installs, builds or executes the packages it analyses; it reads JSON
-  metadata only.
-- HTTPS-only communication with certificate verification always enabled.
-- 10 MB input file size limit; path-confinement helper for externally supplied paths.
-
-### Known limitations
-
-Documented in full at
-<https://rahulkaushal04.github.io/depkeeper/reference/limitations/>. Most significant:
-
-- Not a substitute for pip's resolver — the transitive dependency graph is not expanded.
-- Only `pypi.org` is queried; `--index-url` directives are parsed and ignored.
-- Backslash line continuations are not joined, so default `pip-compile --generate-hashes` output
-  cannot be parsed.
-- `--allow-hash-removal` yields a partially hashed file that `pip --require-hashes` rejects.
-- Compatibility filtering uses depkeeper's own interpreter, with no override flag.
-- Calendar-versioned packages hit the major-version boundary (`2023.x` never bumps to `2024.x`).
+- Updating a hashed requirement is refused unless you pass `--allow-hash-removal`.
+- depkeeper never installs, builds or runs the packages it reads. It only reads PyPI metadata over verified HTTPS.
+- 10 MB limit on input files.
 
 ---
 
-[Unreleased]: https://github.com/rahulkaushal04/depkeeper/compare/v0.1.1...main
+[Unreleased]: https://github.com/rahulkaushal04/depkeeper/compare/v1.0.0...main
+[1.0.0]: https://github.com/rahulkaushal04/depkeeper/compare/v0.1.1...v1.0.0
 [0.1.1]: https://github.com/rahulkaushal04/depkeeper/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/rahulkaushal04/depkeeper/releases/tag/v0.1.0

@@ -1,10 +1,4 @@
-"""Tests for :meth:`VersionChecker.get_package_info` failure degradation.
-
-Related to regression M6: PyPI unavailability must consistently degrade to an
-*unavailable stub* instead of propagating. ``PyPIError`` (404 / unexpected
-status) was already handled; timeouts, exhausted retries and rate limiting
-arrive as plain ``NetworkError`` and must be handled identically.
-"""
+"""``VersionChecker.get_package_info`` degrades to an unavailable stub on failure."""
 
 from __future__ import annotations
 

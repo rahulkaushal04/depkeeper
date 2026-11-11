@@ -156,12 +156,15 @@ def _atomic_write(
             os.fsync(tmp.fileno())
 
         if target.exists():
+            if not os.access(target, os.W_OK):
+                raise PermissionError(f"{target} is read-only")
             # NamedTemporaryFile creates 0600; keep the original file's mode.
             shutil.copymode(target, temp_path)
 
         _replace_with_retry(temp_path, target)
         _fsync_directory(target.parent)
-    except Exception as exc:
+    except BaseException as exc:
+        # BaseException: Ctrl-C / SIGTERM must not leak the temporary file.
         if temp_path and temp_path.exists():
             try:
                 temp_path.unlink()
@@ -173,6 +176,8 @@ def _atomic_write(
                     cleanup_exc,
                 )
 
+        if not isinstance(exc, Exception):
+            raise
         raise FileOperationError(
             f"Atomic write failed: {exc}",
             file_path=str(target),
@@ -228,6 +233,7 @@ def safe_read_file(
     *,
     max_size: Optional[int] = MAX_FILE_SIZE,
     encoding: str = DEFAULT_READ_ENCODING,
+    newline: Optional[str] = None,
 ) -> str:
     """Safely read a text file with optional size limits.
 
@@ -242,6 +248,7 @@ def safe_read_file(
         max_size: Maximum allowed file size in bytes (None disables limit).
             Measured in bytes on disk, so a BOM counts toward the limit.
         encoding: Text encoding.
+        newline: Passed to ``open``; ``""`` keeps line terminators verbatim.
 
     Returns:
         File contents as a string, without a leading byte order mark.
@@ -261,7 +268,10 @@ def safe_read_file(
         )
 
     try:
-        return path.read_text(encoding=encoding)
+        if newline is None:
+            return path.read_text(encoding=encoding)
+        with path.open("r", encoding=encoding, newline=newline) as handle:
+            return handle.read()
     except Exception as exc:
         raise FileOperationError(
             f"Failed to read file: {exc}",
@@ -463,11 +473,12 @@ def validate_path(
 
 
 def create_timestamped_backup(file_path: PathLike) -> Path:
-    """Create a backup named ``<stem>.<timestamp>_<uuid>.backup<suffix>``.
+    """Create a backup named ``<name>.<timestamp>_<uuid>.backup``.
 
-    Unlike `create_backup`, the original suffix is kept last so the
-    backup remains recognizable by extension (``requirements.txt`` backs up to
-    ``requirements.<timestamp>_<uuid>.backup.txt``).
+    The name ends in ``.backup`` so no ``*.txt`` / ``requirements*.txt`` glob
+    (depkeeper's own discovery, ``pip install -r *.txt``) mistakes the copy for
+    a live requirements file (``requirements.txt`` backs up to
+    ``requirements.txt.<timestamp>_<uuid>.backup``).
 
     Args:
         file_path: File to copy.
@@ -490,7 +501,7 @@ def create_timestamped_backup(file_path: PathLike) -> Path:
 
     unique = uuid4().hex[:8]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    backup_name = f"{path.stem}.{timestamp}_{unique}.backup{path.suffix}"
+    backup_name = f"{path.name}.{timestamp}_{unique}.backup"
     backup_path = path.with_name(backup_name)
 
     try:

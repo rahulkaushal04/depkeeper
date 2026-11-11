@@ -1,6 +1,6 @@
 """Tests for :mod:`depkeeper.utils.console`.
 
-The load-bearing responsibility here is **stream separation** (regression M11).
+The load-bearing responsibility here is **stream separation**.
 ``depkeeper check --format json`` writes a machine-readable payload to stdout;
 every status message, warning and summary must go to stderr, or a downstream
 ``jq`` receives a document with English prose appended to it. Colour handling
@@ -67,7 +67,9 @@ CHECK_ROWS: List[Dict[str, Any]] = [
 
 
 @pytest.fixture
-def captured_streams(monkeypatch: pytest.MonkeyPatch) -> Iterator[Tuple[io.StringIO, io.StringIO]]:
+def captured_streams(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[Tuple[io.StringIO, io.StringIO]]:
     """Bind the stdout and stderr consoles to in-memory buffers.
 
     Both buffers are wide and colourless so assertions can compare plain text
@@ -246,7 +248,11 @@ class TestStatusMessages:
 
     @pytest.mark.parametrize(
         ("printer", "default_prefix"),
-        [(print_success, "[OK]"), (print_warning, "[WARNING]"), (print_error, "[ERROR]")],
+        [
+            (print_success, "[OK]"),
+            (print_warning, "[WARNING]"),
+            (print_error, "[ERROR]"),
+        ],
         ids=["success", "warning", "error"],
     )
     def test_default_prefix_is_prepended(
@@ -266,7 +272,7 @@ class TestStatusMessages:
     def test_errors_default_to_stderr(
         self, captured_streams: Tuple[io.StringIO, io.StringIO]
     ) -> None:
-        """Regression M11: an error on stdout corrupts a JSON payload.
+        """An error on stdout corrupts a JSON payload.
 
         This is the one default that differs from the other helpers, and it is
         the one that mattered.
@@ -295,7 +301,9 @@ class TestStatusMessages:
         assert err.getvalue() == ""
 
     @pytest.mark.parametrize(
-        "printer", [print_success, print_warning, print_error], ids=["ok", "warn", "err"]
+        "printer",
+        [print_success, print_warning, print_error],
+        ids=["ok", "warn", "err"],
     )
     def test_every_helper_can_be_redirected_to_stderr(
         self,
@@ -322,9 +330,8 @@ class TestStatusMessages:
     def test_bracketed_text_in_a_message_is_not_eaten_as_markup(
         self, captured_streams: Tuple[io.StringIO, io.StringIO]
     ) -> None:
-        """Regression M4's failure mode: Rich reads ``[outdated]`` as a style
-        tag and renders nothing. Status labels are bracketed by convention, so
-        this silently blanked the ``--format simple`` output.
+        """Rich reads ``[outdated]`` as a style
+        tag and renders nothing, so bracketed status labels must be escaped.
         """
         out, _err = captured_streams
 
@@ -481,7 +488,9 @@ class TestConfirm:
     @pytest.mark.parametrize(
         "response", ["", "maybe", "1", "yolo"], ids=["enter", "word", "digit", "typo"]
     )
-    @pytest.mark.parametrize("default", [True, False], ids=["default-yes", "default-no"])
+    @pytest.mark.parametrize(
+        "default", [True, False], ids=["default-yes", "default-no"]
+    )
     def test_unrecognised_input_falls_back_to_the_default(
         self,
         captured_streams: Tuple[io.StringIO, io.StringIO],
@@ -513,7 +522,7 @@ class TestConfirm:
         captured_streams: Tuple[io.StringIO, io.StringIO],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Regression: ``confirm`` renders with ``markup=False``.
+        """``confirm``  renders with ``markup=False``.
 
         ``[y/N]`` used to be swallowed as a (meaningless) Rich style tag, so
         the user was asked ``Apply 4 updates? :`` with no indication that
@@ -599,3 +608,34 @@ class TestColorizeUpdateType:
         the caller never asserted.
         """
         assert colorize_update_type(update_type) == update_type
+
+
+class TestMessagesAreNotParsedAsMarkup:
+    """Square brackets in user-facing messages must be printed literally."""
+
+    @pytest.mark.parametrize(
+        "printer", [print_error, print_warning, print_success], ids=lambda f: f.__name__
+    )
+    def test_bracketed_names_survive(
+        self, printer: Any, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        printer("file has no [depkeeper] table", stderr=True)
+        captured = capsys.readouterr()
+        assert "has no [depkeeper] table" in captured.out + captured.err
+
+
+class TestLeadingNewlines:
+    """A message that starts with a blank line keeps it ahead of the label."""
+
+    @pytest.mark.parametrize(
+        "printer", [print_error, print_warning, print_success], ids=lambda f: f.__name__
+    )
+    def test_label_stays_on_the_text_line(
+        self, printer: Any, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        printer("\nsomething happened", stderr=True)
+        captured = capsys.readouterr()
+        lines = (captured.out + captured.err).splitlines()
+        assert lines[0] == ""
+        assert lines[1].endswith("something happened")
+        assert lines[1].startswith("[")

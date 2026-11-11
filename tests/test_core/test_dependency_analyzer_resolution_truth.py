@@ -1,17 +1,4 @@
-"""Tests for M10 — the reported version must be the version that is applied.
-
-``resolve_and_annotate_conflicts()`` used to write ``Package.recommended_version``
-twice: first from the resolution loop's decision, then again from an
-*independent* "compatible alternative" search. The second write won, so
-``depkeeper check``/``update`` displayed the resolver's version in the
-resolution summary while writing the alternative to ``requirements.txt``.
-
-The invariant these tests lock in::
-
-    pkg.recommended_version == result.resolved_versions[pkg.name].resolved
-
-for every package, on every code path.
-"""
+"""The version reported by conflict resolution is the version that is applied."""
 
 from __future__ import annotations
 
@@ -80,9 +67,7 @@ class TestStaleConflictDoesNotOverrideResolution:
         store = FakePyPIStore(
             available={
                 "flask": _pkg_data("flask", ["2.0.0", "2.2.5", "2.3.3"]),
-                "werkzeug": _pkg_data(
-                    "werkzeug", ["2.0.0", "2.1.0", "2.2.3", "2.3.7"]
-                ),
+                "werkzeug": _pkg_data("werkzeug", ["2.0.0", "2.1.0", "2.2.3", "2.3.7"]),
             },
             dependencies={
                 "flask==2.3.3": ["werkzeug>=2.2,<2.3"],
@@ -107,7 +92,7 @@ class TestStaleConflictDoesNotOverrideResolution:
         return store, packages
 
     async def test_applied_version_matches_reported_version(self) -> None:
-        """Regression: werkzeug was written as 2.2.3 but reported as 2.3.7."""
+        """werkzeug was written as 2.2.3 but reported as 2.3.7."""
         store, packages = self._scenario()
 
         result = await DependencyAnalyzer(
@@ -311,9 +296,7 @@ class TestInvariantHoldsOnEveryPath:
             dependencies={"flask==2.3.3": ["werkzeug>=2.0"]},
         )
         packages = [
-            Package(
-                name="flask", current_version="2.0.0", recommended_version="2.3.3"
-            ),
+            Package(name="flask", current_version="2.0.0", recommended_version="2.3.3"),
             Package(
                 name="werkzeug", current_version="2.0.0", recommended_version="2.3.7"
             ),
@@ -352,7 +335,14 @@ class TestInvariantHoldsOnEveryPath:
         ).resolve_and_annotate_conflicts(packages)
 
         assert result.resolved_versions["stable"].resolved == "1.0.0"
-        _assert_single_source_of_truth(packages, result)
+        # Nothing was recommended and nothing moved, so no recommendation
+        # is synthesized (it would mask an unavailable package as "latest").
+        assert packages[0].recommended_version is None
+        # The single-source-of-truth invariant (recommended == resolved) is
+        # deliberately inapplicable to that one field here; the rest holds.
+        resolution = result.resolved_versions["stable"]
+        assert resolution.original == packages[0].current_version == "1.0.0"
+        assert result.get_changed_packages() == []
 
 
 # ---------------------------------------------------------------------------
@@ -406,7 +396,10 @@ class TestNonPep440VersionNeverFabricatesAConflict:
 
         assert result.packages_with_conflicts == 0
         assert result.resolved_versions["pkg-a"].resolved == "2.0.0"
-        assert result.resolved_versions["pkg-a"].status == ResolutionStatus.KEPT_RECOMMENDED
+        assert (
+            result.resolved_versions["pkg-a"].status
+            == ResolutionStatus.KEPT_RECOMMENDED
+        )
         _assert_single_source_of_truth(packages, result)
 
     async def test_find_cross_conflicts_treats_it_as_satisfied(self) -> None:
@@ -420,9 +413,17 @@ class TestNonPep440VersionNeverFabricatesAConflict:
 
     def test_satisfies_treats_unparseable_version_as_satisfied(self) -> None:
         assert _satisfies("1.0.0.RELEASE", ">=1.0") is True
-        assert _satisfies_all("1.0.0.RELEASE", [
-            make_conflict("pkg-a", ">=1.0", "pkg-b", conflicting_version="1.0.0.RELEASE")
-        ]) is True
+        assert (
+            _satisfies_all(
+                "1.0.0.RELEASE",
+                [
+                    make_conflict(
+                        "pkg-a", ">=1.0", "pkg-b", conflicting_version="1.0.0.RELEASE"
+                    )
+                ],
+            )
+            is True
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -500,18 +501,26 @@ class TestDuplicateDeclarationsResolveIndependently:
             },
             dependencies={"pkg-a==2.0.0": ["pkg-b<1.6"]},
         )
-        source = Package(name="pkg-a", current_version="2.0.0", recommended_version="2.0.0")
-        target_one = Package(name="pkg-b", current_version="1.0.0", recommended_version="1.8.0")
-        target_two = Package(name="pkg-b", current_version="1.0.0", recommended_version="1.8.0")
-
-        result = await DependencyAnalyzer(data_store=store).resolve_and_annotate_conflicts(
-            [source, target_one, target_two]
+        source = Package(
+            name="pkg-a", current_version="2.0.0", recommended_version="2.0.0"
         )
+        target_one = Package(
+            name="pkg-b", current_version="1.0.0", recommended_version="1.8.0"
+        )
+        target_two = Package(
+            name="pkg-b", current_version="1.0.0", recommended_version="1.8.0"
+        )
+
+        result = await DependencyAnalyzer(
+            data_store=store
+        ).resolve_and_annotate_conflicts([source, target_one, target_two])
 
         # pkg-b must not exceed <1.6 while pkg-a==2.0.0 is proposed -- both
         # declarations of pkg-b move together, matching the single-instance
         # behaviour this scenario would have had without duplication.
-        assert target_one.recommended_version == target_two.recommended_version == "1.5.0"
+        assert (
+            target_one.recommended_version == target_two.recommended_version == "1.5.0"
+        )
         assert result.converged is True
 
 
@@ -564,14 +573,14 @@ class TestDisplayedConflictsReflectTheFinalState:
     must never cite a source/target version pairing that was abandoned
     during resolution."""
 
-    async def test_a_fallback_revert_clears_the_stale_conflict_from_display(
+    async def test_a_fallback_revert_displays_only_the_conflict_of_the_final_state(
         self,
     ) -> None:
         # flask has a higher major-3 release (3.1.3) whose Werkzeug floor is
         # even stricter than 3.0.3's -- neither is satisfiable by werkzeug's
         # own proposal, so both packages fall back to their *current*
         # versions. The conflict recorded during detection cites flask's
-        # abandoned 3.1.3 proposal, which the live source (now back at
+        # abandoned 3.1.3 proposal, which the live source (back at
         # 3.0.3) has moved away from.
         store = FakePyPIStore(
             {
@@ -583,27 +592,33 @@ class TestDisplayedConflictsReflectTheFinalState:
                 "flask==3.0.3": ["werkzeug>=3.0.0"],
             },
         )
-        flask = Package(name="flask", current_version="3.0.3", recommended_version="3.1.3")
+        flask = Package(
+            name="flask", current_version="3.0.3", recommended_version="3.1.3"
+        )
         werkzeug = Package(
             name="werkzeug", current_version="2.0.3", recommended_version="2.3.8"
         )
 
-        result = await DependencyAnalyzer(data_store=store).resolve_and_annotate_conflicts(
-            [flask, werkzeug]
-        )
+        result = await DependencyAnalyzer(
+            data_store=store
+        ).resolve_and_annotate_conflicts([flask, werkzeug])
 
         assert flask.recommended_version == "3.0.3"
         assert werkzeug.recommended_version == "2.0.3"
 
-        # The resolver fell back to reverting both packages, so no live
-        # conflict should be attributed to the abandoned 3.1.3 pairing on
-        # the Package object users actually see...
-        assert werkzeug.conflicts == []
+        # The resolver fell back to reverting both packages, so nothing may be
+        # attributed to the abandoned 3.1.3 pairing on the Package object
+        # users actually see.
+        # The revert is rescanned, so the only conflict displayed is
+        # the genuine one between the reverted pair (flask 3.0.3 vs 2.0.3).
+        assert [c.source_version for c in werkzeug.conflicts] == ["3.0.3"]
 
-        # ...but the run is still surfaced as having had an unresolved
+        # The run is still surfaced as having had an unresolved
         # conflict, and the full resolution history (citing the 3.1.3
         # proposal that actually triggered it) remains available for anyone
         # inspecting `ResolutionResult` directly.
         assert result.packages_with_conflicts == 1
         assert result.resolved_versions["werkzeug"].conflicts != []
-        assert result.resolved_versions["werkzeug"].conflicts[0].source_version == "3.1.3"
+        assert (
+            result.resolved_versions["werkzeug"].conflicts[0].source_version == "3.1.3"
+        )
