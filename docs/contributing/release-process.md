@@ -73,9 +73,8 @@ version = "0.2.0"
 
 Move the `[Unreleased]` entries into a dated section of the root `CHANGELOG.md` — the canonical file, linked from `pyproject.toml`
 and PyPI — following Keep a Changelog. Every user-visible change belongs in it, grouped under
-`Added` / `Changed` / `Deprecated` / `Removed` / `Fixed` / `Security`, each once. Rename `[Unreleased]` to the new version and date, then add a fresh empty `[Unreleased]`. Mirror the same section into
-`docs/community/changelog.md`; that copy may summarise rather than repeat verbatim, but must not
-diverge in substance.
+`Added` / `Changed` / `Deprecated` / `Removed` / `Fixed` / `Security`, each once. Rename `[Unreleased]` to the new version and date, then add a fresh empty `[Unreleased]`.
+`CHANGELOG.md` is the only place release notes live; `docs/community/changelog.md` just points to it.
 
 Call out behavioural changes explicitly, with a "how this affects you" note:
 

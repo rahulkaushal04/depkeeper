@@ -1,5 +1,6 @@
-click>=8.5.1
-packaging>=26.3
-httpx[http2]>=0.28.1
-rich>=15.0.0
+# Runtime dependencies. Mirrors [project].dependencies in pyproject.toml; keep them identical.
+click>=8.1.8
+packaging>=26.2
+httpx[http2]>=0.24.1
+rich>=14.3.4
 tomli>=2.5.0
