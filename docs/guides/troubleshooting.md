@@ -117,6 +117,18 @@ reported on stderr as `N package(s) could not be checked (not found on PyPI or n
 and `check` exits `4` (`update` also exits `4` after updating the others). A failure is never
 reported as up to date. Direct references (URL, VCS, editable) are not looked up and never cause `4`.
 
+### `Network unreachable (too many consecutive connection failures)`
+
+Three consecutive connection-level failures to one host opened the circuit breaker for 30 s, so
+the remaining requests to that host failed at once. Fix connectivity or `HTTPS_PROXY` and re-run;
+see [Circuit breaker](operations.md#circuit-breaker).
+
+### `Conflict check incomplete: dependency metadata unavailable for N package(s)`
+
+The version recommendations were still computed, but the cross-package conflict check could not
+read those packages' dependencies, so a clean result is not a guarantee. Re-run when the network
+is stable. `json-v2` carries `summary.conflict_check_complete: false`.
+
 ### `Rate limit exceeded after 5 retries`
 
 Too many requests from one egress IP. depkeeper honours `Retry-After` (capped at 120 s) and retries up to 5 times.

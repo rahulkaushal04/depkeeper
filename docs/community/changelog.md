@@ -39,7 +39,7 @@ See [CHANGELOG.md](https://github.com/rahulkaushal04/depkeeper/blob/main/CHANGEL
 
 ### Security
 
-- Responses are capped at 20 MB, redirects are limited to https PyPI hosts, `--verify` never builds source distributions, and URL credentials are redacted.
+- Responses are capped at 64 MB, redirects are limited to https PyPI hosts, `--verify` never builds source distributions, and URL credentials are redacted.
 
 ---
 

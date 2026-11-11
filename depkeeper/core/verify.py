@@ -74,7 +74,7 @@ _NET_RE = re.compile(
 )
 _CONFLICT_RE = re.compile(r"Cannot install (.+?) because these package versions", re.S)
 _DETAIL_RE = re.compile(r"^\s+(\S.*?)\s+depends on\s+(.+?)\s*$")
-_VER_RE = re.compile(r"pip (\d+)\.(\d+)(?:\.\d+)?")
+_VER_RE = re.compile(r"pip ([0-9]+)\.([0-9]+)(?:\.[0-9]+)?")
 _PIP_PY_RE = re.compile(r"\(python ([0-9]+\.[0-9]+)\)")
 _PY_RE = re.compile(r"\A\s*([0-9]+)\.([0-9]+)(?:\.[0-9]+)*\s*\Z")
 _NO_DIST_RE = re.compile(r"No matching distribution found for (\S+)")
@@ -480,7 +480,7 @@ def verify_plan(
             return requirements[n - 1] if 0 < n <= len(requirements) else m.group(0)
 
         conflicts = [
-            re.sub(r"-r \S+ \(line (\d+)\)", _line, c) for c in parse_conflicts(text)
+            re.sub(r"-r \S+ \(line ([0-9]+)\)", _line, c) for c in parse_conflicts(text)
         ]
         if conflicts:
             return VerifyResult(

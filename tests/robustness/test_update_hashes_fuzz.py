@@ -57,6 +57,8 @@ class TestHashes:
         f.write_bytes(raw)
         r = go(f, "--dry-run")
         assert r.exit_code == 0 and f.read_bytes() == raw
+        assert "would be refused without --allow-hash-removal" in text(r)
+        assert "2.31.0" in r.stdout + r.stderr
 
     @pytest.mark.parametrize("raw", HASHED)
     def test_allow_removal_leaves_no_orphan_hash_lines(
@@ -107,7 +109,8 @@ class TestOutput:
         f.write_bytes(b"my_pkg==1.0.0\nrequests==2.0.0\n")
         r = go(f, "-f", "markdown", "-y")
         assert r.exit_code == 0
-        assert "my-pkg" in r.stdout.lower() or "my_pkg" in r.stdout.lower()
+        assert "| `my-pkg` | 1.0.0 | 9.0.0 |" in r.stdout
+        assert "| `requests` | 2.0.0 | 2.31.0 |" in r.stdout
         assert "Successfully updated" not in r.stdout  # status lines go to stderr
         assert "|" in r.stdout
 
@@ -186,6 +189,10 @@ def test_minimal_diff_and_idempotence_fuzz(tmp_path: Path) -> None:
         # A new bound may be added to, or a first pin written for, a bare name.
         return re.sub(rb"S(\s*,?\s*S)*", b"", spec.sub(b"S", line))
 
+    pin = re.compile(
+        rb"(?i)(requests|flask|idna|my_pkg)(?:\[\w+\])?\s*==\s*(?:1\.0|2\.0\.0)\b"
+    )
+
     for case in range(150):
         d = tmp_path / f"c{case}"
         d.mkdir()
@@ -193,7 +200,8 @@ def test_minimal_diff_and_idempotence_fuzz(tmp_path: Path) -> None:
         raw = _gen(rng)
         f.write_bytes(raw)
         r = go(f, "-y")
-        assert r.exit_code in (0, 4), (raw, text(r))
+        has_ghost = re.search(rb"(?mi)^(?:\xef\xbb\xbf)?ghost", raw) is not None
+        assert r.exit_code == (4 if has_ghost else 0), (raw, text(r))
         new = f.read_bytes()
         assert new.startswith(b"\xef\xbb\xbf") == raw.startswith(b"\xef\xbb\xbf")
         assert new.count(b"\r\n") == raw.count(b"\r\n"), raw
@@ -206,9 +214,14 @@ def test_minimal_diff_and_idempotence_fuzz(tmp_path: Path) -> None:
                 assert a.partition(b"#")[2] == b.partition(b"#")[2], (a, b)
                 assert a.partition(b";")[2] == b.partition(b";")[2], (a, b)
                 assert strip_specs(a) == strip_specs(b), (a, b)
+        for a, b in zip(old_l, new_l):  # an exact stale pin is bumped
+            m = pin.match(a.lstrip(b"\xef\xbb\xbf"))
+            if m:
+                key = m.group(1).decode().lower().replace("_", "-")
+                assert T[key].encode() in b, (a, b)
         # idempotent: second run is a byte-for-byte no-op
         again = f.read_bytes()
         r2 = go(f, "-y")
-        assert r2.exit_code in (0, 4)
+        assert r2.exit_code == (4 if has_ghost else 0)
         assert f.read_bytes() == again, (raw, new)
         assert strays(d) == []

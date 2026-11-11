@@ -48,6 +48,7 @@ from packaging.specifiers import Specifier
 from depkeeper.models.requirement import Requirement
 from depkeeper.utils import get_logger, safe_read_file
 from depkeeper.utils.naming import normalize_package_name
+from depkeeper.utils.redact import redact
 from depkeeper.exceptions import ParseError, FileOperationError
 from depkeeper.constants import (
     INCLUDE_DIRECTIVE,
@@ -96,11 +97,6 @@ _HASH_DIRECTIVE_PATTERN = re.compile(r"--hash[=\s]+(\S+)")
 _INCLUDE_PATTERN = re.compile(r"(?:--requirement(?:\s*=\s*|\s+|$)|-r\s*=?\s*)(.*)$")
 _CONSTRAINT_PATTERN = re.compile(r"(?:--constraint(?:\s*=\s*|\s+|$)|-c\s*=?\s*)(.*)$")
 
-# Credentials embedded in URLs (``://user:pass@host``) must not reach errors or
-# logs. Greedy up to the last ``@`` of the authority, so a password that itself
-# contains ``@`` is masked completely.
-_URL_CREDENTIALS_PATTERN = re.compile(r"(://)[^/\s]*@")
-
 _URL_PREFIX_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
 
 # pip starts a comment at ``#`` only at the start of a line or after whitespace
@@ -123,11 +119,6 @@ _LINE_BREAK_PATTERN = re.compile(r"\r\n|\r|\n")
 
 # A ``#egg=`` value is a project name, never a path.
 _EGG_NAME_PATTERN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?")
-
-
-def _redact(text: str) -> str:
-    """Mask ``user:pass@`` credentials in URLs found in *text*."""
-    return _URL_CREDENTIALS_PATTERN.sub(r"\1***@", text)
 
 
 def _join_continuations(content: str) -> List[Tuple[int, str]]:
@@ -418,7 +409,7 @@ class RequirementsParser:
             self.logger.debug(
                 "Line %d: Skipping supported pip global option: %s",
                 line_number,
-                _redact(requirement_spec),
+                redact(requirement_spec),
             )
             return None
 
@@ -436,7 +427,7 @@ class RequirementsParser:
                 raise ParseError(
                     "Editable directive requires a path or URL.",
                     line_number=line_number,
-                    line_content=_redact(line_text),
+                    line_content=redact(line_text),
                     file_path=source_file_path,
                 )
 
@@ -512,9 +503,9 @@ class RequirementsParser:
             marker = str(Marker(marker_text))
         except InvalidMarker as exc:
             raise ParseError(
-                f"Invalid environment marker: {_redact(str(exc))}",
+                f"Invalid environment marker: {redact(str(exc))}",
                 line_number=line_number,
-                line_content=_redact(requirement_spec),
+                line_content=redact(requirement_spec),
                 file_path=source_file_path,
             ) from exc
         return requirement_spec[: match.start()].strip(), marker
@@ -590,9 +581,9 @@ class RequirementsParser:
             )
         except (FileOperationError, ParseError) as exc:
             raise ParseError(
-                f"Failed to process include directive: {_redact(str(exc))}",
+                f"Failed to process include directive: {redact(str(exc))}",
                 line_number=line_number,
-                line_content=_redact(directive_line),
+                line_content=redact(directive_line),
                 file_path=source_file_path,
             ) from exc
 
@@ -645,9 +636,9 @@ class RequirementsParser:
             )
         except (FileOperationError, ParseError) as exc:
             raise ParseError(
-                f"Failed to process constraint directive: {_redact(str(exc))}",
+                f"Failed to process constraint directive: {redact(str(exc))}",
                 line_number=line_number,
-                line_content=_redact(directive_line),
+                line_content=redact(directive_line),
                 file_path=source_file_path,
             ) from exc
 
@@ -660,7 +651,7 @@ class RequirementsParser:
             raise ParseError(
                 "Remote requirements/constraints files are not supported.",
                 line_number=line_number,
-                line_content=_redact(path),
+                line_content=redact(path),
                 file_path=source_file_path,
             )
 
@@ -698,9 +689,9 @@ class RequirementsParser:
             parsed_pkg = PkgRequirement(requirement_spec)
         except InvalidRequirement as exc:
             raise ParseError(
-                f"Invalid requirement syntax: {_redact(str(exc))}",
+                f"Invalid requirement syntax: {redact(str(exc))}",
                 line_number=line_number,
-                line_content=_redact(requirement_spec),
+                line_content=redact(requirement_spec),
                 file_path=source_file_path,
             ) from exc
 
@@ -710,7 +701,7 @@ class RequirementsParser:
                 raise ParseError(
                     f"Invalid version specifier: empty version in '{spec.operator}{spec.version}'",
                     line_number=line_number,
-                    line_content=requirement_spec,
+                    line_content=redact(requirement_spec),
                     file_path=source_file_path,
                 )
 
@@ -776,7 +767,7 @@ class RequirementsParser:
                 raise ParseError(
                     "URL requirements must include '#egg=<name>' or an inferable package name.",
                     line_number=line_number,
-                    line_content=_redact(url_string),
+                    line_content=redact(url_string),
                 )
 
         self._validate_egg_name(package_name, line_number, url_string)
@@ -801,7 +792,7 @@ class RequirementsParser:
             raise ParseError(
                 f"Invalid '#egg=' name {name!r}: must be a project name, not a path.",
                 line_number=line_number,
-                line_content=_redact(line_content),
+                line_content=redact(line_content),
             )
 
     def _build_local_path_requirement(

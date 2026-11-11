@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import socket
 import subprocess
 import sys
 import time
@@ -17,17 +16,8 @@ from click.testing import CliRunner
 from depkeeper.cli import cli
 
 
-def _online() -> bool:
-    try:
-        socket.create_connection(("pypi.org", 443), timeout=3).close()
-        return True
-    except OSError:
-        return False
-
-
 pytestmark = [
     pytest.mark.network,
-    pytest.mark.skipif(not _online(), reason="PyPI unreachable"),
 ]
 
 
@@ -50,10 +40,6 @@ def _check(tmp_path: Path, body: str, *extra: str) -> List[dict]:
     return json.loads(res.stdout)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="X1: editable/VCS/URL requirements are looked up on PyPI by name",
-)
 def test_direct_references_are_not_looked_up(tmp_path: Path) -> None:
     out = _check(
         tmp_path,
@@ -75,10 +61,6 @@ def test_poetry_python_constraint_is_target(tmp_path: Path) -> None:
     assert SpecifierSet(rec).contains("3.9.0"), rec
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="X4: duplicate package across directory files makes update non-idempotent",
-)
 def test_directory_update_is_idempotent_with_cross_file_duplicate(
     tmp_path: Path,
 ) -> None:
@@ -101,20 +83,12 @@ def test_conflicts_match_final_recommendation(tmp_path: Path) -> None:
             assert c["conflicting_version"] == pkg["versions"]["recommended"], pkg
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="X7: simple format prints a doubled comma in the Python line",
-)
 def test_simple_format_has_no_double_comma(tmp_path: Path) -> None:
     (tmp_path / "requirements.txt").write_text("celery==5.2.0\n")
     res = _invoke("check", "-f", "simple", str(tmp_path / "requirements.txt"))
     assert ",," not in res.stdout.replace("\n", " "), res.stdout
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="X9: check --allow-major with an unknown package is silent in non-table formats",
-)
 def test_allow_major_unknown_package_warns(tmp_path: Path) -> None:
     f = tmp_path / "requirements.txt"
     f.write_text("requests==2.25.0\n")
@@ -147,10 +121,6 @@ def test_huge_pypi_document_is_not_a_lookup_failure(tmp_path: Path) -> None:
     assert res.exit_code != 4, res.stderr
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="X11: update --pin leaves a range unpinned when the version does not change",
-)
 def test_pin_applies_when_already_at_recommended(tmp_path: Path) -> None:
     f = tmp_path / "requirements.txt"
     f.write_text("requests>=2.34.2\n")

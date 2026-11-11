@@ -241,7 +241,8 @@ parsing.
 | Retries per request | 3 (4 attempts) | `DEFAULT_MAX_RETRIES` |
 | `429` retries | 5, honouring `Retry-After` | `HTTPClient._max_429_retries` |
 | Request timeout | 30 s per attempt, plus a total deadline per request | `DEFAULT_TIMEOUT`, `HTTPClient(total_timeout=…)` |
-| Response body | 20 MB | `http.MAX_RESPONSE_BYTES` |
+| Response body | 64 MB | `http.MAX_RESPONSE_BYTES` |
+| Circuit breaker | 3 consecutive connection failures to one host open it for 30 s; then one probe | `http.BREAKER_THRESHOLD`, `http.BREAKER_TTL` |
 | Maximum input file size | 10 MB | `constants.MAX_FILE_SIZE` |
 | Resolution passes | 100 | `_MAX_RESOLUTION_ITERATIONS` |
 | Source candidates evaluated per conflict | 50 | `_MAX_SOURCE_CANDIDATES` |

@@ -50,7 +50,8 @@ depkeeper reports version drift, not vulnerabilities. Use `pip-audit` or `safety
 ### Calendar versioning heuristics
 
 Calver packages (such as `certifi 2023.7.22`) are detected automatically and updated across years;
-the change is labelled `year`. Detection is heuristic: force it with `versioning = "calver"` (or
+the change is labelled `year`. Detection is heuristic (it reads the latest releases, so a semver project whose major reaches 18+
+with minors of 12 or less can look like calver): force it with `versioning = "calver"` (or
 `"semver"`) per package. A calver `year` counts as `minor` for gating (`--fail-on`, `--max-update`).
 
 **Workaround:** leave date-versioned packages unversioned so there is no anchor, or bump the pin
@@ -175,6 +176,14 @@ variable.
 
 **Workaround:** use the [Python API](python-api.md) and construct `HTTPClient` /
 `PyPIDataStore` yourself.
+
+### Conflict check can be partial
+
+When PyPI is partly unreachable, a package's dependency metadata may be missing during conflict
+resolution. depkeeper reports this (`Conflict check incomplete: ...` on stderr,
+`summary.conflict_check_complete: false` in `json-v2`) but still prints the recommendations it
+could compute. The HTTP client's circuit breaker is per host: 3 consecutive connection failures
+to `pypi.org` stop requests to it for 30 s, then one probe decides whether to resume.
 
 ### No file locking
 

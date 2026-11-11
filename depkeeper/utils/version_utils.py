@@ -34,6 +34,14 @@ UPDATE_RANK = {"patch": 0, "month": 1, "minor": 1, "year": 2, "major": 2}
 
 _FIRST_CALVER_YEAR = 1990
 
+#: Earliest two-digit year treated as calver (pip's ``18.0`` is the first).
+_FIRST_YY = 18
+
+#: Recent stable releases that must all look like dates, and the cap on how
+#: far back to look for a second distinct leading component.
+_RECENT_RELEASES = 8
+_MAX_WINDOW = 40
+
 
 def update_rank(update_type: str) -> int:
     """Return the severity rank of an update label, or -1 if unranked.
@@ -63,25 +71,43 @@ def _leading_is_year(version: str) -> bool:
     )
 
 
-def _history_is_yy_m(versions: Sequence[str]) -> bool:
-    """Strong evidence of ``YY.M`` calver: every stable release looks like it."""
-    yy = _dt.date.today().year % 100
-    parsed = []
+def _fits_calendar(release: Tuple[int, ...]) -> bool:
+    """Return whether a release looks like ``YYYY[.x]`` or ``YY.M``."""
+    this_year = _dt.date.today().year
+    if _FIRST_CALVER_YEAR <= release[0] <= this_year + 1:
+        return True
+    return (
+        len(release) >= 2
+        and _FIRST_YY <= release[0] <= this_year % 100 + 1
+        and 0 <= release[1] <= 12
+    )
+
+
+def _history_is_calendar(versions: Sequence[str]) -> bool:
+    """Judge calver by recent history only.
+
+    Old releases are ignored on purpose: pip moved from 1.x-10.x to ``YY.N``,
+    and a project that adopted calver late is still calver today. Walks the
+    stable releases newest-first until at least ``_RECENT_RELEASES`` have been
+    seen across two distinct leading components; every one of them must look
+    like a date.
+    """
+    releases = []
     for raw in versions:
         try:
             v = Version(raw)
         except InvalidVersion:
             continue
-        if not v.is_prerelease:
-            parsed.append(v.release)
-    if len(parsed) < 5:
-        return False
-    if any(
-        len(r) < 2 or not (15 <= r[0] <= yy + 1) or not (1 <= r[1] <= 12)
-        for r in parsed
-    ):
-        return False
-    return len({r[0] for r in parsed}) >= 2
+        if not (v.is_prerelease or v.is_postrelease or v.is_devrelease):
+            releases.append(v)
+    seen: Set[int] = set()
+    for count, v in enumerate(sorted(releases, reverse=True)[:_MAX_WINDOW], 1):
+        if not _fits_calendar(v.release):
+            return False
+        seen.add(v.release[0])
+        if count >= _RECENT_RELEASES and len(seen) >= 2:
+            return True
+    return False
 
 
 def detect_versioning(
@@ -93,16 +119,16 @@ def detect_versioning(
 
     ``"semver"``/``"calver"`` are returned as-is. ``"auto"`` picks calver when
     the current (else newest historical) version leads with a plausible 4-digit
-    year (1990..this year+1, e.g. ``2024.8.30``), or when the whole release
-    history strongly looks like ``YY.M`` (e.g. black ``24.2.0``). A lone
-    ``23.1.0`` is never guessed to be calver.
+    year (1990..this year+1, e.g. ``2024.8.30``), or when the most recent
+    stable releases (at least 8, spanning two leading components) all look like
+    ``YY.M`` (e.g. black, pip). A lone ``23.1.0`` is never guessed to be calver.
     """
     if mode in ("semver", "calver"):
         return mode
     sample = current_version or (history[0] if history else None)
     if sample and _leading_is_year(sample):
         return "calver"
-    return "calver" if _history_is_yy_m(history) else "semver"
+    return "calver" if _history_is_calendar(history) else "semver"
 
 
 def get_update_type(

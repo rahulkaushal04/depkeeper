@@ -202,7 +202,7 @@ async def test_size_cap_declared_and_streamed_and_gzip_bomb() -> None:
         lambda r: httpx.Response(200, content=b"{}" + b" " * 5000),
         max_response_bytes=1000,
     )
-    with pytest.raises(NetworkError, match="too large|exceeds"):
+    with pytest.raises(NetworkError, match="too large"):
         await c.get(URL)
 
     # Undeclared length: stream over the cap.
@@ -214,7 +214,7 @@ async def test_size_cap_declared_and_streamed_and_gzip_bomb() -> None:
         return httpx.Response(200, content=gen())
 
     c2 = await _client(chunked, max_response_bytes=1000)
-    with pytest.raises(NetworkError, match="exceeds"):
+    with pytest.raises(NetworkError, match="too large"):
         await c2.get(URL)
     bomb = gzip.compress(b"0" * 50_000_000)
     c3 = await _client(
@@ -223,7 +223,7 @@ async def test_size_cap_declared_and_streamed_and_gzip_bomb() -> None:
         ),
         max_response_bytes=1_000_000,
     )
-    with pytest.raises(NetworkError, match="exceeds"):
+    with pytest.raises(NetworkError, match="too large"):
         await c3.get(URL)
     for x in (c, c2, c3):
         await x.close()
@@ -326,11 +326,11 @@ async def test_credentials_never_in_errors_or_logs(
         lambda r: (_ for _ in ()).throw(httpx.ConnectError(f"boom {url}")),
     ):
         c = await _client(h, max_retries=1)
-        try:
+        with pytest.raises(NetworkError) as caught:
             await c.get_json(url)
-        except Exception as e:  # noqa: BLE001
-            blob = f"{e} {getattr(e, 'url', '')} {getattr(e, 'details', '')}"
-            assert secret not in blob, blob
+        e = caught.value
+        blob = f"{e} {getattr(e, 'url', '')} {getattr(e, 'details', '')}"
+        assert secret not in blob, blob
         await c.close()
     assert secret not in caplog.text
 

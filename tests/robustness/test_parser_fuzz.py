@@ -8,10 +8,12 @@ import time
 from typing import List, Tuple
 
 import pytest
+from packaging.requirements import InvalidRequirement
 from packaging.requirements import Requirement as PkgRequirement
 from packaging.utils import canonicalize_name
 
 from depkeeper.core.parser import RequirementsParser
+from depkeeper.exceptions import ParseError
 from depkeeper.models.requirement import Requirement
 
 NAMES = [
@@ -89,7 +91,7 @@ def _valid(seed: int, count: int = 120) -> List[Tuple[str, Requirement]]:
     for line in _lines(seed, count):
         try:
             PkgRequirement(_strip_comment(line))
-        except Exception:
+        except InvalidRequirement:
             continue
         req = RequirementsParser().parse_line(line, 1)
         assert isinstance(req, Requirement), line
@@ -110,8 +112,8 @@ class TestDifferential:
             body = _strip_comment(line)
             try:
                 expected = PkgRequirement(body)
-            except Exception:
-                with pytest.raises(Exception):
+            except InvalidRequirement:
+                with pytest.raises(ParseError):
                     RequirementsParser().parse_line(line, 1)
                 continue
             got = RequirementsParser().parse_line(line, 1)
@@ -170,7 +172,7 @@ class TestRoundTrip:
             req.direct_reference,
         )
         assert again.markers == req.markers
-        assert req.name in req.to_string() or "#egg=" in req.to_string()
+        assert req.name in req.to_string()
 
 
 class TestUpdateMinimalDiff:
@@ -234,9 +236,8 @@ class TestUpdateMinimalDiff:
             assert out == expected
         else:
             # Everything outside the specifier text is byte-identical.
-            assert out.split(";")[-1].strip() == line.split(";")[-1].strip() or (
-                ";" not in line
-            )
+            if ";" in line:
+                assert out.split(";")[-1].strip() == line.split(";")[-1].strip()
             assert out[0] == line[0]
 
 

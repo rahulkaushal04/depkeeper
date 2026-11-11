@@ -55,6 +55,7 @@ from depkeeper.utils import (
     print_warning,
     print_table,
     colorize_update_type,
+    safe_text,
     get_update_type,
     create_timestamped_backup,
     safe_read_file,
@@ -152,7 +153,10 @@ logger = get_logger("commands.update")
     "--max-update",
     type=click.Choice(["patch", "minor", "major"]),
     default=None,
-    help="Skip updates larger than this level (e.g. 'minor' skips major bumps).",
+    help=(
+        "Largest update level to apply. The newest release within the cap is "
+        "chosen (e.g. 'patch' stays on the current minor)."
+    ),
 )
 @click.option(
     "--format",
@@ -329,6 +333,8 @@ def update(
     except DepKeeperError as e:
         print_error(e.message)
         sys.exit(1)
+    except BrokenPipeError:
+        raise
     except Exception as e:
         print_error(f"Unexpected error: {type(e).__name__}: {e}")
         logger.debug("Error in update command", exc_info=True)
@@ -438,6 +444,7 @@ async def _update_async(
                 data_store=data_store, target_python=python[0], checker=checker
             )
             resolution_result = await resolve_conflicts_by_name(analyzer, packages)
+            _report.warn_conflict_check_incomplete(resolution_result)
 
             if ctx.verbose > 0 and resolution_result:
                 _report.display_resolution_summary(resolution_result, stderr=markdown)
@@ -583,7 +590,7 @@ async def _update_async(
             _report.Row(p, r, links.get(p.name, {}), v) for r, p, v in updates
         ]
         skipped = [
-            f"`{n}`: update exceeds --max-update {max_update}"
+            f"{_report.md_code(n)}: update exceeds --max-update {max_update}"
             for n in sorted(set(capped))
         ]
         title = "depkeeper updates (dry run)" if dry_run else "depkeeper updates"
@@ -706,8 +713,10 @@ async def resolve_conflicts_by_name(
     for pkg in packages:
         proposal = parse_version_lenient(pkg.recommended_version or pkg.current_version)
         held = best.get(pkg.name)
-        held_v = held and parse_version_lenient(
-            held.recommended_version or held.current_version
+        held_v = (
+            parse_version_lenient(held.recommended_version or held.current_version)
+            if held
+            else None
         )
         if held is None or (
             proposal is not None and (held_v is None or proposal > held_v)
@@ -812,6 +821,8 @@ def _find_updates(
             continue
 
         target_version = pkg.recommended_version
+        if pin and pkg.pin_target and not req.series:
+            target_version = pkg.pin_target
         if not target_version:
             logger.debug("No target version for %s", pkg.name)
             continue
@@ -1043,10 +1054,10 @@ def _fuzzy_noop(req: Requirement, target: str) -> bool:
     raw = req.raw_line or ""
     if not (req.approximate and len(req.specs) == 1 and req.specs[0][0] == "=="):
         return False
-    if not (re.search(r"[^=!<>~]=\s*\d", raw) or raw.rstrip().endswith(".*")):
+    if not (re.search(r"[^=!<>~]=\s*[0-9]", raw) or raw.rstrip().endswith(".*")):
         return False
     prefix = req.specs[0][1]
-    lead = re.match(r"\d+(\.\d+)*", target)
+    lead = re.match(r"[0-9]+(\.[0-9]+)*", target)
     if lead is None:
         return False
     return ".".join(lead.group(0).split(".")[: len(prefix.split("."))]) == prefix
@@ -1083,17 +1094,19 @@ def _display_update_plan(
 
         # Fall back to the latest release's requirement when the target
         # version's own metadata was never fetched.
-        python_req = (
-            pkg.get_version_python_req("recommended")
-            or pkg.get_version_python_req("latest")
+        python_req = safe_text(
+            _report.python_bounds(
+                pkg.get_version_python_req("recommended")
+                or pkg.get_version_python_req("latest")
+            )
             or "-"
         )
 
         data.append(
             {
-                "Package": pkg.name,
-                "Current": old_version,
-                "New Version": f"[bold green]{new_version}[/bold green]"
+                "Package": safe_text(pkg.name),
+                "Current": safe_text(old_version),
+                "New Version": f"[bold green]{safe_text(new_version)}[/bold green]"
                 + (
                     f"\n[dim]{_report.age_short(pkg)} old[/dim]"
                     if new_version == pkg.recommended_version
@@ -1106,8 +1119,13 @@ def _display_update_plan(
         )
     if _report.multi_file([_report.Row(p, r) for r, p, _ in updates]):
         for row, (req, pkg, _) in zip(data, updates):
-            fmt = f"\n[dim]({req.source_format})[/dim]" if req.source_format else ""
-            row["Source"] = f"{_report.source_cell(_report.Row(pkg, req))}{fmt}"
+            fmt = (
+                f"\n[dim]({safe_text(req.source_format)})[/dim]"
+                if req.source_format
+                else ""
+            )
+            source = safe_text(_report.source_cell(_report.Row(pkg, req)))
+            row["Source"] = f"{source}{fmt}"
 
     column_styles: Dict[str, Dict[str, Union[str, bool]]] = {
         "Package": {"style": "bold cyan", "no_wrap": True},

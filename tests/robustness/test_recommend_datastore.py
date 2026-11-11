@@ -124,10 +124,12 @@ def test_non_string_requires_python_is_ignored(bad: Any) -> None:
 )
 def test_odd_info_fields_never_crash(info: Dict[str, Any]) -> None:
     data = _store(FakeHttp(lambda u: Resp()))._parse_package_data(
-        "p", _payload(info=info)
+        "p", _payload(info={"version": "1.1", **info})
     )
-    assert data.latest_version is None or isinstance(data.latest_version, str)
+    good = isinstance(info.get("version", "1.1"), str)
+    assert data.latest_version == ("1.1" if good else None)
     assert all(isinstance(d, str) for d in data.latest_dependencies)
+    assert sorted(data.all_versions) == ["1.0", "1.1"]
     assert "a" not in data.latest_dependencies and "b" not in data.latest_dependencies
 
 
@@ -357,11 +359,7 @@ def test_urls_with_odd_names_are_quoted() -> None:
     store = _store(http)
     with pytest.raises(PyPIError):
         asyncio.run(store.get_package_data("a/../b?x#y"))
-    assert (
-        "/" not in http.calls[0].split("/pypi/", 1)[1].rsplit("/json", 1)[0]
-        or "%2F" in http.calls[0]
-    )
-    assert "?" not in http.calls[0] and "#" not in http.calls[0]
+    assert http.calls == ["https://pypi.org/pypi/a%2F..%2Fb%3Fx%23y/json"]
 
 
 def test_concurrent_limit_validation() -> None:

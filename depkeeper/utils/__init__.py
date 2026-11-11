@@ -40,6 +40,7 @@ from depkeeper.utils.console import (
     print_table,
     print_warning,
     reconfigure_console,
+    safe_text,
 )
 
 from depkeeper.utils.http import HTTPClient
@@ -64,6 +65,7 @@ __all__ = [
     "print_warning",
     "get_raw_console",
     "reconfigure_console",
+    "safe_text",
     "colorize_update_type",
     "get_logger",
     "setup_logging",

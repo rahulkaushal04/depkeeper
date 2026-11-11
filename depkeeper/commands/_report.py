@@ -15,14 +15,15 @@ from urllib.parse import urlsplit
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import click
-from rich.markup import escape
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import Version
 
 from depkeeper.config import DepKeeperConfig, parse_duration
 from depkeeper.core import ResolutionResult
 from depkeeper.core.data_store import PyPIDataStore
 from depkeeper.models import Package, Requirement
 from depkeeper.utils import get_logger, get_raw_console
+from depkeeper.utils.console import print_warning, safe_text, strip_controls
 from depkeeper.utils.naming import normalize_package_name
 from depkeeper.utils.version_utils import get_update_type
 
@@ -68,7 +69,7 @@ def minimum_python(spec: str) -> Optional[str]:
     spec = spec.strip()
     if _PY_RE.match(spec):
         return spec
-    if re.fullmatch(r"=*\s*\d+(\.\*)?", spec):
+    if re.fullmatch(r"=*\s*[0-9]+(\.\*)?", spec):
         return None
     try:
         sset = SpecifierSet(spec)
@@ -77,8 +78,17 @@ def minimum_python(spec: str) -> Optional[str]:
     # An upper-bound-only spec (``<3.9``) names no lower bound to target.
     if not any(sp.operator in (">=", ">", "==", "~=") for sp in sset):
         return None
+    # ``>3.8`` means "newer than the 3.8 series" to the people who write it,
+    # although PEP 440 would admit 3.8.1.
+    skipped_series = {
+        tuple(Version(sp.version).release[:2])
+        for sp in sset
+        if sp.operator == ">" and len(Version(sp.version).release) == 2
+    }
     for major, top in ((2, 8), (3, 40)):
         for minor in range(0, top):
+            if (major, minor) in skipped_series:
+                continue
             if sset.contains(f"{major}.{minor}.0", prereleases=True) or (
                 sset.contains(f"{major}.{minor}.999", prereleases=True)
             ):
@@ -302,6 +312,12 @@ def clean_specifier(spec: Optional[str]) -> Optional[str]:
     return ",".join(c.strip() for c in spec.split(",") if c.strip()) or None
 
 
+def python_bounds(spec: Optional[str]) -> str:
+    """Return *spec* without ``!=`` exclusion clauses, which make a cell unreadable."""
+    parts = [x for x in (spec or "").replace(" ", "").split(",") if x]
+    return ",".join(x for x in parts if not x.startswith("!="))
+
+
 def attention_note(packages: Sequence[Package], failed: Sequence[str] = ()) -> str:
     """Return what still needs attention even though nothing is outdated.
 
@@ -344,15 +360,35 @@ def package_json(row: Row) -> Dict[str, Any]:
     return entry
 
 
+def warn_conflict_check_incomplete(result: Optional[ResolutionResult]) -> None:
+    """Tell the user (stderr) when dependency metadata was missing for the check."""
+    failed = result.dependency_lookup_failures if result else []
+    if failed:
+        print_warning(
+            "Conflict check incomplete: dependency metadata unavailable for "
+            f"{len(failed)} package(s): {', '.join(failed)}",
+            stderr=True,
+        )
+
+
 def build_envelope(
-    rows: Sequence[Row], python: Tuple[Optional[str], str]
+    rows: Sequence[Row],
+    python: Tuple[Optional[str], str],
+    conflict_check_complete: bool = True,
 ) -> Dict[str, Any]:
     """Return the ``json-v2`` document (see docs/reference/cli-commands.md)."""
     packages: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
     files: Dict[str, Dict[str, Any]] = {}
     by_type: Dict[str, int] = {}
-    counts = {"outdated": 0, "up_to_date": 0, "held": 0, "ignored": 0, "conflicts": 0}
+    counts = {
+        "outdated": 0,
+        "up_to_date": 0,
+        "held": 0,
+        "ignored": 0,
+        "conflicts": 0,
+        "not_applicable": 0,
+    }
 
     for row in rows:
         pkg, req = row.pkg, row.req
@@ -393,6 +429,7 @@ def build_envelope(
             counts["up_to_date"] += 1
         counts["held"] += pkg.held
         counts["ignored"] += pkg.ignored
+        counts["not_applicable"] += bool(pkg.not_applicable)
         counts["conflicts"] += pkg.has_conflicts() or pkg.conflict_held
 
     return {
@@ -402,6 +439,7 @@ def build_envelope(
             "errors": len(errors),
             "by_update_type": by_type,
             **counts,
+            "conflict_check_complete": conflict_check_complete,
         },
         "python": {"version": python[0], "source": python[1]},
         "files": list(files.values()),
@@ -423,11 +461,43 @@ _GROUP_TITLES = {
 
 
 def _cell(text: str) -> str:
-    """Escape *text* for a Markdown table cell."""
-    return text.replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+    """Make *text* a single table cell: no control characters, no bare ``|``."""
+    text = strip_controls(text.replace("\r", " ").replace("\n", " "))
+    return text.replace("|", "\\|")
 
 
-_UNSAFE_URL_CHARS = re.compile(r"[\x00-\x20\x7f()<>\[\]|`\\\"]")
+_MD_SPECIAL = re.compile(r"([\\`*_\[\]<>&~])")
+
+
+def md(value: object) -> str:
+    """Escape externally sourced text for inline Markdown.
+
+    Newlines become spaces, so the text never starts a heading, list or quote
+    line of its own; backslash-escapes neutralise emphasis, links, HTML and
+    code spans; ``|`` becomes an entity so no backslash can pair with it.
+    """
+    text = strip_controls(str(value).replace("\r", " ").replace("\n", " "))
+    return _MD_SPECIAL.sub(r"\\\1", text).replace("|", "&#124;")
+
+
+def md_code(value: object) -> str:
+    """Return *value* as a Markdown code span that cannot be closed early."""
+    text = strip_controls(str(value).replace("\r", " ").replace("\n", " "))
+    if "\\" in text or "|" in text:  # would pair with the table-cell pipe escape
+        return md(text)
+    longest = max((len(m) for m in re.findall(r"`+", text)), default=0)
+    fence = "`" * (longest + 1)
+    pad = " " if text.startswith("`") or text.endswith("`") else ""
+    return f"{fence}{pad}{text}{pad}{fence}"
+
+
+_UNSAFE_URL_CHARS = re.compile(
+    '[\x00-\x20\x7f-\x9f()<>\\[\\]|`\\\\"\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]'
+)
+
+
+def _pct(match: "re.Match[str]") -> str:
+    return "".join(f"%{b:02X}" for b in match.group().encode("utf-8"))
 
 
 def _safe_url(url: str) -> Optional[str]:
@@ -441,7 +511,7 @@ def _safe_url(url: str) -> Optional[str]:
     parts = urlsplit(url)
     if parts.scheme.lower() not in ("http", "https") or not parts.netloc:
         return None
-    return _UNSAFE_URL_CHARS.sub(lambda m: f"%{ord(m.group()):02X}", url)
+    return _UNSAFE_URL_CHARS.sub(_pct, url)
 
 
 def _links_cell(row: Row) -> str:
@@ -455,7 +525,9 @@ def _links_cell(row: Row) -> str:
         url = _safe_url(row.links[k]) if k in row.links else None
         if url:
             parts.append(f"[{names[k]}]({url})")
-    parts.append(f"[PyPI](https://pypi.org/project/{row.pkg.name}/)")
+    parts.append(
+        f"[PyPI](https://pypi.org/project/{_UNSAFE_URL_CHARS.sub(_pct, row.pkg.name)}/)"
+    )
     return " · ".join(parts)
 
 
@@ -484,7 +556,7 @@ def render_markdown(
         python: Interpreter ``(version, source)`` the check targeted.
         change_rows: ``update`` only: the rows actually changed, each to
             ``row.new_version``; default derives changes from *rows*.
-        skipped: Extra lines for the "Skipped" section (e.g. ``--max-update``).
+        skipped: Extra lines (already Markdown-safe) for the "Skipped" section.
     """
     multi = multi_file(rows)
     changes_only = change_rows is not None
@@ -511,7 +583,7 @@ def render_markdown(
     out = [f"## {title}", ""]
     total = len(rows)
     target = (
-        f"target Python {python[0]} ({python[1]})"
+        f"target Python {md(python[0])} ({md(python[1])})"
         if python[0]
         else "target Python: running interpreter"
     )
@@ -541,14 +613,14 @@ def render_markdown(
                 age_text(r.pkg) if r.new_version == r.pkg.recommended_version else None
             )
             line = [
-                f"`{r.pkg.name}`",
-                r.pkg.current_version or "-",
-                r.new_version or "-",
-                (age or "-").replace("released ", ""),
+                md_code(r.pkg.name),
+                md(r.pkg.current_version or "-"),
+                md(r.new_version or "-"),
+                md((age or "-").replace("released ", "")),
                 _links_cell(r),
             ]
             if multi:
-                line.append(source_cell(r))
+                line.append(md(source_cell(r)))
             lines.append(line)
         out += _table(header, lines)
 
@@ -559,25 +631,40 @@ def render_markdown(
     pkgs = [r.pkg for r in rows]
     bullets(
         "Held by policy",
-        [f"`{p.name}` stays on {p.current_version}" for p in pkgs if p.held]
-        + [f"`{p.name}` ignored" for p in pkgs if p.ignored],
+        [f"{md_code(p.name)} stays on {md(p.current_version)}" for p in pkgs if p.held]
+        + [f"{md_code(p.name)} ignored" for p in pkgs if p.ignored],
     )
     bullets(
         "Cooldown",
         [
-            f"`{p.name}`: {p.cooldown_skipped} withheld (younger than min_age)"
+            f"{md_code(p.name)}: {md(p.cooldown_skipped)} withheld "
+            "(younger than min_age)"
             for p in pkgs
             if p.cooldown_skipped
         ],
     )
+    na_python = sorted({p.not_applicable for p in pkgs if p.not_applicable})
+    for version in na_python:
+        bullets(
+            f"Not applicable for target Python {md(version)}",
+            [
+                f"{md_code(p.name)}: marker is false, left unchanged"
+                for p in pkgs
+                if p.not_applicable == version
+            ],
+        )
     bullets(
         "Major updates available (not applied)",
-        [f"`{p.name}`: {p.major_available}" for p in pkgs if p.major_available],
+        [
+            f"{md_code(p.name)}: {md(p.major_available)}"
+            for p in pkgs
+            if p.major_available
+        ],
     )
     bullets(
         "Conflicts",
         [
-            f"`{r.pkg.name}`: {c.to_display_string()}"
+            f"{md_code(r.pkg.name)}: {md(c.to_display_string())}"
             for r in rows
             for c in r.pkg.conflicts
         ],
@@ -586,7 +673,7 @@ def render_markdown(
     bullets(
         "Lookup failures",
         [
-            f"`{r.pkg.name}` could not be checked ({source_cell(r)})"
+            f"{md_code(r.pkg.name)} could not be checked ({md(source_cell(r))})"
             for r in rows
             if r.failed
         ],
@@ -645,9 +732,9 @@ def display_resolution_summary(
         console.print("\n[bold]Version changes:[/bold]")
         for pkg_resolution in changed:
             console.print(
-                f"  • {escape(str(pkg_resolution.name))}: "
-                f"{escape(str(pkg_resolution.original))} → "
-                f"{escape(str(pkg_resolution.resolved))} "
+                f"  • {safe_text(str(pkg_resolution.name))}: "
+                f"{safe_text(str(pkg_resolution.original))} → "
+                f"{safe_text(str(pkg_resolution.resolved))} "
                 f"({pkg_resolution.status.value})"
             )
 

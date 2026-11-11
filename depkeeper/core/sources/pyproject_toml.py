@@ -19,6 +19,7 @@ from depkeeper.models import Requirement
 from depkeeper.core.sources.base import SourceAdapter, SourceUpdate
 from depkeeper.utils import safe_read_file
 from depkeeper.utils.logger import get_logger
+from depkeeper.utils.redact import redact
 from depkeeper.utils.version_utils import rewrite_version_specs, specs_allow_version
 
 logger = get_logger("sources.pyproject")
@@ -214,7 +215,8 @@ def _parse_specs(text: str) -> Optional[List[Spec]]:
 
 def _release(version: str) -> Optional[List[int]]:
     parts = version.split(".")
-    return [int(p) for p in parts] if all(p.isdigit() for p in parts) else None
+    ok = all(p.isascii() and p.isdigit() for p in parts)  # not "²" / "١"
+    return [int(p) for p in parts] if ok else None
 
 
 def _caret_tilde_specs(op: str, version: str) -> Optional[List[Spec]]:
@@ -304,7 +306,7 @@ class PyprojectTomlAdapter(SourceAdapter):
         try:
             return text, tomllib.loads(text)
         except tomllib.TOMLDecodeError as exc:
-            m = re.search(r"line (\d+)", str(exc))
+            m = re.search(r"line ([0-9]+)", str(exc))
             raise ParseError(
                 f"Invalid TOML: {exc}",
                 line_number=int(m.group(1)) if m else None,
@@ -353,7 +355,7 @@ class PyprojectTomlAdapter(SourceAdapter):
                     "%s:%d: skipping invalid requirement %r",
                     path,
                     _line_of(text, node.start),
-                    text[node.start : node.end],
+                    redact(text[node.start : node.end]),
                 )
         for name, node in self._poetry_nodes(tree):
             req = self._poetry(text, name, node, path)
@@ -476,7 +478,9 @@ class PyprojectTomlAdapter(SourceAdapter):
             req.markers = decoded.partition(";")[2].strip() or None
         specs = _parse_specs(inner)
         if specs is None:
-            logger.debug("Skipping unparsable requirement %r at line %d", s, line)
+            logger.debug(
+                "Skipping unparsable requirement %r at line %d", redact(s), line
+            )
             return None
         req.specs = specs
         if inner.strip():

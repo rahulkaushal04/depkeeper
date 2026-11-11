@@ -83,10 +83,12 @@ def test_unicode_and_odd_requirement_strings_never_raise(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(verify, "_run", _fake(lambda a, t: (0, "", "")))
-    for line in ["pkgé==1.0", "‮pkg", "a" * 100000, "pkg==\x00", "pkg\x1b[0m"]:
+    for line in ["pkgé==1.0", "‮pkg", "pkg==\x00", "pkg\x1b[0m"]:
         r = verify_plan([line])
-        assert isinstance(r, VerifyResult)
-        assert r.ok or r.skipped or r.conflicts or r.message
+        assert r.skipped and not r.ok and r.checked == 0, line
+        assert "not a plain requirement" in r.message, line
+    r = verify_plan(["a" * 100000])  # a valid (if absurd) name still verifies
+    assert r.ok and not r.skipped and r.checked == 1
 
 
 def test_requirement_file_is_private_and_removed_on_every_path(
@@ -165,20 +167,20 @@ def test_pip_version_nonzero_and_oserror_skip(monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.mark.parametrize(
-    "report",
+    "report, checked",
     [
-        "",
-        "not json",
-        "[]",
-        "null",
-        '{"install": null}',
-        '{"install": 5}',
-        '{"environment": 3}',
-        '{"install": [], "environment": []}',
+        ("", 2),
+        ("not json", 2),
+        ("[]", 2),
+        ("null", 2),
+        ('{"install": null}', 2),
+        ('{"install": 5}', 2),
+        ('{"environment": 3}', 2),
+        ('{"install": [], "environment": []}', 0),
     ],
 )
 def test_garbage_report_still_ok_and_never_raises(
-    monkeypatch: pytest.MonkeyPatch, report: str
+    monkeypatch: pytest.MonkeyPatch, report: str, checked: int
 ) -> None:
     def install(args: List[str], t: float) -> Tuple[int, str, str]:
         Path(_arg(args, "--report")).write_text(report)
@@ -187,7 +189,7 @@ def test_garbage_report_still_ok_and_never_raises(
     monkeypatch.setattr(verify, "_run", _fake(install))
     r = verify_plan(["six", "attrs"])
     assert r.ok and not r.skipped
-    assert r.checked in (0, 2)  # falls back to the plan size, or an empty install list
+    assert r.checked == checked  # unreadable -> plan size; readable -> install list
 
 
 def test_failure_output_never_leaks_credentials(
@@ -324,14 +326,15 @@ def test_fuzzed_pip_outputs_never_raise(monkeypatch: pytest.MonkeyPatch) -> None
     )
     for _ in range(300):
         text = "".join(rnd.choice(frags) for _ in range(rnd.randint(0, 8)))
+        rc = rnd.choice([0, 1, 2])
         monkeypatch.setattr(
-            verify,
-            "_run",
-            _fake(lambda a, t, text=text: (rnd.choice([0, 1, 2]), text, text)),
+            verify, "_run", _fake(lambda a, t, text=text, rc=rc: (rc, text, text))
         )
         r = verify_plan(["six"])
-        assert isinstance(r, VerifyResult)
-        assert not (r.ok and r.skipped)
+        if rc == 0:
+            assert r.ok and not r.skipped, (text, r)
+        else:
+            assert not r.ok, (rc, text, r)
 
 
 def test_run_env_handling(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -45,9 +45,18 @@ def test_detect_auto(current: str, history: List[str], expected: str) -> None:
 
 
 def test_detect_yy_m_needs_history() -> None:
-    black = ["22.1.0", "22.12.0", "23.1.0", "23.9.1", "24.2.0"]
+    black = [
+        "22.1.0",
+        "22.3.0",
+        "22.12.0",
+        "23.1.0",
+        "23.3.0",
+        "23.9.1",
+        "24.1.0",
+        "24.2.0",
+    ]
     assert detect_versioning("auto", "23.1.0", black) == "calver"
-    assert detect_versioning("auto", "23.1.0", black[:3]) == "semver"
+    assert detect_versioning("auto", "23.1.0", black[:7]) == "semver"
     assert detect_versioning("calver", "1.0", []) == "calver"
     assert detect_versioning("semver", "2024.1", []) == "semver"
 

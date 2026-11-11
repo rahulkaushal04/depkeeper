@@ -1,5 +1,5 @@
-click>=8.4.2
-packaging>=23.2
+click>=8.5.1
+packaging>=26.3
 httpx[http2]>=0.28.1
-rich>=13.9.4
-tomli>=2.4.1
+rich>=15.0.0
+tomli>=2.5.0

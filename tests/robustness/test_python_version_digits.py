@@ -30,3 +30,17 @@ def test_minimum_python_ignores_non_ascii_digits() -> None:
 def test_verify_skips_non_ascii_target() -> None:
     result = verify_plan(["packaging==24.0"], python_version="３.９")
     assert result.skipped
+
+
+def test_source_has_no_unicode_digit_patterns() -> None:
+    """``\\d`` matches non-ASCII digits that ``int()`` or pip then rejects."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2] / "depkeeper"
+    offenders = [
+        f"{path.relative_to(root.parent)}:{number}"
+        for path in root.rglob("*.py")
+        for number, line in enumerate(path.read_text().splitlines(), 1)
+        if "\\d" in line and not line.lstrip().startswith("#")
+    ]
+    assert offenders == []

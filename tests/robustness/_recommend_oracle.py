@@ -77,14 +77,23 @@ def detect(mode: str, current: Optional[str], stable_desc: Sequence[str]) -> str
     sv = _v(sample) if sample and "*" not in sample else None
     if sv is not None and sv.release and 1990 <= sv.release[0] <= this_year + 1:
         return "calver"
-    rels = [Version(s).release for s in stable_desc]
-    if len(rels) < 5:
-        return "semver"
+    rels = [
+        v.release
+        for v in (Version(s) for s in stable_desc)
+        if not (v.is_postrelease or v.is_devrelease)
+    ]
     yy = this_year % 100
-    for r in rels:
-        if len(r) < 2 or not (15 <= r[0] <= yy + 1) or not (1 <= r[1] <= 12):
-            return "semver"
-    return "calver" if len({r[0] for r in rels}) >= 2 else "semver"
+
+    def fits(r: Any) -> bool:
+        return 1990 <= r[0] <= this_year + 1 or (
+            len(r) >= 2 and 18 <= r[0] <= yy + 1 and 0 <= r[1] <= 12
+        )
+
+    for size in range(8, 41):
+        window = rels[:size]
+        if len(window) == size and len({r[0] for r in window}) >= 2:
+            return "calver" if all(fits(r) for r in window) else "semver"
+    return "semver"
 
 
 def _upload(files: Any) -> Optional[datetime]:
@@ -160,9 +169,7 @@ def oracle(case: Case) -> Dict[str, Any]:
         return out
 
     opted = case.allow_major or bool(pol.get("allow_major"))
-    caps = [pol.get("max_update")]
-    if opted:
-        caps.append(case.run_max_update)
+    caps = [pol.get("max_update"), case.run_max_update]
     caps_set = [c for c in caps if c]
     cap = min(caps_set, key=lambda c: _RANK[c]) if caps_set else None
 

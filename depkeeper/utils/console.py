@@ -19,6 +19,7 @@ corrupted for downstream consumers such as ``jq``.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import threading
 from typing import IO, Any, Callable, Dict, List, Optional
@@ -40,6 +41,43 @@ DEPKEEPER_THEME = Theme(
         "highlight": "bold magenta",
     }
 )
+
+# Control characters that can drive a terminal (ESC/CSI/OSC 8, BEL, backspace,
+# CR) plus invisible bidi overrides; newline and tab are kept.
+_CONTROL_CHARS = re.compile(
+    "[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]"
+)
+
+
+def strip_controls(value: object) -> str:
+    """Return ``str(value)`` without terminal control or bidi-override characters."""
+    return _CONTROL_CHARS.sub("", str(value))
+
+
+def safe_text(value: object) -> str:
+    """Make externally sourced text safe to interpolate into Rich markup.
+
+    Strips terminal control characters and escapes ``[`` markup, so PyPI
+    metadata, file names and exception text can neither style the output,
+    inject hyperlinks, nor drive the terminal.
+    """
+    return escape(strip_controls(value))
+
+
+class _SafeConsole(Console):
+    """Console that strips control characters from every string it prints."""
+
+    def print(self, *objects: Any, **kwargs: Any) -> None:
+        super().print(
+            *(strip_controls(o) if isinstance(o, str) else o for o in objects),
+            **kwargs,
+        )
+
+    def on_broken_pipe(self) -> None:
+        """Surface a closed pipe as `BrokenPipeError` (Rich would exit with 1)."""
+        self.quiet = True
+        raise BrokenPipeError
+
 
 # Keyed by the ``stderr`` flag: False is the stdout console, True the stderr one.
 _consoles: Dict[bool, Console] = {}
@@ -85,7 +123,7 @@ def _get_console(*, stderr: bool = False) -> Console:
             console = _consoles.get(stderr)
             if console is None:
                 use_color = _should_use_color(stderr=stderr)
-                console = Console(
+                console = _SafeConsole(
                     theme=DEPKEEPER_THEME,
                     stderr=stderr,
                     # color_system=None drops every SGR code (bold/dim too);
@@ -108,6 +146,12 @@ def reconfigure_console() -> None:
         _consoles.clear()
 
 
+def _labelled(prefix: str, message: str) -> str:
+    """Return ``prefix message`` with leading blank lines kept before the prefix."""
+    body = message.lstrip("\n")
+    return f"{message[: len(message) - len(body)]}{prefix} {safe_text(body)}"
+
+
 def print_success(message: str, *, prefix: str = "[OK]", stderr: bool = False) -> None:
     """Print a success message.
 
@@ -117,7 +161,7 @@ def print_success(message: str, *, prefix: str = "[OK]", stderr: bool = False) -
         stderr: Write to stderr instead of stdout. Use this whenever stdout
             carries machine-readable output.
     """
-    _get_console(stderr=stderr).print(f"{prefix} {escape(message)}", style="success")
+    _get_console(stderr=stderr).print(_labelled(prefix, message), style="success")
 
 
 def print_error(message: str, *, prefix: str = "[ERROR]", stderr: bool = True) -> None:
@@ -130,7 +174,7 @@ def print_error(message: str, *, prefix: str = "[ERROR]", stderr: bool = True) -
         prefix: Label rendered before the message.
         stderr: Write to stderr (default) or stdout.
     """
-    _get_console(stderr=stderr).print(f"{prefix} {escape(message)}", style="error")
+    _get_console(stderr=stderr).print(_labelled(prefix, message), style="error")
 
 
 def print_warning(
@@ -144,7 +188,7 @@ def print_warning(
         stderr: Write to stderr instead of stdout. Use this whenever stdout
             carries machine-readable output.
     """
-    _get_console(stderr=stderr).print(f"{prefix} {escape(message)}", style="warning")
+    _get_console(stderr=stderr).print(_labelled(prefix, message), style="warning")
 
 
 def print_table(
@@ -179,7 +223,7 @@ def print_table(
     column_styles = column_styles or {}
     rows = [
         (
-            tuple(str(row.get(h, "")) for h in headers),
+            tuple(strip_controls(row.get(h, "")) for h in headers),
             row_styler(row) if row_styler else None,
         )
         for row in data

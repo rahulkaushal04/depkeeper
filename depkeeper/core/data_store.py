@@ -288,7 +288,7 @@ class PyPIDataStore:
 
         # Only Python-version markers change; platform markers stay the host's.
         self._marker_env: Dict[str, str] = {"extra": ""}
-        match = re.match(r"\s*(\d+)\.(\d+)", target_python or "")
+        match = re.match(r"\s*([0-9]+)\.([0-9]+)", target_python or "")
         if match:
             xy = f"{match.group(1)}.{match.group(2)}"
             self._marker_env["python_version"] = xy

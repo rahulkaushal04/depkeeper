@@ -299,7 +299,8 @@ dependency) that supports block-style `dependencies:` lists and a nested `- pip:
 | `conda-forge::numpy=1.24` | Channel prefix kept |
 | `numpy=1.24=py311_0` (build string), `a=1\|2`, `a=*` | Skipped, left untouched |
 | `python=3.11` | Never updated; used as the file's Python constraint |
-| `pip`, `mkl`, `libgcc-ng`, `openssl`, `cuda*`, `lib*`, `r-*` and similar | Skipped quietly (not PyPI packages); well-known PyPI projects such as `librosa` and `libsass` are still checked |
+| Known conda-only names (`pip`, `mkl`, `openssl`, `ca-certificates`, `zlib`, `xz`, `tk`, `sqlite`, `readline`, `ncurses`, `libffi`, `libgomp`, `libxml2`, `cudatoolkit`, `cudnn`, `nccl`, `pytorch-cuda`, `r-base` and similar) and conda-only families (`lib*-ng`, `libgcc*`, `libstdcxx*`, `libgfortran*`, `liblapack`/`libblas`, `_*` helpers, `r-*`, CUDA components such as `cuda-nvcc`, `cuda-runtime`, `cuda-version`) | Skipped quietly (not PyPI packages) |
+| Any other name, e.g. `cuda-python`, `libvirt-python`, `mkl-service`, `librosa`, `samtools` | Looked up on PyPI by name; if PyPI has no such project, one warning lists it as not found and the entry is left unchanged |
 
 Flow-style lists (`dependencies: [a, b]`) are rejected with a parse error. Edits are in place;
 comments, quoting, indentation and line endings are preserved.

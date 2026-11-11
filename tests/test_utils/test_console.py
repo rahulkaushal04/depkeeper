@@ -622,3 +622,20 @@ class TestMessagesAreNotParsedAsMarkup:
         printer("file has no [depkeeper] table", stderr=True)
         captured = capsys.readouterr()
         assert "has no [depkeeper] table" in captured.out + captured.err
+
+
+class TestLeadingNewlines:
+    """A message that starts with a blank line keeps it ahead of the label."""
+
+    @pytest.mark.parametrize(
+        "printer", [print_error, print_warning, print_success], ids=lambda f: f.__name__
+    )
+    def test_label_stays_on_the_text_line(
+        self, printer: Any, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        printer("\nsomething happened", stderr=True)
+        captured = capsys.readouterr()
+        lines = (captured.out + captured.err).splitlines()
+        assert lines[0] == ""
+        assert lines[1].endswith("something happened")
+        assert lines[1].startswith("[")

@@ -289,12 +289,9 @@ def test_random_environments_minimal_idempotent_and_match_yaml(
     for r, (name, old, exp) in zip(reqs, want):
         if r.source_format == "conda":
             s, e = r.span  # type: ignore[misc]
-            assert text[s:e] == old.strip() or text[s:e] == old
+            assert text[s:e] == old.strip()
             one = C.apply_updates(text, [(r, new_v)])
-            assert (
-                one[s : len(one) - (len(text) - e)] == exp.strip()
-                or one[s : len(one) - (len(text) - e)] == exp
-            )
+            assert one[s : len(one) - (len(text) - e)] == exp.strip()
 
     # idempotent: apply, re-read, apply again at the same version
     p.write_bytes(new.encode())

@@ -16,7 +16,7 @@ Everything an operator needs to run depkeeper predictably in a controlled enviro
 | Endpoint | `https://pypi.org/pypi/{package}/json` and `https://pypi.org/pypi/{package}/{version}/json` (the latter for dependencies and, with `--refresh-hashes`, file digests) |
 | Protocol | HTTPS, HTTP/2 enabled; at most 5 redirects, only to `pypi.org` or `files.pythonhosted.org` |
 | User-Agent | `depkeeper/{version} (https://github.com/rahulkaushal04/depkeeper)` |
-| Timeout | 30 s per request; 180 s total per request including retries; responses over 20 MB are rejected |
+| Timeout | 30 s per request; 180 s total per request including retries; responses over 64 MB are rejected |
 | Authentication | None. Only public PyPI metadata is read. |
 | Outbound data | The package **names** in your requirements file, as URL path segments. Nothing else leaves the machine. |
 
@@ -72,6 +72,38 @@ never more than the 180 s per-request cap (`Request timed out after 180s`). A re
 its retries is remembered as failed for 30 s within the run, so the same URL is not retried
 immediately. Requests for distinct packages proceed concurrently, so a whole-file failure is not
 the sum of these.
+
+### Circuit breaker
+
+Connection-level failures (refused, DNS, proxy, TLS handshake, connect timeout) are tracked **per
+host** (scheme, host and port). After 3 consecutive such failures to a host, requests to it fail
+immediately with `Network unreachable` for 30 s instead of each waiting out its retries; other
+hosts are unaffected. When the 30 s are over, exactly **one** probe request is let through while
+all other callers keep failing fast: a received response of any status closes the circuit, another
+connection failure re-opens it for a fresh 30 s. HTTP status codes (`404`, `429`, `5xx`) never
+count, and any received response resets the counter, so occasional flaky requests among
+successes cannot open it. A fully unreachable network therefore ends in seconds rather than
+minutes.
+
+### Redirects, size and deadline
+
+Redirects are followed manually, at most 5 hops, and only over `https` to the request's own host
+or `pypi.org` / `files.pythonhosted.org`; anything else is refused. Bodies are read incrementally
+and rejected above 64 MB (`MAX_RESPONSE_BYTES`); a `Content-Length` that is not plain ASCII digits
+is ignored and the streamed size is enforced instead. One request, including retries and backoff,
+is cut off after 180 s (`DEFAULT_TOTAL_TIMEOUT`).
+
+### Closed pipes
+
+If the reader of stdout exits early (`depkeeper check big.txt | head -1`), depkeeper stops quietly
+and exits `141` (`128 + SIGPIPE`). See [Exit codes](../reference/exit-codes.md).
+
+### Incomplete conflict check
+
+If a package's dependency metadata cannot be fetched during conflict resolution, depkeeper prints
+`Conflict check incomplete: dependency metadata unavailable for N package(s): ...` on stderr and
+sets `summary.conflict_check_complete` to `false` in `json-v2`. Conflicts involving those packages
+could not be detected.
 
 ### Rate limiting
 

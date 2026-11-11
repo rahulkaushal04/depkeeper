@@ -204,3 +204,66 @@ def test_long_chain_of_cascading_fixes_stays_within_the_cap() -> None:
     # every p_i at 1.1.0 forces p_{i+1} to 1.0.0, so no two neighbours are both 1.1.0
     ranks = [p.recommended_version for p in pkgs]
     assert not any(a == b == "1.1.0" for a, b in zip(ranks, ranks[1:]))
+
+
+async def test_failed_dependency_lookups_are_reported(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store = _store()
+    original = store.get_version_dependencies
+
+    async def flaky(name: str, version: str) -> List[str]:
+        if name in ("a", "c"):
+            raise NetworkError("boom", url="https://pypi.org")
+        return await original(name, version)
+
+    store.get_version_dependencies = flaky  # type: ignore[method-assign]
+    with caplog.at_level("WARNING"):
+        res = await DependencyAnalyzer(store).resolve_and_annotate_conflicts(_trio())
+    assert sorted(res.dependency_lookup_failures) == ["a", "c"]
+    assert not res.conflict_check_complete
+    warns = [r for r in caplog.records if "conflict check incomplete" in r.getMessage()]
+    assert len(warns) == 1
+
+
+async def test_complete_run_reports_no_lookup_failures() -> None:
+    res = await DependencyAnalyzer(_store()).resolve_and_annotate_conflicts(_trio())
+    assert res.dependency_lookup_failures == [] and res.conflict_check_complete
+
+
+async def test_failures_do_not_leak_into_the_next_run() -> None:
+    store = _store()
+    original = store.get_version_dependencies
+    broken = {"on": True}
+
+    async def flaky(name: str, version: str) -> List[str]:
+        if broken["on"] and name == "a":
+            raise NetworkError("boom", url="https://pypi.org")
+        return await original(name, version)
+
+    store.get_version_dependencies = flaky  # type: ignore[method-assign]
+    analyzer = DependencyAnalyzer(store)
+    first = await analyzer.resolve_and_annotate_conflicts(_trio())
+    broken["on"] = False
+    second = await analyzer.resolve_and_annotate_conflicts(_trio())
+    assert first.dependency_lookup_failures == ["a"]
+    assert second.dependency_lookup_failures == []
+
+
+def test_warning_helper_and_envelope(capsys: pytest.CaptureFixture[str]) -> None:
+    from depkeeper.commands import _report
+    from depkeeper.core import ResolutionResult
+
+    ok = ResolutionResult({}, 0, 0, 0, True)
+    _report.warn_conflict_check_incomplete(ok)
+    assert capsys.readouterr().err == ""
+    bad = ResolutionResult({}, 2, 0, 1, True, dependency_lookup_failures=["a", "b"])
+    _report.warn_conflict_check_incomplete(bad)
+    err = " ".join(capsys.readouterr().err.split())
+    assert (
+        "Conflict check incomplete: dependency metadata unavailable for 2 package(s): a, b"
+        in err
+    )
+    env = _report.build_envelope([], (None, "x"), conflict_check_complete=False)
+    assert env["summary"]["conflict_check_complete"] is False
+    assert _report.build_envelope([], (None, "x"))["summary"]["conflict_check_complete"]

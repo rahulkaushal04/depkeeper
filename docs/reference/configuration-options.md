@@ -77,7 +77,7 @@ table (`[depkeeper.packages.<name>]`, see below).
 ### `versioning` and `[packages.<name>]`
 
 `versioning` is `"auto"` (default), `"semver"` or `"calver"`: how version change types are
-classified. Per-package policy lives in `[depkeeper.packages.<name>]` (`[tool.depkeeper.packages.<name>]`
+classified; `auto` detects calver from the most recent releases (see [Calendar versions](../concepts/version-recommendation.md#calendar-versions)). Per-package policy lives in `[depkeeper.packages.<name>]` (`[tool.depkeeper.packages.<name>]`
 in `pyproject.toml`) with `hold`, `ignore`, `allow_prerelease` (booleans, default `false`), `max_update` (`patch`/`minor`/`major`), `allow_major` (boolean) and `versioning`. Package keys are matched in PEP 503 form (two entries that normalise to the same name are an error); unknown keys fail with `Unknown keys in packages.<name>: foo`, wrong types with `packages.<name>.hold must be a boolean, got str`, bad values with `packages.<name>.max_update must be one of patch, minor, major, got 'x'`. `allow_prerelease = true` makes pre-releases candidates for that package (no global equivalent).
 `max_update` is only a cap: `max_update = "major"` permits a major but does not cross one. Set
 `allow_major = true` (same as `--allow-major <name>`) to let the package move to a higher major, within

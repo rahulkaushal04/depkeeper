@@ -13,6 +13,7 @@ description: Exit code semantics per command, with scripting patterns
 | `3` | Updates found | `check --fail-on` threshold met (`check` only). |
 | `4` | Lookup failed | At least one package could not be looked up on PyPI (`check` and `update`; wins over `3` for `check`). |
 | `130` | Interrupted | `Ctrl+C` (`128 + SIGINT`) or aborted prompt. |
+| `141` | Broken pipe | stdout was closed by the reader (`depkeeper check big.txt \| head -1`); `128 + SIGPIPE`, printed quietly. |
 
 Without `--fail-on`, `check` exits `0` even when updates exist. Direct references (editable, VCS,
 URL, local path) are never looked up on PyPI and never cause `4`.
@@ -79,6 +80,13 @@ Error: No such option: --bogus
 ```
 
 Also raised for a `--config` path that does not exist, an invalid `--format`, `--fail-on`, `--max-update` or `--python-version`/`--min-age` value, `update --refresh-hashes` together with `--allow-hash-removal`, and `update -f markdown` without `--yes` or `--dry-run`.
+
+## `141` — Broken pipe
+
+The reader of stdout exited early (for example `| head -1`). depkeeper stops without a message or
+traceback and exits `141` (`128 + SIGPIPE`), the status a shell reports for a process killed by
+`SIGPIPE`. Only `set -o pipefail` makes it visible to the pipeline; a plain pipe reports the last
+command's status.
 
 ## `130` — Interrupted
 

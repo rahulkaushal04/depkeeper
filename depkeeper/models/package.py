@@ -60,6 +60,11 @@ class Package:
         major_available: Newest eligible version in a higher major than the
             recommendation that was *not* applied (no ``--allow-major`` opt-in,
             or capped by ``max_update``). Informational only.
+        not_applicable: Target Python ("3.12") for which the requirement's own
+            environment marker is false. The line does not apply there, so it
+            is reported as ``not-applicable`` and never changed.
+        pin_target: Newest release inside the requirement's own series (a
+            ``~=X.Y`` line cannot record it), used only by ``--pin``.
         conflict_held: A conflict was resolved by holding or reverting a
             version, so ``conflicts`` may be empty.
     """
@@ -89,6 +94,8 @@ class Package:
     major_available: Optional[str] = field(default=None, compare=False)
     # The major is blocked by a max_update cap, not by lack of opt-in.
     major_capped: bool = field(default=False, compare=False)
+    pin_target: Optional[str] = field(default=None, compare=False)
+    not_applicable: Optional[str] = field(default=None, compare=False)
     # URL/VCS/editable/path requirement: never looked up on PyPI.
     direct: bool = field(default=False, compare=False)
 
@@ -231,8 +238,8 @@ class Package:
 
         Returns:
             Tuple of ``(status, installed, latest, recommended)``, where
-            *status* is one of ``direct``, ``no-update``, ``install``, ``downgrade``,
-            ``outdated`` or ``latest``.
+            *status* is one of ``direct``, ``not-applicable``, ``no-update``,
+            ``install``, ``downgrade``, ``outdated`` or ``latest``.
         """
         installed = self.current_version or "none"
         latest = self.latest_version or "error"
@@ -240,6 +247,8 @@ class Package:
 
         if self.direct:
             status = "direct"
+        elif self.not_applicable:
+            status = "not-applicable"
         elif not self.recommended_version:
             status = "no-update"
         elif not self.current_version:
@@ -264,19 +273,7 @@ class Package:
         Returns:
             JSON-safe package representation.
         """
-        # Mirrors the status ladder in get_status_summary(); keep both in sync.
-        if self.direct:
-            status = "direct"
-        elif not self.recommended_version:
-            status = "no-update"
-        elif not self.current_version:
-            status = "install"
-        elif self.requires_downgrade:
-            status = "downgrade"
-        elif self.has_update():
-            status = "outdated"
-        else:
-            status = "latest"
+        status = self.get_status_summary()[0]
 
         entry: Dict[str, Any] = {
             "name": self.name,
@@ -297,6 +294,8 @@ class Package:
         if status in ("outdated", "downgrade"):
             entry["update_type"] = self.update_type
 
+        if self.not_applicable:
+            entry["target_python"] = self.not_applicable
         if self.versioning != "semver":
             entry["versioning"] = self.versioning
         if self.held:

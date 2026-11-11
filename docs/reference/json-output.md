@@ -46,6 +46,7 @@ flattened in place).
 | `python_requirements.current` | string | — | For the current version. |
 | `python_requirements.latest` | string | — | For the latest version. |
 | `python_requirements.recommended` | string | — | For the recommended version. |
+| `target_python` | string | — | Present only when `status` is `not-applicable`: the `X.Y` the marker was judged against. |
 | `versioning` | string | — | `calver` (only written when not `semver`). |
 | `held` | boolean | — | `true` when the `hold` policy froze the package. |
 | `ignored` | boolean | — | `true` when the `ignore` policy applies. |
@@ -65,6 +66,7 @@ in `jq` and `.get()` in Python.
 
 | Value | Condition |
 |---|---|
+| `not-applicable` | The requirement's own `python_version` / `python_full_version` marker is false for the target Python. Accompanied by `target_python`; no `recommended`. The line is never changed. |
 | `no-update` | No recommended version — PyPI metadata was unavailable. Accompanied by `error`. |
 | `install` | No current version, but a recommendation exists. `update` will add a pin. |
 | `downgrade` | Recommended is lower than current. |
@@ -210,7 +212,7 @@ or a conflict capped the upgrade.
 A versioned envelope with the same package entries plus `file`, `line`, `source_format`, `age_days`,
 `held`, `ignored`, `versioning`, `update_type` (`null` when none) and `links` on every entry. Top-level keys:
 `schema_version` (`2`), `summary` (`total`, `errors`, `by_update_type`, `outdated`, `up_to_date`, `held`,
-`ignored`, `conflicts`), `python` (`version`, `source`; `version` is `null` for the running interpreter),
+`ignored`, `conflicts`, `not_applicable`, `conflict_check_complete`), `python` (`version`, `source`; `version` is `null` for the running interpreter),
 `files[]` (`path`, `format`, `packages`), `packages[]` and `errors[]` (`package`, `file`, `line`,
 `message`). Real output for a file with an unknown package:
 
@@ -218,7 +220,8 @@ A versioned envelope with the same package entries plus `file`, `line`, `source_
 {
   "schema_version": 2,
   "summary": {"total": 5, "errors": 1, "by_update_type": {"minor": 2, "patch": 2},
-              "outdated": 4, "up_to_date": 0, "held": 0, "ignored": 0, "conflicts": 1},
+              "outdated": 4, "up_to_date": 0, "held": 0, "ignored": 0, "conflicts": 1,
+              "not_applicable": 0, "conflict_check_complete": true},
   "python": {"version": null, "source": "running interpreter"},
   "files": [{"path": "/abs/requirements.txt", "format": "requirements.txt", "packages": 5}],
   "packages": ["..."],

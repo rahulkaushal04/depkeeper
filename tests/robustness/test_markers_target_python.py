@@ -152,7 +152,13 @@ def test_cli_python_version_changes_conflict_outcome(
 ) -> None:
     old = _check(tmp_path, monkeypatch, "3.8")
     new = _check(tmp_path, monkeypatch, "3.12")
-    assert old["out"] != new["out"]
-    assert "lib>=2" in old["out"] or "conflict" in old["out"].lower()
-    assert "lib>=2" not in new["out"]
-    json.dumps(old)  # both runs produced a result dict
+    assert old["code"] == new["code"] == 0
+
+    def lib_row(out: str) -> Dict[str, Any]:
+        rows = json.loads(out[out.index("[") :])  # logs may precede the JSON
+        return next(r for r in rows if r["name"] == "lib")
+
+    held, free = lib_row(old["out"]), lib_row(new["out"])
+    assert held["conflict_held"] is True
+    assert [c["required_spec"] for c in held["conflicts"]] == [">=2"]
+    assert "conflict_held" not in free and "conflicts" not in free

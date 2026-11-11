@@ -190,7 +190,8 @@ def test_crash_at_every_atomic_step_leaves_old_or_new(tmp_path: Path) -> None:
         with mock.patch.object(*target_fn, side_effect=boom):
             with pytest.raises(KeyboardInterrupt):
                 fs.safe_write_file(target, new, create_backup=False)
-        assert target.read_text() in (old, new)
+        # Only an interrupt after the rename may leave the new content.
+        assert target.read_text() == (new if step == "dirsync" else old), step
         assert os.listdir(sub) == ["t.txt"]
 
 

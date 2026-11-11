@@ -49,7 +49,16 @@ def _hist(*versions: str) -> List[str]:
         ("24.0", _hist("24.0", "23.3", "23.2", "23.1", "22.3", "1.0"), "semver"),
         (
             "24.2.0",
-            _hist("24.2.0", "24.1.1", "23.12.1", "23.12.0", "23.11.0", "23.10.1"),
+            _hist(
+                "24.2.0",
+                "24.1.1",
+                "23.12.1",
+                "23.12.0",
+                "23.11.0",
+                "23.10.1",
+                "23.9.1",
+                "23.9.0",
+            ),
             "calver",  # black
         ),
         ("24.2.0", _hist("24.2.0", "24.1.1", "24.1.0", "24.3.0", "24.4.0"), "semver"),
@@ -71,18 +80,17 @@ def test_detection_year_window_tracks_today() -> None:
     assert detect_versioning("auto", f"{year}.1.1", []) == "calver"
 
 
-def test_yy_m_needs_five_releases_two_years_and_valid_months() -> None:
+def test_yy_m_needs_eight_recent_releases_two_years_and_valid_months() -> None:
     a, b = YY, YY - 1
-    ok = [f"{a}.1", f"{a}.2", f"{b}.12", f"{b}.11", f"{b}.10"]
+    ok = [f"{a}.1", f"{a}.2", f"{a}.3", f"{b}.12", f"{b}.11", f"{b}.10", f"{b}.9"]
+    ok.append(f"{b}.8")
     assert detect_versioning("auto", None, ok) == "calver"
-    assert detect_versioning("auto", None, ok[:4]) == "semver"
+    assert detect_versioning("auto", None, ok[:7]) == "semver"
     assert (
-        detect_versioning("auto", None, [f"{a}.{m}" for m in (1, 2, 3, 4, 5)])
-        == "semver"
+        detect_versioning("auto", None, [f"{a}.{m}" for m in range(1, 10)]) == "semver"
     )
-    assert detect_versioning("auto", None, ok[:4] + [f"{b}.13"]) == "semver"
-    assert detect_versioning("auto", None, ok[:4] + [f"{YY + 2}.1"]) == "semver"
-    assert detect_versioning("auto", None, ok[:4] + ["14.1"]) == "semver"
+    assert detect_versioning("auto", None, ok[:7] + [f"{b}.13"]) == "semver"
+    assert detect_versioning("auto", None, ok[:7] + [f"{YY + 2}.1"]) == "semver"
 
 
 @pytest.mark.parametrize("mode", ["semver", "calver"])

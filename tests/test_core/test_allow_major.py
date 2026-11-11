@@ -165,11 +165,11 @@ async def test_cli_cap_picks_best_in_cap_version_and_reports_major() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cli_cap_ignored_for_packages_without_opt_in() -> None:
-    # Default behaviour: the CLI cap stays a post-filter in `update`.
+async def test_cli_cap_applies_without_opt_in() -> None:
+    # The cap picks the best version within it for every package.
     c = _checker(["3.2.25", "3.3.0"], max_update="patch")
     pkg = await c.get_package_info("django", "3.2", [])
-    assert pkg.recommended_version == "3.3.0"
+    assert pkg.recommended_version == "3.2.25"
 
 
 @pytest.mark.asyncio

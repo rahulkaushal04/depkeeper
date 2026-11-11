@@ -256,11 +256,8 @@ def test_stale_span_raises(tmp_path: Path) -> None:
 def test_invalid_result_is_never_returned(tmp_path: Path, bad: str) -> None:
     text = '[project]\ndependencies = ["a>=1"]\n'
     _, reqs = _parse(tmp_path, text)
-    try:
-        out = A.apply_updates(text, [(reqs[0], bad)])
-    except DepKeeperError:
-        return
-    tomli.loads(out)  # if it was accepted it must still be valid TOML
+    with pytest.raises(DepKeeperError):
+        A.apply_updates(text, [(reqs[0], bad)])
 
 
 def test_excluding_cap_raises_with_location(tmp_path: Path) -> None:
@@ -413,7 +410,9 @@ def test_random_documents_update_minimally_and_idempotently(
         assert one[:s] == text[:s] and one.endswith(text[e:])
         middle = one[s : len(one) - (len(text) - e)]
         assert re.fullmatch(r"[0-9A-Za-z.,<>=!~* ]*", middle), middle
-        assert ver in middle or "~=" in middle
+        # A compatible-release bound that already admits the target is kept.
+        kept = middle.startswith("~=") and SpecifierSet(middle).contains(ver)
+        assert ver in middle or kept, (r.span, ver, middle)
         middles[(s, e)] = middle
     expected_text = text
     for (s, e), middle in sorted(middles.items(), reverse=True):

@@ -182,7 +182,8 @@ All limits are module constants and are **not** configurable at runtime.
 | HTTP connections in flight | 10 | `HTTPClient(max_concurrency=…)` |
 | Distinct PyPI fetches in flight | 10 | `PyPIDataStore(concurrent_limit=…)` |
 | Request timeout | 30 s per attempt, plus a total deadline per request | `constants.DEFAULT_TIMEOUT`, `HTTPClient(total_timeout=…)` |
-| Response body | 20 MB | `http.MAX_RESPONSE_BYTES` |
+| Response body | 64 MB | `http.MAX_RESPONSE_BYTES` |
+| Circuit breaker | 3 consecutive connection failures to one host open it for 30 s; then one probe | `http.BREAKER_THRESHOLD`, `http.BREAKER_TTL` |
 | Redirects | https on PyPI hosts only | `HTTPClient._send_once` |
 | Retries per request | 3 (4 attempts) | `constants.DEFAULT_MAX_RETRIES` |
 | `429` retries | 5, honouring `Retry-After` | `HTTPClient._max_429_retries` |

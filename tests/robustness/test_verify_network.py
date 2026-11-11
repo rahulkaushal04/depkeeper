@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -13,20 +12,11 @@ import pytest
 from depkeeper.core.verify import verify_plan
 
 
-def _online() -> bool:
-    try:
-        socket.create_connection(("pypi.org", 443), timeout=3).close()
-        return True
-    except OSError:
-        return False
-
-
 pytestmark = [
     pytest.mark.network,
     pytest.mark.skipif(
         importlib.util.find_spec("pip") is None, reason="pip not installed"
     ),
-    pytest.mark.skipif(not _online(), reason="PyPI unreachable"),
 ]
 
 

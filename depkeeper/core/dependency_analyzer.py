@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from enum import Enum
 from functools import lru_cache
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Set, Tuple
 
 from packaging.version import parse, InvalidVersion
@@ -119,6 +119,9 @@ class ResolutionResult:
         iterations_used: How many resolution iterations were performed.
         converged: Whether resolution reached a stable state (True) or
             hit the iteration limit (False).
+        dependency_lookup_failures: Names of packages whose dependency
+            metadata could not be fetched; conflicts involving them could not
+            be detected.
     """
 
     resolved_versions: Dict[str, PackageResolution]
@@ -126,6 +129,12 @@ class ResolutionResult:
     packages_with_conflicts: int
     iterations_used: int
     converged: bool
+    dependency_lookup_failures: List[str] = field(default_factory=list)
+
+    @property
+    def conflict_check_complete(self) -> bool:
+        """Whether every dependency lookup succeeded."""
+        return not self.dependency_lookup_failures
 
     def get_changed_packages(self) -> List[PackageResolution]:
         """Return packages whose resolved version differs from the original."""
@@ -430,6 +439,8 @@ class DependencyAnalyzer:
 
         # Names whose fetch failed; avoids retrying them on every pass.
         self._unavailable_packages: Set[str] = set()
+        # Packages whose dependency lookup failed; reported once per resolution.
+        self._dependency_failures: Dict[str, None] = {}
 
     async def _get_package_data_or_none(self, name: str) -> Optional[PyPIPackageData]:
         """Fetch metadata for *name*, returning ``None`` when unavailable.
@@ -461,6 +472,7 @@ class DependencyAnalyzer:
             return await self.data_store.get_version_dependencies(name, version)
         except NetworkError as exc:
             logger.debug("Dependencies of %s==%s unavailable: %s", name, version, exc)
+            self._dependency_failures.setdefault(name, None)
             return []
 
     async def _requirements_of(
@@ -545,7 +557,7 @@ class DependencyAnalyzer:
             A `ResolutionResult` with the final version per package, conflict
             details and resolution statistics.
         """
-        packages = [pkg for pkg in packages if not pkg.direct]
+        packages = [pkg for pkg in packages if not (pkg.direct or pkg.not_applicable)]
         pkg_lookup: Dict[str, Package] = {pkg.name: pkg for pkg in packages}
         update_set: Dict[str, Optional[str]] = {}
         conflict_tracking: Dict[str, List[Conflict]] = {}
@@ -740,12 +752,22 @@ class DependencyAnalyzer:
                 compatible_alternative=compatible_alt,
             )
 
+        failures = list(self._dependency_failures)
+        self._dependency_failures.clear()
+        if failures:
+            logger.warning(
+                "Dependency metadata unavailable for %d package(s): %s; "
+                "conflict check incomplete",
+                len(failures),
+                ", ".join(failures),
+            )
         return ResolutionResult(
             resolved_versions=resolved_versions,
             total_packages=len(packages),
             packages_with_conflicts=packages_with_conflicts,
             iterations_used=iterations_used,
             converged=converged,
+            dependency_lookup_failures=failures,
         )
 
     def _find_alternative_within_major(

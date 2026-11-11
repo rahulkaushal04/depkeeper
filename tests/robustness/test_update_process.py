@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import os
-import re
 import signal
-import socket
 import subprocess
 import sys
 import threading
@@ -95,14 +93,6 @@ def test_flags_combine_without_error(tmp_path: Path) -> None:
     assert f.read_bytes() == b"requests>=2.0\nflask==3.0.0\n"
 
 
-def _online() -> bool:
-    try:
-        socket.create_connection(("pypi.org", 443), timeout=3).close()
-        return True
-    except OSError:
-        return False
-
-
 _ENV = {
     **os.environ,
     "NO_COLOR": "1",
@@ -118,7 +108,6 @@ def _cli(*args: str, cwd: Path, stdin: Any = subprocess.DEVNULL) -> Any:
 
 
 @pytest.mark.network
-@pytest.mark.skipif(not _online(), reason="PyPI unreachable")
 class TestRealProcess:
     def test_non_tty_without_yes_refuses_cleanly(self, tmp_path: Path) -> None:
         f = tmp_path / "requirements.txt"
@@ -143,17 +132,43 @@ class TestRealProcess:
         assert p2.returncode == 0 and f.read_bytes() == first
         assert _cli("check", "--fail-on", "minor", cwd=tmp_path).returncode == 0
 
-    def test_sigint_exits_130_and_leaves_file_whole(self, tmp_path: Path) -> None:
-        f = tmp_path / "requirements.txt"
-        f.write_bytes(b"requests==2.0.0\n")
-        proc = subprocess.Popen(
-            [sys.executable, "-m", "depkeeper", "update", "-y"], cwd=tmp_path, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, env=_ENV,
-        )  # fmt: skip
+
+# Stalls the first HTTP request after printing a marker, so SIGINT lands mid-run.
+_STALL = """
+import asyncio, sys
+from depkeeper.utils import http
+
+async def _send_once(self, *a, **k):
+    sys.stderr.write("READY\\n")
+    sys.stderr.flush()
+    await asyncio.sleep(120)
+
+http.HTTPClient._send_once = _send_once
+from depkeeper.__main__ import main
+sys.exit(main())
+"""
+
+
+def test_sigint_exits_130_and_leaves_file_whole(tmp_path: Path) -> None:
+    f = tmp_path / "requirements.txt"
+    f.write_bytes(b"requests==2.0.0\n")
+    proc = subprocess.Popen(
+        [sys.executable, "-c", _STALL, "update", "-y"], cwd=tmp_path, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, env=_ENV, text=True,
+    )  # fmt: skip
+    assert proc.stderr is not None
+    try:
+        for line in proc.stderr:  # blocks until the process is mid-request
+            if line.strip() == "READY":
+                break
+        else:
+            pytest.fail("process exited before reaching the network layer")
         proc.send_signal(signal.SIGINT)
-        proc.communicate(timeout=60)
-        assert proc.returncode in (130, 0, -2)
-        assert f.read_bytes() == b"requests==2.0.0\n" or re.fullmatch(
-            rb"requests==2\.\d+\.\d+\n", f.read_bytes()
-        )
-        assert strays(tmp_path) == []
+        proc.wait(timeout=60)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    assert proc.returncode == 130
+    assert f.read_bytes() == b"requests==2.0.0\n"
+    assert strays(tmp_path) == []

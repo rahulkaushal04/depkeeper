@@ -73,7 +73,7 @@ responsibly.
 
 - Vulnerabilities in third-party dependencies (report those upstream; tell us if depkeeper's usage
   makes them exploitable)
-- Denial of service requiring extreme resources or an input beyond the 10 MB file limit or the 20 MB response cap
+- Denial of service requiring extreme resources or an input beyond the 10 MB file limit or the 64 MB response cap
 - Social engineering and physical access attacks
 - Issues affecting unsupported versions
 - Features depkeeper does not implement — for example private-index authentication, which does not
@@ -89,7 +89,7 @@ described in [Operations → Security posture](../guides/operations.md#security-
 | Property | Behaviour |
 |---|---|
 | Code execution | depkeeper does not import or run the packages it analyses. The one exception is `update --verify`, which runs `pip install --dry-run --only-binary=:all:` in a subprocess (no shell); wheels only, so no build code runs. |
-| Network destinations | `pypi.org` only, over TLS. Redirects must be https and land on the same host, `pypi.org` or `files.pythonhosted.org`. Response bodies over 20 MB are rejected. (`--verify` runs pip with your own pip index settings.) |
+| Network destinations | `pypi.org` only, over TLS. Redirects must be https and land on the same host, `pypi.org` or `files.pythonhosted.org`. Response bodies over 64 MB are rejected. (`--verify` runs pip with your own pip index settings.) |
 | Outbound data | Package **names**, as URL path segments. Versions, comments and file contents never leave the machine. |
 | Credentials | depkeeper reads, stores and sends none. URL credentials in dependency files are redacted from error and `--verify` output. |
 | Persisted state | No cache directory and no `$HOME` writes. |

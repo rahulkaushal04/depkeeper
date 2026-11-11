@@ -173,6 +173,7 @@ ECOSYSTEM: Dict[str, Distribution] = {
         _dist("idna", Release("2.10", ">=3.5"), Release("3.7", ">=3.5")),
         _dist(
             "django",
+            Release("3.2", ">=3.6", ("asgiref<4,>=3.3", "sqlparse>=0.2.2")),
             Release("3.2.25", ">=3.6", ("asgiref<4,>=3.3.2", "sqlparse>=0.2.2")),
             Release("4.1.13", ">=3.8", ("asgiref<4,>=3.5.2", "sqlparse>=0.3.1")),
             Release("4.2.11", ">=3.8", ("asgiref<4,>=3.6.0", "sqlparse>=0.3.1")),

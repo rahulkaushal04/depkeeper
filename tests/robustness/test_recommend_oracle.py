@@ -7,7 +7,7 @@ from typing import Any, List
 from depkeeper.config import PackagePolicy
 from depkeeper.core.checker import VersionChecker
 from depkeeper.core.data_store import PyPIDataStore
-from packaging.specifiers import SpecifierSet
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import Version
 
 from tests.robustness._recommend_oracle import (
@@ -97,9 +97,11 @@ def test_recommendation_invariants_and_idempotence() -> None:
         )
         if rp and not rp.endswith(".*"):
             try:
-                assert Version(case.python) in SpecifierSet(rp), seed
-            except Exception:  # noqa: BLE001 -- malformed specifier is permitted
-                pass
+                spec = SpecifierSet(rp)
+            except InvalidSpecifier:  # an unparseable Requires-Python is ignored
+                spec = None
+            if spec is not None:
+                assert Version(case.python) in spec, seed
         if case.min_age is not None:
             assert rv > cv, seed
         if got.versioning == "semver" and not (

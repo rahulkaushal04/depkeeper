@@ -53,6 +53,23 @@ class ColoredFormatter(logging.Formatter):
         self.use_color = use_color
 
     def format(self, record: logging.LogRecord) -> str:
+        """Render *record* with terminal control characters removed.
+
+        Log text carries PyPI metadata, file names and exception text, so an
+        escape sequence in it must not reach the terminal. The level name is
+        optionally wrapped in an ANSI color code afterwards.
+        """
+        # Imported here: console.py is a sibling that may import this module.
+        from depkeeper.utils.console import strip_controls
+
+        message, args = record.msg, record.args
+        record.msg, record.args = strip_controls(record.getMessage()), None
+        try:
+            return self._format_colored(record)
+        finally:
+            record.msg, record.args = message, args
+
+    def _format_colored(self, record: logging.LogRecord) -> str:
         """Render *record*, wrapping its level name in an ANSI color code."""
         if self.use_color and self._should_use_color():
             color = self.COLORS.get(record.levelname)

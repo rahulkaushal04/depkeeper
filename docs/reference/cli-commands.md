@@ -181,6 +181,9 @@ A PR-body / CI-summary report: a summary line, tables grouped by update type (ma
 changelog/PyPI links, then *Held by policy*, *Cooldown*, *Conflicts* and *Lookup failures* lists
 (`file:line` for multi-file runs). Example: `depkeeper check -f markdown >> "$GITHUB_STEP_SUMMARY"`.
 
+> [!NOTE]
+> **Output safety.** Anything that comes from outside (PyPI metadata, file names, error text) is printed literally: Rich markup, hyperlinks and terminal control characters (escape sequences, carriage returns, bidi overrides) are neutralised in every terminal format, and the Markdown report escapes Markdown and HTML syntax. `json`/`json-v2` values are not altered; they are JSON-escaped.
+
 ### Examples
 
 ```bash
@@ -227,7 +230,7 @@ depkeeper update [OPTIONS] [FILE]
 | `--min-age` | — | duration | config `min_age` | Do not update to versions released more recently than this. |
 | `--allow-major` | — | `PKG`, repeatable (`'*'` = all) | none | Let this package cross its current major, within your declared bounds. `--max-update` still caps it. See [Opt-in major upgrades](#opt-in-major-upgrades). |
 | `--ignore` | — | string, repeatable | config `ignore`, plus flags | Never update this package (name-normalised). |
-| `--max-update` | — | `patch` \| `minor` \| `major` | none | Skip updates larger than this level (`minor` skips major bumps). Skipped updates are listed in a warning. |
+| `--max-update` | — | `patch` \| `minor` \| `major` | none | Largest update level to apply: the newest release within the cap is chosen (`patch` stays on the current minor). Updates above the cap are listed in a warning. |
 | `--packages` | `-p` | string, repeatable | all | Restrict the update to these packages. Matched in PEP 503 canonical form. |
 | `--strict-version-matching` | — | flag (no negative form) | config, then `false` | Only a sole `==` specifier counts as a current version. |
 | `--check-conflicts / --no-check-conflicts` | — | flag pair | config, then `true` | Enable cross-package conflict resolution. |

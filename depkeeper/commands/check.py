@@ -16,7 +16,6 @@ from datetime import timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from packaging.utils import canonicalize_name
-from rich.markup import escape
 
 from depkeeper.models import Package
 from depkeeper.exceptions import DepKeeperError
@@ -40,6 +39,7 @@ from depkeeper.utils import (
     print_table,
     get_raw_console,
     colorize_update_type,
+    safe_text,
 )
 
 logger = get_logger("commands.check")
@@ -348,6 +348,7 @@ async def _check_async(
                 data_store=data_store, target_python=python[0], checker=checker
             )
             resolution_result = await analyzer.resolve_and_annotate_conflicts(packages)
+            _report.warn_conflict_check_incomplete(resolution_result)
 
             # The summary is noise unless something changed or conflicted.
             if (
@@ -411,7 +412,20 @@ async def _check_async(
     elif format == "simple":
         _display_simple(packages, rows)
     elif format == "json-v2":
-        print(json.dumps(_report.build_envelope(rows, python), indent=2))
+        print(
+            json.dumps(
+                _report.build_envelope(
+                    rows,
+                    python,
+                    conflict_check_complete=(
+                        resolution_result.conflict_check_complete
+                        if resolution_result
+                        else True
+                    ),
+                ),
+                indent=2,
+            )
+        )
     elif format == "markdown":
         print(
             _report.render_markdown(rows, title="Dependency report", python=python),
@@ -535,11 +549,11 @@ def _display_table(
             r = by_id.get(id(pkg))
             if r and r.req:
                 fmt = (
-                    f"\n[dim]({escape(r.req.source_format)})[/dim]"
+                    f"\n[dim]({safe_text(r.req.source_format)})[/dim]"
                     if r.req.source_format
                     else ""
                 )
-                row["Source"] = f"{escape(_report.source_cell(r))}{fmt}"
+                row["Source"] = f"{safe_text(_report.source_cell(r))}{fmt}"
             else:
                 row["Source"] = "[dim]-[/dim]"
 
@@ -574,9 +588,7 @@ def _python_cell(pkg: Package) -> str:
     ) or pkg.get_version_python_req("latest")
     if not req:
         return "[dim]-[/dim]"
-    # Exclusion clauses (!=3.0.*) make the cell unreadable; keep the bounds.
-    parts = [x for x in req.replace(" ", "").split(",") if x and not x.startswith("!=")]
-    return escape(",".join(parts))
+    return safe_text(_report.python_bounds(req))
 
 
 def _create_table_row(pkg: Package) -> Dict[str, str]:
@@ -587,7 +599,9 @@ def _create_table_row(pkg: Package) -> Dict[str, str]:
         row["Status"] = f"[cyan][{marker}][/cyan]"
         row["Update Type"] = f"[cyan]{marker.lower()} by policy[/cyan]"
     if pkg.cooldown_skipped:
-        row["Recommended"] += f"\n[dim]{escape(pkg.cooldown_skipped)} held (age)[/dim]"
+        row["Recommended"] += (
+            f"\n[dim]{safe_text(pkg.cooldown_skipped)} held (age)[/dim]"
+        )
     return row
 
 
@@ -599,10 +613,25 @@ def _base_table_row(pkg: Package) -> Dict[str, str]:
     if pkg.direct:
         return {
             "Status": "[dim][DIRECT][/dim]",
-            "Package": escape(pkg.name),
+            "Package": safe_text(pkg.name),
             "Current": dash,
             "Latest": dash,
             "Recommended": "[dim]direct reference, not checked[/dim]",
+            "Update Type": dash,
+            "Conflicts": dash,
+            "Python Support": dash,
+        }
+
+    if pkg.not_applicable:
+        return {
+            "Status": "[dim][N/A][/dim]",
+            "Package": safe_text(pkg.name),
+            "Current": safe_text(pkg.current_version) if pkg.current_version else dash,
+            "Latest": safe_text(pkg.latest_version) if pkg.latest_version else dash,
+            "Recommended": (
+                f"[dim]not applicable for target Python "
+                f"{safe_text(pkg.not_applicable)}[/dim]"
+            ),
             "Update Type": dash,
             "Conflicts": dash,
             "Python Support": dash,
@@ -613,8 +642,8 @@ def _base_table_row(pkg: Package) -> Dict[str, str]:
     if not pkg.latest_version:
         return {
             "Status": "[red][ERROR][/red]",
-            "Package": escape(pkg.name),
-            "Current": escape(pkg.current_version) if pkg.current_version else dash,
+            "Package": safe_text(pkg.name),
+            "Current": safe_text(pkg.current_version) if pkg.current_version else dash,
             "Latest": "[red]error[/red]",
             "Recommended": dash,
             "Update Type": dash,
@@ -629,22 +658,22 @@ def _base_table_row(pkg: Package) -> Dict[str, str]:
     if pkg.recommended_version:
         if pkg.current_version and pkg.recommended_version != pkg.current_version:
             recommended_display = (
-                f"[bright_cyan]{escape(pkg.recommended_version)}[/bright_cyan]"
+                f"[bright_cyan]{safe_text(pkg.recommended_version)}[/bright_cyan]"
             )
 
     conflicts_display = dash
     if display["has_conflicts"]:
         conflicts_display = "\n".join(
-            f"[red]⚠[/red] {escape(c.source_package)} needs {escape(c.required_spec)}"
+            f"[red]⚠[/red] {safe_text(c.source_package)} needs {safe_text(c.required_spec)}"
             for c in pkg.conflicts
         )
 
     def build(status: str, update_type: str) -> Dict[str, str]:
         return {
             "Status": status,
-            "Package": escape(pkg.name),
-            "Current": escape(pkg.current_version) if pkg.current_version else dash,
-            "Latest": escape(pkg.latest_version) if pkg.latest_version else dash,
+            "Package": safe_text(pkg.name),
+            "Current": safe_text(pkg.current_version) if pkg.current_version else dash,
+            "Latest": safe_text(pkg.latest_version) if pkg.latest_version else dash,
             "Recommended": recommended_display,
             "Update Type": update_type,
             "Conflicts": conflicts_display,
@@ -696,6 +725,15 @@ def _display_simple(
         if pkg.direct:
             console.print(
                 f"{status_label:12} {pkg.name:20} direct reference, not checked",
+                markup=False,
+                soft_wrap=True,
+            )
+            continue
+
+        if pkg.not_applicable:
+            console.print(
+                f"{status_label:12} {pkg.name:20} {installed:10} "
+                f"not applicable for target Python {pkg.not_applicable}",
                 markup=False,
                 soft_wrap=True,
             )

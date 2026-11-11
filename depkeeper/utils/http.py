@@ -13,6 +13,7 @@ import logging
 import httpx
 import random
 import asyncio
+import threading
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Optional, Dict, Iterable, Callable, Tuple, cast
@@ -53,28 +54,73 @@ MAX_REDIRECTS = 5
 #: Hosts a redirect may land on (besides the request's own host).
 _REDIRECT_HOSTS = frozenset({"pypi.org", "files.pythonhosted.org"})
 
-#: Consecutive connection-level failures (refused, DNS, proxy) that open the
-#: circuit; while open, requests fail at once instead of each waiting out retries.
+#: Consecutive connection-level failures (refused, DNS, proxy, TLS) to one host
+#: that open its circuit; while open, requests to that host fail at once
+#: instead of each waiting out retries. Any received response closes it.
 BREAKER_THRESHOLD = 3
-#: Seconds the circuit stays open before one probe request is allowed.
+#: Seconds a circuit stays open before exactly one probe request is allowed.
 BREAKER_TTL = 30.0
+#: Longest ``Content-Length`` digit string parsed; longer ones are clamped.
+_MAX_LENGTH_DIGITS = 18
 
 #: Seconds a request that exhausted its retries is remembered as failed.
 FAILURE_TTL = 30.0
+
+
+def _human_size(n: int) -> str:
+    """Format a byte count with a unit that keeps small caps readable."""
+    if n >= 1024 * 1024:
+        return f"{n / (1024 * 1024):.0f} MB"
+    if n >= 1024:
+        return f"{n / 1024:.0f} KB"
+    return f"{n} B"
 
 
 class ResponseTooLargeError(NetworkError):
     """A response body exceeded the client's size cap."""
 
     def __init__(self, url: str, limit: int, size: Optional[int] = None) -> None:
-        mb = 1024 * 1024
-        what = f"{size / mb:.0f} MB" if size else f"more than {limit / mb:.0f} MB"
+        what = _human_size(size) if size else f"more than {_human_size(limit)}"
         super().__init__(
-            f"Response too large ({what}, limit {limit / mb:.0f} MB): {url}",
+            f"Response too large ({what}, limit {_human_size(limit)}): {url}",
             url=url,
         )
         self.size = size
         self.limit = limit
+
+
+def _declared_length(value: str) -> Optional[int]:
+    """Parse a ``Content-Length`` value; ``None`` when absent or malformed.
+
+    Only ASCII digits are accepted, and values with more than
+    ``_MAX_LENGTH_DIGITS`` digits are clamped to ``10**18`` (far above any cap)
+    so a hostile header can never reach ``int()``'s digit-count limit.
+    """
+    value = value.strip()
+    if not (value.isascii() and value.isdigit()):
+        return None
+    return int(value) if len(value) <= _MAX_LENGTH_DIGITS else 10**_MAX_LENGTH_DIGITS
+
+
+def _host_key(url: str) -> str:
+    """Return the circuit-breaker key (scheme, host, port) for *url*."""
+    parts = urlsplit(url)
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    return f"{parts.scheme}://{parts.hostname}:{port or ''}"
+
+
+class _HostState:
+    """Circuit-breaker state for one host."""
+
+    __slots__ = ("failures", "open_until", "probing")
+
+    def __init__(self) -> None:
+        self.failures = 0
+        self.open_until = 0.0
+        self.probing = False
 
 
 def _failure_key(url: str, params: Any) -> Tuple[str, str]:
@@ -160,8 +206,8 @@ class HTTPClient:
         # one within FAILURE_TTL (prefetch then check) would re-wait the
         # backoff; the TTL stops one outage poisoning a long-lived client.
         self._failed: Dict[Any, Tuple[float, NetworkError]] = {}
-        self._conn_failures = 0
-        self._breaker_open_until = 0.0
+        self._hosts: Dict[str, _HostState] = {}
+        self._breaker_lock = threading.Lock()
         self.timeout = timeout
         self.max_retries = max_retries
         self.rate_limit_delay = rate_limit_delay
@@ -225,14 +271,45 @@ class HTTPClient:
             else:
                 self._last_request_time = now
 
-    def _note_connect_failure(self) -> bool:
-        """Count a connection-level failure; return True when it opens the circuit."""
-        self._conn_failures += 1
-        if self._conn_failures < BREAKER_THRESHOLD:
-            return False
-        self._breaker_open_until = time.monotonic() + BREAKER_TTL
-        logger.warning("Network unreachable; failing fast")
-        return True
+    def _breaker_admit(self, host: str) -> Optional[bool]:
+        """Decide whether a request to *host* may be sent.
+
+        Returns ``False`` for a normal request, ``True`` when the caller is
+        the single half-open probe, and ``None`` when it must fail fast.
+        """
+        with self._breaker_lock:
+            state = self._hosts.get(host)
+            if state is None or state.failures < BREAKER_THRESHOLD:
+                return False
+            if state.probing or time.monotonic() < state.open_until:
+                return None
+            state.probing = True
+            return True
+
+    def _note_connect_failure(self, host: str) -> bool:
+        """Count a connection-level failure; return True when the circuit is open."""
+        with self._breaker_lock:
+            state = self._hosts.setdefault(host, _HostState())
+            state.failures += 1
+            state.probing = False
+            if state.failures < BREAKER_THRESHOLD:
+                return False
+            if state.failures == BREAKER_THRESHOLD:
+                logger.warning("%s unreachable; failing fast", host)
+            state.open_until = time.monotonic() + BREAKER_TTL
+            return True
+
+    def _note_reachable(self, host: str) -> None:
+        """Close the circuit for *host*: a response (any status) arrived."""
+        with self._breaker_lock:
+            self._hosts.pop(host, None)
+
+    def _release_probe(self, host: str) -> None:
+        """Let another probe through when the current one ended inconclusively."""
+        with self._breaker_lock:
+            state = self._hosts.get(host)
+            if state is not None:
+                state.probing = False
 
     async def _send_once(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         """Send one request, following only safe redirects and capping the body.
@@ -261,14 +338,10 @@ class HTTPClient:
                     url = target
                     continue
 
-                declared = response.headers.get("content-length", "")
-                if (
-                    declared.isascii()
-                    and declared.isdigit()
-                    and int(declared) > self.max_response_bytes
-                ):
+                declared = _declared_length(response.headers.get("content-length", ""))
+                if declared is not None and declared > self.max_response_bytes:
                     raise ResponseTooLargeError(
-                        redact(url), self.max_response_bytes, int(declared)
+                        redact(url), self.max_response_bytes, declared
                     )
                 chunks = []
                 size = 0
@@ -363,22 +436,26 @@ class HTTPClient:
         assert self._client is not None
 
         clean_url = url.strip().strip("\"'")
+        host = _host_key(clean_url)
         last_exc: Optional[Exception] = None
         retry_429_count = 0
 
         for attempt in range(self.max_retries + 1):
+            probe = False
             try:
-                if time.monotonic() < self._breaker_open_until:
+                admitted = self._breaker_admit(host)
+                if admitted is None:
                     raise NetworkError(
                         "Network unreachable (too many consecutive connection "
                         f"failures): {redact(clean_url)}",
                         url=redact(clean_url),
                     )
+                probe = admitted
                 await self._rate_limit()
 
                 async with self._semaphore:
                     response = await self._send_once(method, clean_url, **kwargs)
-                self._conn_failures = 0
+                self._note_reachable(host)
 
                 if response.status_code == 429:
                     retry_429_count += 1
@@ -414,7 +491,9 @@ class HTTPClient:
 
             except httpx.TimeoutException as exc:
                 last_exc = exc
-                if isinstance(exc, httpx.ConnectTimeout) and self._note_connect_failure():
+                if isinstance(exc, httpx.ConnectTimeout) and self._note_connect_failure(
+                    host
+                ):
                     break
                 logger.warning(
                     "Request timeout (%d/%d): %s",
@@ -431,10 +510,10 @@ class HTTPClient:
             except (httpx.TransportError, httpx.DecodingError) as exc:
                 last_exc = exc
                 if isinstance(exc, (httpx.ConnectError, httpx.ProxyError)):
-                    if self._note_connect_failure():
+                    if self._note_connect_failure(host):
                         break
                 else:
-                    self._conn_failures = 0
+                    self._note_reachable(host)
                 logger.warning(
                     "Network error (%d/%d): %s",
                     attempt + 1,
@@ -458,6 +537,10 @@ class HTTPClient:
                     self.max_retries + 1,
                     redact(clean_url),
                 )
+
+            finally:
+                if probe:
+                    self._release_probe(host)
 
             if attempt < self.max_retries:
                 delay = (2**attempt) + random.uniform(0.0, 0.3)

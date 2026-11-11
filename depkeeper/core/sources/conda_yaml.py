@@ -11,7 +11,7 @@ environments use: ``dependencies:`` items plus a nested ``- pip:`` list.
   (``Requirement.series`` = significant components): it only updates when a
   newer series exists, and is rewritten at the same granularity (``=1.26``).
 * ``python`` is never checked (see `requires_python`); items with build strings,
-  ``|`` alternatives or well-known non-PyPI names are skipped.
+  ``|`` alternatives or known conda-only names are skipped.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from depkeeper.models import Requirement
 from depkeeper.core.parser import RequirementsParser
 from depkeeper.core.sources.base import SourceAdapter, SourceUpdate
 from depkeeper.utils import get_logger
+from depkeeper.utils.redact import redact
 from depkeeper.utils.version_utils import rewrite_version_specs, specs_allow_version
 
 logger = get_logger("sources.conda")
@@ -42,28 +43,36 @@ _PART_RE = re.compile(
 )
 # conda name -> PyPI name where they differ commonly.
 _PYPI_NAME = {"pytorch": "torch", "matplotlib-base": "matplotlib"}
-# Conda-only packages (never on PyPI under that name); skipped quietly.
-_NON_PYPI = {
-    "pip", "mkl", "openssl", "ca-certificates", "certifi-conda", "zlib", "xz",
-    "tk", "sqlite", "readline", "ncurses", "nodejs", "cudatoolkit", "cudnn",
-    "pytorch-cuda", "r-base", "libffi", "bzip2", "intel-openmp", "blas",
-}  # fmt: skip
-
-
-# PyPI projects the ``lib*`` rule below would otherwise swallow.
-_LIB_PYPI = {
-    "librosa", "libsass", "libclang", "libcst", "libusb1", "libarchive-c",
-    "libtmux", "libhoney", "libnacl", "libpysal", "libzim", "libsixel",
-}  # fmt: skip
+# Conda-only packages (no PyPI project under that name); skipped quietly.
+# Anything not listed is looked up on PyPI and, when absent, reported as a
+# warning, so a missing entry costs one lookup and a wrong entry hides a package.
+_NON_PYPI = frozenset("""
+    pip python_abi mkl mkl-include mkl-devel intel-openmp llvm-openmp blas
+    openssl ca-certificates certifi-conda zlib xz bzip2 tk sqlite readline
+    ncurses libffi libgomp libxml2 libxslt libiconv libuuid libnsl libedit
+    libev libsodium libsqlite libzlib libexpat expat icu gmp zstd lz4-c
+    jpeg freetype nodejs r-base cudatoolkit cudatoolkit-dev cudnn nccl
+    pytorch-cuda pytorch-mutex openjdk make perl
+""".split())  # fmt: skip
+# Conda-only families: system libraries, compilers, CUDA components, R packages
+# and internal helper packages. ``cuda-python`` and friends are real PyPI
+# projects and deliberately not matched.
+_NON_PYPI_PREFIXES = (
+    "_", "r-", "libgcc", "libstdcxx", "libgfortran", "libblas", "libcblas",
+    "liblapack", "libopenblas", "libpng", "libjpeg", "libtiff", "libwebp",
+    "libxcb", "libcurl", "libssh2", "libprotobuf", "libgdal", "libnvjitlink",
+    "gcc_", "gxx_", "gfortran_", "ld_impl_", "sysroot_",
+    "cuda-nvcc", "cuda-nvrtc", "cuda-nvtx", "cuda-nvml", "cuda-cudart",
+    "cuda-cupti", "cuda-cccl", "cuda-libraries", "cuda-runtime", "cuda-version",
+    "cuda-toolkit", "cuda-driver", "cuda-compiler", "cuda-opencl", "cuda-tools",
+    "cuda-profiler", "cuda-sanitizer", "cuda-gdb", "cuda-visual",
+)  # fmt: skip
 
 
 def _is_non_pypi(name: str) -> bool:
-    """Whether *name* is a conda-only package that has no PyPI counterpart."""
+    """Whether *name* is a known conda-only package with no PyPI counterpart."""
     n = name.lower()
-    return n in _NON_PYPI or (
-        n not in _LIB_PYPI
-        and (n.startswith(("lib", "_", "r-", "mkl", "cuda")) or n.endswith("-ng"))
-    )
+    return n in _NON_PYPI or n.startswith(_NON_PYPI_PREFIXES)
 
 
 class _Item(NamedTuple):
@@ -111,7 +120,7 @@ def _scan(text: str) -> List[_Item]:
                     "Only block-style 'dependencies:' lists are supported "
                     "(flow style '[a, b]' is not)",
                     line_number=lineno,
-                    line_content=content,
+                    line_content=redact(content),
                 )
             continue
         if not in_deps:
@@ -120,7 +129,7 @@ def _scan(text: str) -> List[_Item]:
             raise ParseError(
                 "Expected a list item under 'dependencies:'",
                 line_number=lineno,
-                line_content=content,
+                line_content=redact(content),
             )
         if base is None:
             base = indent
@@ -139,18 +148,18 @@ def _scan(text: str) -> List[_Item]:
                 raise ParseError(
                     "Only block-style 'pip:' lists are supported",
                     line_number=lineno,
-                    line_content=content,
+                    line_content=redact(content),
                 )
             in_pip = True
             continue
         if not quoted and re.search(r":(\s|$)", value) and not in_pip:
-            logger.debug("Skipping non-list entry %r at line %d", value, lineno)
+            logger.debug("Skipping non-list entry %r at line %d", redact(value), lineno)
             continue
         if in_pip and indent <= base:
             continue
         kind = "pip" if in_pip else "conda"
         if kind == "pip" and value.startswith("-"):
-            logger.debug("Skipping pip option %r at line %d", value, lineno)
+            logger.debug("Skipping pip option %r at line %d", redact(value), lineno)
             continue
         items.append(_Item(kind, lineno, value, line_off + start, line_off + end))
     return items
@@ -198,7 +207,7 @@ def _render(spec: str, new_version: str, pin: bool) -> str:
         m = _PART_RE.match(spec)
         assert m is not None
         n = len(m.group("ver").split("."))
-        lead = re.match(r"\d+(\.\d+)*", new_version)
+        lead = re.match(r"[0-9]+(\.[0-9]+)*", new_version)
         trunc = ".".join((lead.group(0) if lead else new_version).split(".")[:n])
         return f"{m.group('op') or ''}{trunc}{m.group('wild') or ''}"
     new = rewrite_version_specs(specs, new_version)
@@ -290,7 +299,7 @@ class CondaYamlAdapter(SourceAdapter):
                     "%s:%d: skipping unparsable dependency item %r",
                     path,
                     it.line,
-                    it.value,
+                    redact(it.value),
                 )
                 continue
             name = m.group("name")
@@ -300,7 +309,7 @@ class CondaYamlAdapter(SourceAdapter):
             spec = m.group("spec").strip()
             parsed = _conda_specs(spec)
             if parsed is None:
-                logger.debug("Skipping unsupported conda spec %r", it.value)
+                logger.debug("Skipping unsupported conda spec %r", redact(it.value))
                 continue
             start = it.start + (m.start("spec") if spec else m.end("name"))
             reqs.append(

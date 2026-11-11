@@ -77,10 +77,18 @@ Candidates are drawn from the `releases` map of the PyPI JSON API and filtered, 
    are dropped.
 6. **Declared-constraint filter.** Releases rejected by the retained specs, the `~=`-implied
    major bound or `-c` constraint specs are dropped.
-7. **`max_update` cap.** A per-package `max_update` (and, for opted-in packages, the run-wide
-   `--max-update`) drops upgrades larger than the cap. Calver `year`/`month` rank as `minor`.
-8. **Series filter** (conda fuzzy specs only). Only versions in a *newer series* survive: with
-   `numpy=1.24` (series 2) `1.24.9` is not an update but `1.25.0` is.
+7. **`max_update` cap.** A per-package `max_update` and the run-wide `--max-update` (the stricter
+   wins) drop upgrades larger than the cap for every package, before a candidate is chosen, so
+   `requests==2.25.0 --max-update patch` gets `2.25.1` rather than nothing. Calver `year`/`month`
+   rank as `minor`.
+8. **Series filter** (conda fuzzy specs and `~=` lines). Only versions in a *newer series*
+   survive: with `numpy=1.24` (series 2) `1.24.9` is not an update but `1.25.0` is. The same
+   holds for a compatible-release line, at the precision it is written: `PyYAML~=5.4` already
+   allows `5.4.1` and the line cannot say more, so `5.4.1` is not an update (`check` and
+   `update` agree, `--fail-on updates` stays green), while `~=5.4.0` moves to `~=5.4.1` and
+   `~=5.3` moves to `~=5.4` when 5.4.x exists. `--pin` still writes the newest release in the
+   series (`==5.4.1`). Plain floors (`>=`, `>`) move at full precision; `==` pins, wildcard
+   bands, ranges and `!=` are unaffected.
 9. **Cooldown** (`min_age`). Applied last, while choosing; see [Release cooldown](#release-cooldown-min_age).
 
 The list is sorted descending, so the recommendation is simply the first survivor.
@@ -121,11 +129,11 @@ other rule still applies:
 
 - your declared upper bounds (`<6`, `!=`, wildcard bands) and any `-c` constraint caps,
 - the major bound implied by `~=` (`click~=8.0` means `>=8.0,<9`, so it stays on 8.x),
-- `--max-update` and the package's `max_update`,
+- `--max-update` and the package's `max_update` (these apply to every package, opted in or not),
 - target-Python compatibility, yanked/pre-release exclusion and the `min_age` cooldown.
 
 The conflict resolver's searches are unbounded for opted-in packages too, so it can reach the same
-versions the checker may recommend. When `max_update` is what holds an opted-in package back, the note reads
+versions the checker may recommend. When a cap is what holds an opted-in package back, the note reads
 `major available: PKG X (blocked by max_update; raise --max-update)`. `update` warns
 `N major upgrade(s) applied` after applying one; run `--verify` and your tests.
 
@@ -135,11 +143,17 @@ versions the checker may recommend. When `max_update` is what holds an opted-in 
 
 - the current version (or, with none, the newest release) leads with a plausible 4-digit year,
   `1990` through *this year + 1* (`2024.8.30`); or
-- the entire stable release history looks like `YY.M`: at least 5 stable releases, every one
-  with a first component 15 through *this year + 1* (two-digit) and a second component 1-12, and
-  at least two distinct years (black `24.2.0`).
+- the **most recent** stable releases look like dates. Starting from the newest, depkeeper reads
+  releases (pre-, post- and dev-releases and unparsable versions are skipped) until it has seen at
+  least 8 spanning two distinct first components, looking back at most 40. Every one must have either a
+  4-digit first component (1990 through *this year + 1*) or a two-digit first component 18 through
+  *this year + 1* with a second component 0-12 (black `24.2.0`, pip `23.0`, packaging `24.0`, attrs
+  `24.1`). Older history is ignored, so pip's `1.x`-`10.x` era does not matter.
 
-A lone `23.1.0` is never guessed to be calver. Override per package with `versioning = "calver"`
+A lone `23.1.0` is never guessed to be calver, and a project with fewer than 8 recent releases or a
+single first component stays semver (virtualenv `20.x`, setuptools, pytest and cryptography are semver).
+**Known limit:** a semver project whose major reaches 18 or more while its minors stay at 12 or below
+looks like calver; set `versioning = "semver"` for it. Override per package with `versioning = "calver"`
 or `"semver"` (or globally in config). Calver packages have no major boundary: updates cross the
 leading year and are labelled `year`, `month` or `patch`.
 
@@ -180,6 +194,19 @@ you pass a flag or set config.
 | `requires_python` absent | Treated as compatible. This matches pip. |
 | `requires_python` unparseable | Treated as compatible. Malformed upstream metadata must not exclude an installable release. |
 | Specifier excludes the target | Candidate dropped. |
+
+### Requirements with a Python marker
+
+A line whose own environment marker is built only from `python_version` / `python_full_version`
+is evaluated for the target Python. When the marker is **false** (`requests==2.25.0 ;
+python_version<"3.9"` with target 3.12) the line does not apply there: it is never changed, never
+part of the conflict analysis, and is reported as `not applicable for target Python 3.12` (status
+`not-applicable`, table label `[N/A]`, simple label `[NOT-APPLICABLE]`, a Markdown section, and
+`status: "not-applicable"` plus `target_python` in `json`/`json-v2`). It does not count as an
+update, so `--fail-on` ignores it. When the marker is **true** the normal Python filter applies.
+Markers that also use the platform, an extra or any other variable cannot be judged for a Python
+alone and are treated as applicable, as are lines without a marker. To maintain the line for a
+different Python, run depkeeper with that `--python-version`.
 
 > [!CAUTION]
 > **The fallback is depkeeper's own interpreter**

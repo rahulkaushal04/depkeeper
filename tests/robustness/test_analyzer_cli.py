@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -19,17 +18,8 @@ from depkeeper.cli import cli
 _ROOT = Path(__file__).resolve().parents[2]
 
 
-def _online() -> bool:
-    try:
-        socket.create_connection(("pypi.org", 443), timeout=3).close()
-        return True
-    except OSError:
-        return False
-
-
 pytestmark = [
     pytest.mark.network,
-    pytest.mark.skipif(not _online(), reason="PyPI unreachable"),
 ]
 
 
@@ -44,7 +34,7 @@ def _check(*args: str) -> List[Dict[str, Any]]:
     except TypeError:
         runner = CliRunner()
     result = runner.invoke(cli, ["check", "--format", "json", *args])
-    assert result.exit_code in (0, 3), result.output
+    assert result.exit_code == 0, result.output
     return json.loads(result.stdout)  # type: ignore[no-any-return]
 
 
@@ -107,7 +97,7 @@ def test_input_order_does_not_change_the_plan_in_a_real_subprocess(
             env={**os.environ, "PYTHONPATH": str(_ROOT)},
             timeout=120,
         )
-        assert out.returncode in (0, 3), out.stderr
+        assert out.returncode == 0, out.stderr
         rows = _by_name(json.loads(out.stdout))
         plans.append({n: r["versions"]["recommended"] for n, r in rows.items()})
     assert plans[0] == plans[1] == plans[2]

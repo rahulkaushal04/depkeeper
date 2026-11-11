@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import pytest
 from packaging.requirements import Requirement as PkgReq
+from packaging.specifiers import SpecifierSet
 from packaging.version import parse
 
 from depkeeper.config import PackagePolicy
@@ -21,7 +22,6 @@ from depkeeper.core.dependency_analyzer import (
 )
 from depkeeper.models import Requirement
 from depkeeper.models.package import Package
-from depkeeper.utils.version_utils import specs_allow_version
 from tests.support.pypi import FakePyPIStore, package_data
 
 NOW = datetime(2025, 1, 1, tzinfo=timezone.utc)
@@ -46,6 +46,8 @@ _DEP_SPECS = [
     ">=2.1",
     "<1.3",
 ]
+# Mostly-satisfiable dependency specs for the properties that need a settled case.
+_SOFT_SPECS = ["", "", ">=1.0", "<3", ">=1.0,<3", "!=9.9"]
 _RP = [None, None, ">=3.8", ">=3.11", "<3.10", ">=3.9,<3.12"]
 
 
@@ -72,7 +74,9 @@ class Eco:
         return FakePyPIStore(avail, dependencies=self.deps)
 
 
-def gen(seed: int, *, policies: bool = True, calver: bool = False) -> Eco:
+def gen(
+    seed: int, *, policies: bool = True, calver: bool = False, soft: bool = False
+) -> Eco:
     rnd = random.Random(seed)
     eco = Eco()
     n = rnd.randint(2, 6)
@@ -97,10 +101,13 @@ def gen(seed: int, *, policies: bool = True, calver: bool = False) -> Eco:
         for v in eco.versions[name]:
             deps = []
             for other in names + ["ghost"]:
-                if rnd.random() < (0.05 if other == name else 0.4):
-                    deps.append(
-                        other + rnd.choice(_CALVER_SPECS if calver else _DEP_SPECS)
-                    )
+                if rnd.random() < (0.05 if other == name else 0.4 if not soft else 0.2):
+                    pool = _CALVER_SPECS if calver else _DEP_SPECS
+                    if soft and other == "ghost":
+                        pool = [""]
+                    elif soft and rnd.random() < 0.9:
+                        pool = _SOFT_SPECS
+                    deps.append(other + rnd.choice(pool))
             eco.deps["%s==%s" % (name, v)] = deps
     for name in names:
         if rnd.random() < 0.15:
@@ -198,10 +205,9 @@ def check_invariants(
             ):
                 assert parse(r).major == parse(cur).major, (p.name, cur, rec0, r)
             rp = eco.rp[p.name][r]
-            assert rp is None or TARGET in __import__(
-                "packaging.specifiers", fromlist=["x"]
-            ).SpecifierSet(rp), (p.name, r, rp)
-            assert specs_allow_version(p.retained_specs, r), (
+            assert rp is None or TARGET in SpecifierSet(rp), (p.name, r, rp)
+            retained = SpecifierSet(",".join(op + v for op, v in p.retained_specs))
+            assert retained.contains(r, prereleases=True), (
                 p.name,
                 r,
                 p.retained_specs,
@@ -289,55 +295,67 @@ def test_input_order_and_reruns_do_not_change_the_outcome(seed: int) -> None:
     }
 
 
-@pytest.mark.parametrize("seed", SEEDS)
-def test_consistent_proposals_are_left_alone(seed: int) -> None:
-    eco = gen(seed)
-    store = eco.store()
-    checker = VersionChecker(
-        store,
-        target_python=TARGET,
-        policies=eco.policies,
-        min_age=eco.min_age,
-        clock=lambda: NOW,
-        allow_major=eco.allow_major,
-    )
-    pkgs = asyncio.run(checker.check_packages(list(eco.reqs)))
-    proposals = _final(pkgs)
-    if violations(eco, proposals):
-        pytest.skip("proposals conflict")
-    res = asyncio.run(
-        DependencyAnalyzer(
-            store, target_python=TARGET, checker=checker
-        ).resolve_and_annotate_conflicts(pkgs)
-    )
-    assert _final(pkgs) == proposals
-    assert res.converged and res.packages_with_conflicts == 0
-    assert not res.get_changed_packages()
+MIN_EFFECTIVE = 0.9
 
 
-@pytest.mark.parametrize("seed", SEEDS)
-def test_a_converged_result_is_a_fixed_point(seed: int) -> None:
-    eco = gen(seed)
-    pkgs, _, res, checker = asyncio.run(run(eco))
-    if not res.converged:
-        pytest.skip("unconverged")
-    before = _final(pkgs)
-    again = asyncio.run(
-        DependencyAnalyzer(
-            eco.store(), target_python=TARGET, checker=checker
-        ).resolve_and_annotate_conflicts(pkgs)
-    )
-    assert _final(pkgs) == before
-    assert again.converged and not again.get_changed_packages()
+def test_consistent_proposals_are_left_alone() -> None:
+    effective = 0
+    for seed in SEEDS:
+        eco = gen(seed, soft=True)
+        store = eco.store()
+        checker = VersionChecker(
+            store,
+            target_python=TARGET,
+            policies=eco.policies,
+            min_age=eco.min_age,
+            clock=lambda: NOW,
+            allow_major=eco.allow_major,
+        )
+        pkgs = asyncio.run(checker.check_packages(list(eco.reqs)))
+        proposals = _final(pkgs)
+        if violations(eco, proposals):
+            continue  # counted below: the generator must make these rare
+        effective += 1
+        res = asyncio.run(
+            DependencyAnalyzer(
+                store, target_python=TARGET, checker=checker
+            ).resolve_and_annotate_conflicts(pkgs)
+        )
+        assert _final(pkgs) == proposals, seed
+        assert res.converged and res.packages_with_conflicts == 0, seed
+        assert not res.get_changed_packages(), seed
+    assert effective >= MIN_EFFECTIVE * len(SEEDS), effective
 
 
-@pytest.mark.parametrize("seed", range(150))
-def test_a_clean_installed_set_is_never_left_broken(seed: int) -> None:
+def test_a_converged_result_is_a_fixed_point() -> None:
+    effective = 0
+    for seed in SEEDS:
+        eco = gen(seed, soft=True)
+        pkgs, _, res, checker = asyncio.run(run(eco))
+        if not res.converged:
+            continue
+        effective += 1
+        before = _final(pkgs)
+        again = asyncio.run(
+            DependencyAnalyzer(
+                eco.store(), target_python=TARGET, checker=checker
+            ).resolve_and_annotate_conflicts(pkgs)
+        )
+        assert _final(pkgs) == before, seed
+        assert again.converged and not again.get_changed_packages(), seed
+    assert effective >= MIN_EFFECTIVE * len(SEEDS), effective
+
+
+def test_a_clean_installed_set_is_never_left_broken() -> None:
     """If every package staying put is consistent, the resolver must end consistent."""
-    eco = gen(seed)
-    pkgs, before, res, _ = asyncio.run(run(eco))
-    installed = {n: c for n, (c, _) in before.items()}
-    if violations(eco, installed):
-        pytest.skip("installed set already conflicts")
-    assert not violations(eco, _final(pkgs))
-    assert res.converged
+    effective = 0
+    for seed in range(150):
+        eco = gen(seed, soft=True)
+        pkgs, before, res, _ = asyncio.run(run(eco))
+        installed = {n: c for n, (c, _) in before.items()}
+        if violations(eco, installed):
+            continue
+        effective += 1
+        assert not violations(eco, _final(pkgs)), seed
+        assert res.converged, seed
+    assert effective >= MIN_EFFECTIVE * 150, effective

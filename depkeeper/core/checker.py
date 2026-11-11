@@ -38,9 +38,11 @@ Typical usage::
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime, timedelta, timezone
 from typing import (
     Any,
+    Awaitable,
     Callable,
     Dict,
     Iterable,
@@ -52,6 +54,7 @@ from typing import (
     Tuple,
     Union,
 )
+from packaging.markers import InvalidMarker, Marker
 from packaging.version import InvalidVersion, Version
 
 from depkeeper.exceptions import NetworkError
@@ -75,6 +78,33 @@ from depkeeper.models.requirement import Requirement
 from depkeeper.core.data_store import PyPIDataStore, PyPIPackageData
 
 logger = get_logger("version_checker")
+
+_MARKER_NAMES = re.compile(r"[a-z_]+")
+_MARKER_STRINGS = re.compile(r"\"[^\"]*\"|'[^']*'")
+_PYTHON_MARKER_NAMES = {"python_version", "python_full_version"}
+
+
+def marker_excludes_python(markers: Optional[str], python: str) -> bool:
+    """Return whether *markers* is false for target *python* (``"3.12"``).
+
+    Only markers built from ``python_version`` / ``python_full_version`` are
+    judged: anything that also depends on the platform or an extra cannot be
+    decided for a target interpreter alone, so the line is treated as applicable.
+    """
+    if not markers:
+        return False
+    names = set(_MARKER_NAMES.findall(_MARKER_STRINGS.sub("", markers)))
+    names -= {"and", "or", "in", "not"}
+    version = re.match(r"\s*([0-9]+)\.([0-9]+)", python)
+    if not names or not names <= _PYTHON_MARKER_NAMES or version is None:
+        return False
+    xy = f"{version.group(1)}.{version.group(2)}"
+    try:
+        return not Marker(markers).evaluate(
+            {"python_version": xy, "python_full_version": f"{xy}.0"}
+        )
+    except InvalidMarker:
+        return False
 
 
 def _newer_series(candidates: List[str], current: str, series: int) -> List[str]:
@@ -128,9 +158,9 @@ class VersionChecker:
         allow_major: Package names (or ``"*"`` for all) whose recommendation may
             cross the current major. The requirement's own upper bounds,
             ``max_update``, Python compatibility and the cooldown still apply.
-        max_update: Run-wide cap (CLI ``--max-update``). Applied before choosing
-            a candidate, but only for packages opted into major upgrades; for the
-            rest the command filters afterwards, as before.
+        max_update: Run-wide cap (CLI ``--max-update``). Applied to every
+            package before a candidate is chosen, so the best version *within*
+            the cap wins rather than the best overall being dropped afterwards.
         clock: Returns the current UTC time (injectable for tests).
 
     Raises:
@@ -204,12 +234,9 @@ class VersionChecker:
             or bool(policy and policy.allow_major)
         )
 
-    def _cap_for(self, name: str, policy: PackagePolicy) -> Optional[str]:
-        """Stricter of the policy cap and the run-wide cap (opted-in packages)."""
-        caps = [policy.max_update]
-        if self.allows_major(name):
-            caps.append(self.max_update)
-        set_caps = [c for c in caps if c]
+    def _cap_for(self, policy: PackagePolicy) -> Optional[str]:
+        """Stricter of the policy cap and the run-wide cap."""
+        set_caps = [c for c in (policy.max_update, self.max_update) if c]
         return min(set_caps, key=update_rank) if set_caps else None
 
     async def get_package_info(
@@ -334,6 +361,28 @@ class VersionChecker:
 
         return None
 
+    def _compatible_series(self, req: Requirement) -> Optional[int]:
+        """Release components a ``~=`` floor can express (``~=5.4`` -> 2).
+
+        The writer keeps that precision, so a newer release inside the same
+        series (5.4 -> 5.4.1) cannot be recorded in the line: it is already
+        allowed by the range and must not count as an update.
+        """
+        if self.extract_current_version(req) is None:
+            return None
+        for operator, version in req.specs:
+            if operator in ("==", "==="):
+                if "*" not in version:
+                    return None
+            elif operator in (">=", ">", "~="):
+                if operator != "~=":
+                    return None
+                try:
+                    return max(2, len(Version(version).release))
+                except InvalidVersion:
+                    return None
+        return None
+
     def create_unavailable_package(
         self,
         name: str,
@@ -371,8 +420,8 @@ class VersionChecker:
         except InvalidVersion:
             return floor
         above = [v for v in pkg_data.all_versions if Version(v) >= low]
-        if not above:
-            return floor
+        if not above or Version(min(above, key=Version)) == low:
+            return floor  # already a real release (maybe spelled 2.3 vs 2.3.0)
         snapped = min(above, key=Version)
         logger.debug("%s: %s is not a release, using %s", pkg_data.name, floor, snapped)
         return snapped
@@ -389,20 +438,34 @@ class VersionChecker:
         if requirement.url or requirement.editable:
             return asyncio.create_task(self._direct_package(requirement))
         current_version = self.extract_current_version(requirement)
-        return asyncio.create_task(
-            self.get_package_info(
-                requirement.name,
-                current_version,
-                # -c constraint caps always bind (never rewritten, so all kept).
-                retained_specs(requirement.specs)
-                + implied_major_bounds(requirement.specs)
-                + list(requirement.constraint_specs),
-                requirement.series,
-                floor_inferred=not any(
-                    op in ("==", "===") for op, _ in requirement.specs
-                ),
-            )
+        python = self.target_python or PyPIDataStore.get_current_python_version()
+        check = self.get_package_info(
+            requirement.name,
+            current_version,
+            # -c constraint caps always bind (never rewritten, so all kept).
+            retained_specs(requirement.specs)
+            + implied_major_bounds(requirement.specs)
+            + list(requirement.constraint_specs),
+            requirement.series or self._compatible_series(requirement),
+            floor_inferred=not any(op in ("==", "===") for op, _ in requirement.specs),
         )
+        if marker_excludes_python(requirement.markers, python):
+            return asyncio.create_task(self._not_applicable(check, python))
+        return asyncio.create_task(check)
+
+    @staticmethod
+    async def _not_applicable(check: Awaitable[Package], python: str) -> Package:
+        """Mark a looked-up package as not applying to the target Python."""
+        package = await check
+        if package.latest_version:
+            package.not_applicable = ".".join(python.split(".")[:2])
+            package.recommended_version = None
+            package.recommended_released = None
+            package.cooldown_skipped = None
+            package.major_available = None
+            package.major_capped = False
+            package.pin_target = None
+        return package
 
     def _process_check_results(
         self,
@@ -470,6 +533,9 @@ class VersionChecker:
         cooldown_skipped: Optional[str] = None
         major_available: Optional[str] = None
         held = bool(policy.hold and current_version)
+        # Newest release inside the current series: not an update, but what
+        # --pin should write because an exact pin can express it.
+        pin_target: Optional[str] = None
 
         if held or policy.ignore:
             recommended_version = current_version
@@ -501,16 +567,23 @@ class VersionChecker:
                     candidates = self._cap_update(
                         candidates,
                         current_version,
-                        self._cap_for(pkg_data.name, policy),
+                        self._cap_for(policy),
                         scheme,
                     )
                     if series:
+                        within_series = self._apply_cooldown(
+                            pkg_data, candidates, current_version
+                        )[0]
                         candidates = _newer_series(candidates, current_version, series)
                     recommended_version, cooldown_skipped = self._apply_cooldown(
                         pkg_data, candidates, current_version
                     )
                     if recommended_version is None and series:
                         recommended_version = current_version  # same series: no update
+                        top = parse_version_lenient(within_series)
+                        floor = parse_version_lenient(current_version)
+                        if top and floor and top > floor:
+                            pin_target = within_series
                     elif recommended_version is None:
                         # Deliberate: never fall through to the next major.
                         logger.warning(
@@ -582,6 +655,7 @@ class VersionChecker:
             cooldown_skipped=cooldown_skipped,
             major_available=major_available,
             major_capped=bool(major_available and self.allows_major(pkg_data.name)),
+            pin_target=pin_target,
         )
 
     def _higher_major(
@@ -685,7 +759,7 @@ class VersionChecker:
             versions = self._cap_update(
                 versions,
                 current_version,
-                self._cap_for(pkg_data.name, policy),
+                self._cap_for(policy),
                 scheme,
             )
         if self.min_age is None:

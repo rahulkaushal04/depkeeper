@@ -29,12 +29,17 @@ def run(*args: str) -> Any:
         ("requests~=2.34.2", "requests==2.34.2"),
         ("requests>=2.34.2,<3", "requests==2.34.2"),
         ("requests[socks]>=2.34.2", "requests[socks]==2.34.2"),
-        ('requests>=2.34.2; python_version >= "3.8"', 'requests==2.34.2; python_version >= "3.8"'),
+        (
+            'requests>=2.34.2; python_version >= "3.8"',
+            'requests==2.34.2; python_version >= "3.8"',
+        ),
         ("requests==2.34.*", "requests==2.34.2"),
         ("requests>=2.0  # keep", "requests==2.34.2  # keep"),
     ],
 )
-def test_requirements_txt_pin_semantics(tmp_path: Path, line: str, expected: str) -> None:
+def test_requirements_txt_pin_semantics(
+    tmp_path: Path, line: str, expected: str
+) -> None:
     f = tmp_path / "requirements.txt"
     f.write_text(line + "\n")
     r = run("-y", "--pin", str(f))
@@ -73,7 +78,9 @@ def test_direct_references_never_touched(tmp_path: Path) -> None:
 
 def test_pyproject_range_is_pinned_when_unchanged(tmp_path: Path) -> None:
     f = tmp_path / "pyproject.toml"
-    f.write_text('[project]\nname = "d"\nversion = "0"\ndependencies = ["requests>=2.34.2"]\n')
+    f.write_text(
+        '[project]\nname = "d"\nversion = "0"\ndependencies = ["requests>=2.34.2"]\n'
+    )
     run("-y", "--pin", str(f))
     assert '"requests==2.34.2"' in f.read_text()
 
