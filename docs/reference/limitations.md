@@ -1,11 +1,11 @@
 ---
 title: Known Limitations
-description: Documented behaviours that are surprising, constrained or not yet implemented in 0.1.x
+description: Documented behaviours that are surprising, constrained or not yet implemented in 1.x
 ---
 
 # Known Limitations
 
-Every entry here is verified against the 0.1.x implementation. They are documented rather than
+Every entry here is verified against the 1.x implementation. They are documented rather than
 hidden, because each one has bitten someone and each has a workaround.
 
 ---
@@ -31,7 +31,7 @@ In automated pipelines this step is mandatory.
 `--index-url`, `--extra-index-url`, `-i` and `--find-links` lines are recognised and ignored.
 Packages published only to a private index cannot be looked up: they are reported as `no-update` / `could not be checked` and make the run exit `4`.
 
-**Workaround:** none in 0.1.x. Split private packages into a separate file that you do not run
+**Workaround:** none in 1.x. Split private packages into a separate file that you do not run
 depkeeper against, or use `--ignore` / the `ignore` config key for them.
 
 ### Supported file formats

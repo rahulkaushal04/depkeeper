@@ -23,7 +23,7 @@ resolution decision. Most questions are answered by its first twenty lines:
 
 ```text
 INFO: Target Python: running interpreter (from running interpreter)
-DEBUG: depkeeper v0.1.1
+DEBUG: depkeeper v1.0.0
 DEBUG: Config path: None
 DEBUG: Verbosity: 2 | Color: True
 ```

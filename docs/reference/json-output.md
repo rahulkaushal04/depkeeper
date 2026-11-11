@@ -277,5 +277,5 @@ for pkg in packages:
 
 ## Stability
 
-The bare array is additive within `0.1.x`: new optional keys may appear; existing keys will not change
+The bare array is additive within `1.x`: new optional keys may appear; existing keys will not change
 type or meaning. Consumers should ignore unknown keys.

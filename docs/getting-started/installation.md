@@ -64,11 +64,11 @@ For a full contributor setup (dev extras, pre-commit, test tooling), follow
 **CI (ephemeral)**
 
 ```bash
-python -m pip install --no-cache-dir depkeeper==0.1.1
+python -m pip install --no-cache-dir depkeeper==1.0.0
 ```
 
-Pin the version in CI. depkeeper is still `0.x`, so an unpinned install can change
-recommendation behaviour between pipeline runs.
+Pin the version in CI. Recommendation changes ship in minor releases, so an unpinned install
+can change recommendation behaviour between pipeline runs.
 
 ---
 
@@ -94,7 +94,7 @@ Optional extras: `depkeeper[dev]` and `depkeeper[test]` (both for contributors).
 
 ```bash
 depkeeper --version
-# depkeeper 0.1.1
+# depkeeper 1.0.0
 
 depkeeper --help
 python -m depkeeper --version   # equivalent module entry point

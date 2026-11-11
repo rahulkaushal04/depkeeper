@@ -3,8 +3,8 @@
 name: Publish to PyPI
 
 # Triggered by pushing a version tag, e.g.:
-#   git tag -a v0.1.1 -m "Release 0.1.1"
-#   git push origin v0.1.1
+#   git tag -a v1.0.0 -m "Release 1.0.0"
+#   git push origin v1.0.0
 #
 # Authenticates to PyPI via Trusted Publishing (OIDC) -- no stored API token.
 # One-time setup required on PyPI: on the depkeeper project's "Publishing"

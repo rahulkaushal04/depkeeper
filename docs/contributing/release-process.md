@@ -26,8 +26,7 @@ depkeeper follows [Semantic Versioning](https://semver.org/).
 > a **minor** release, even if the diff looks like a bug fix. Consumers gate pipelines on this
 > output.
 
-While the project is `0.x`, the CLI surface is stable within a patch series; anything may change
-between minor versions.
+These rules apply from 1.0.0 on.
 
 ---
 
@@ -60,13 +59,13 @@ Also run `python -m ruff format --check depkeeper tests` and `python -m ruff che
 
 ```bash
 # depkeeper/__version__.py
-__version__ = "0.2.0"
+__version__ = "1.1.0"
 ```
 
 ```toml
 # pyproject.toml
 [project]
-version = "0.2.0"
+version = "1.1.0"
 ```
 
 ### 3. Update the changelog
@@ -100,7 +99,7 @@ Behavioural changes must already be reflected in:
 ### 5. Commit and push to `main`
 
 ```bash
-git commit -am "chore(release): 0.2.0"
+git commit -am "chore(release): 1.1.0"
 git push origin main
 ```
 
@@ -118,8 +117,8 @@ python -m build
 python -m twine check dist/*                            # must report PASSED for both artefacts
 
 python -m venv /tmp/verify && source /tmp/verify/bin/activate
-pip install dist/depkeeper-0.2.0-py3-none-any.whl
-depkeeper --version                                      # must print 0.2.0
+pip install dist/depkeeper-1.1.0-py3-none-any.whl
+depkeeper --version                                      # must print 1.1.0
 printf 'requests==2.28.0\n' > /tmp/r.txt
 depkeeper check /tmp/r.txt --format json | jq -e 'length == 1'
 deactivate
@@ -129,8 +128,8 @@ rm -rf dist build *.egg-info /tmp/verify
 ### 7. Tag and push — this publishes to PyPI
 
 ```bash
-git tag -a v0.2.0 -m "Release 0.2.0"
-git push origin v0.2.0
+git tag -a v1.1.0 -m "Release 1.1.0"
+git push origin v1.1.0
 ```
 
 Pushing a `v*` tag triggers
@@ -159,7 +158,7 @@ Create a GitHub release from the tag, using the changelog section as the body.
 
 ## Post-release
 
-- [ ] `pip install depkeeper==0.2.0` works from a clean environment.
+- [ ] `pip install depkeeper==1.1.0` works from a clean environment.
 - [ ] The GitHub release exists and its notes match the changelog.
 - [ ] Open a follow-up issue for anything deferred from this release.
 

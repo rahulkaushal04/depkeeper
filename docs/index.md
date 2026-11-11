@@ -96,10 +96,10 @@ Note what did **not** happen:
 
 ## Project status
 
-depkeeper is at version **0.1.1** and is classified `Development Status :: 4 - Beta`.
+depkeeper is at version **1.0.0** and is classified `Development Status :: 5 - Production/Stable`.
 
 - Supported Python: **3.8+**. Candidate versions are filtered against the target Python (by default the `requires-python` of the file, else the interpreter running depkeeper) — see [Python compatibility](concepts/version-recommendation.md#python-compatibility-filtering).
 - Supported input: pip requirements files, `pyproject.toml` and conda `environment.yml`. See [File formats](reference/file-formats.md).
-- Public API stability: the CLI surface is stable within `0.1.x`. The Python API is documented
-  but not yet covered by a compatibility guarantee — see [Python API](reference/python-api.md).
+- Public API stability: the CLI surface is stable within `1.x`. The Python API is documented
+  but not covered by a compatibility guarantee — see [Python API](reference/python-api.md).
 - License: [Apache-2.0](community/license.md).

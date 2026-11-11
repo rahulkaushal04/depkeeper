@@ -16,11 +16,10 @@ the two ever disagree, `SECURITY.md` governs.
 
 | Version | Supported |
 |---|---|
-| `0.1.x` | ✅ |
-| `< 0.1` | ❌ |
+| `1.x` | ✅ |
+| `< 1.0` | ❌ |
 
-depkeeper is in early development. Security patches are provided only for the latest `0.1.x`
-release; upgrade rather than backport.
+Security patches are provided only for the latest `1.x` release; upgrade rather than backport.
 
 ---
 

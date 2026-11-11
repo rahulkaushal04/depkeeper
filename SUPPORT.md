@@ -53,10 +53,9 @@ A wrong-looking recommendation is often a version mismatch.
 
 ## Versions
 
-Only the latest `0.1.x` release is supported. Try the newest release before you report.
+Only the latest `1.x` release is supported. Try the newest release before you report.
 
-depkeeper is early software. Pin the version in automation and read
-[CHANGELOG.md](CHANGELOG.md) before upgrading. Recommendation logic is a behaviour contract, so an
+Pin the version in automation and read [CHANGELOG.md](CHANGELOG.md) before upgrading. Recommendation logic is a behaviour contract, so an
 upgrade can change an update plan.
 
 ---

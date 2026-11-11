@@ -384,7 +384,7 @@ naming the line.
 
 ---
 
-## Not available in 0.1.x
+## Not available in 1.x
 
 There is no command or flag for: initialising a config file, adding or removing a requirement,
 scanning for security advisories, generating a lock file, selecting a package index, tuning

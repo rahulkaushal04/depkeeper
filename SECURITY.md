@@ -4,10 +4,10 @@
 
 | Version | Supported |
 |---|---|
-| `0.1.x` | Yes (latest release only) |
-| `< 0.1` | No |
+| `1.x` | Yes (latest release only) |
+| `< 1.0` | No |
 
-Fixes ship in the latest `0.1.x` release. We do not backport. Please upgrade.
+Fixes ship in the latest `1.x` release. We do not backport. Please upgrade.
 
 ---
 

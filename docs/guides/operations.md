@@ -28,7 +28,7 @@ the report contains only `[ERROR]` rows.
 `--index-url`, `--extra-index-url`, `-i` and `--find-links` lines in a requirements file are
 recognised and **ignored**. Packages published only to a private index will always report as
 unavailable (`check` exits `4`). There is no configuration to point depkeeper at another index in
-0.1.x. The one exception is `update --verify`, which runs pip and honours pip's own index settings
+1.x. The one exception is `update --verify`, which runs pip and honours pip's own index settings
 (`PIP_INDEX_URL`, ...). See
 [Limitations](../reference/limitations.md#only-pypiorg-is-queried).
 
@@ -164,7 +164,7 @@ own computation is negligible for realistic file sizes.
 
 ### Tuning and limits
 
-All limits are module constants and are **not** configurable at runtime in 0.1.x:
+All limits are module constants and are **not** configurable at runtime in 1.x:
 
 | Constant | Value | Module |
 |---|---|---|

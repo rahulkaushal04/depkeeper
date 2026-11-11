@@ -10,6 +10,13 @@ your CI and scripts for these before upgrading.
 
 ## [Unreleased]
 
+---
+
+## [1.0.0] - 2026-11-11
+
+First stable release. It adds `pyproject.toml` and conda support, opt-in major upgrades, calendar versions,
+per-package policy and `--verify`, and hardens parsing, writes and networking.
+
 ### Added
 
 - **More file types:** `pyproject.toml` (project dependencies, optional extras, dependency groups, build requirements, Poetry, uv/PDM/Hatch dev dependencies) and conda `environment.yml`. Pass a directory to check every supported file at once. Edits change only the version text, so comments and formatting stay. Conda packages are matched to PyPI by name, so results are approximate.
@@ -132,6 +139,7 @@ First public release.
 
 ---
 
-[Unreleased]: https://github.com/rahulkaushal04/depkeeper/compare/v0.1.1...main
+[Unreleased]: https://github.com/rahulkaushal04/depkeeper/compare/v1.0.0...main
+[1.0.0]: https://github.com/rahulkaushal04/depkeeper/compare/v0.1.1...v1.0.0
 [0.1.1]: https://github.com/rahulkaushal04/depkeeper/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/rahulkaushal04/depkeeper/releases/tag/v0.1.0

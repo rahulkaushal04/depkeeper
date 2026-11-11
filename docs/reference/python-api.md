@@ -11,7 +11,7 @@ need to embed dependency analysis.
 > [!WARNING]
 > **Stability**
 >
-> Only the CLI surface is covered by a compatibility guarantee in `0.1.x`. The Python API is
+> Only the CLI surface is covered by a compatibility guarantee in `1.x`. The Python API is
 > documented but may change between minor versions. Pin the version if you depend on it.
 
 ---
