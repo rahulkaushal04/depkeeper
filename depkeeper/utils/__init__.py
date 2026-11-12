@@ -20,6 +20,7 @@ from depkeeper.utils.filesystem import (
     find_requirements_files,
     restore_backup,
     safe_read_file,
+    sniff_wide_encoding,
     safe_write_file,
     validate_path,
 )
@@ -39,6 +40,7 @@ from depkeeper.utils.console import (
     print_success,
     print_table,
     print_warning,
+    ensure_safe_output_encoding,
     reconfigure_console,
     safe_text,
 )
@@ -64,6 +66,7 @@ __all__ = [
     "print_success",
     "print_warning",
     "get_raw_console",
+    "ensure_safe_output_encoding",
     "reconfigure_console",
     "safe_text",
     "colorize_update_type",
@@ -72,6 +75,7 @@ __all__ = [
     "disable_logging",
     "is_logging_configured",
     "safe_read_file",
+    "sniff_wide_encoding",
     "safe_write_file",
     "create_backup",
     "restore_backup",

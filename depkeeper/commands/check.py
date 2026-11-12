@@ -453,9 +453,9 @@ async def _check_async(
                 f"\n{packages_needing_action} package(s) have updates available",
                 stderr=status_to_stderr,
             )
-            if resolution_result and resolution_result.packages_with_conflicts > 0:
+            if resolution_result and resolution_result.packages_unresolved > 0:
                 print_warning(
-                    f"{resolution_result.packages_with_conflicts} package(s) have "
+                    f"{resolution_result.packages_unresolved} package(s) have "
                     "unresolved conflicts — see 'Conflicts' column",
                     stderr=status_to_stderr,
                 )

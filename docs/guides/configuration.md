@@ -225,7 +225,7 @@ DEBUG: Logging initialized at DEBUG level
 DEBUG: Found depkeeper.toml: /path/to/depkeeper.toml
 INFO: Loading configuration from /path/to/depkeeper.toml
 DEBUG: Loaded configuration: {'check_conflicts': True, 'strict_version_matching': False, 'fail_on': 'minor', 'ignore': ['django'], 'python_version': '3.9', 'min_age': '7 days, 0:00:00', 'packages': ['django', 'pytz']}
-DEBUG: depkeeper v1.0.0
+DEBUG: depkeeper v1.0.1
 ```
 
 `Config path: None` in the later debug lines means no configuration file was discovered and the

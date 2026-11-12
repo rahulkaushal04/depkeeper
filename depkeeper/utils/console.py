@@ -142,6 +142,20 @@ def _get_console(*, stderr: bool = False) -> Console:
     return console
 
 
+def ensure_safe_output_encoding() -> None:
+    """Make stdout and stderr substitute unencodable characters instead of raising.
+
+    Output uses symbols such as ``→`` that a legacy codec (cp1252 on a redirected
+    Windows stream, ASCII under a non-UTF-8 locale) cannot encode; without this
+    the command dies with ``UnicodeEncodeError`` mid-report. They print as ``?``.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")  # type: ignore[union-attr]
+        except (AttributeError, ValueError, OSError):
+            pass  # not a TextIOWrapper (e.g. a test capture); nothing to do
+
+
 def reconfigure_console() -> None:
     """Discard the memoized stdout and stderr consoles.
 
@@ -196,6 +210,9 @@ def print_warning(
             carries machine-readable output.
     """
     _get_console(stderr=stderr).print(_labelled(prefix, message), style="warning")
+
+
+_UNBOUNDED_WIDTH = 10_000
 
 
 def print_table(
@@ -267,7 +284,10 @@ def print_table(
     table = build(False)
     # The regular layout is kept whenever it can fit; only a table whose
     # fixed-width columns cannot shrink to the terminal switches to compact.
-    if Measurement.get(console, console.options, table).minimum > console.width:
+    # Measure against an unbounded width: Rich clamps the result to the console
+    # width, so a bounded measurement can never report "too wide".
+    unbounded = console.options.update_width(_UNBOUNDED_WIDTH)
+    if Measurement.get(console, unbounded, table).minimum > console.width:
         table = build(True)
     console.print(table)
 

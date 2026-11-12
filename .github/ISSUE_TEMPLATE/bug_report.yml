@@ -19,7 +19,7 @@ body:
     attributes:
       label: depkeeper version
       description: Output of `depkeeper --version`.
-      placeholder: "1.0.0"
+      placeholder: "1.0.1"
     validations:
       required: true
   - type: input

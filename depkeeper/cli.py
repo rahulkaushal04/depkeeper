@@ -24,6 +24,7 @@ try:
     from depkeeper.exceptions import ConfigError, DepKeeperError
     from depkeeper.utils.logger import get_logger, setup_logging
     from depkeeper.utils.console import (
+        ensure_safe_output_encoding,
         print_error,
         print_warning,
         reconfigure_console,
@@ -162,6 +163,7 @@ def main() -> int:
             4   ``check``/``update``: a package lookup failed
             130 Interrupted by user (Ctrl+C)
     """
+    ensure_safe_output_encoding()
     try:
         cli(standalone_mode=False)
         return 0

@@ -118,6 +118,11 @@ flask>=2.0,<2.3     latest 3.1.3     → recommended 2.2.5
 requests==2.28.0    latest 2.34.2    → recommended 2.34.2   (same major, so full upgrade)
 ```
 
+The boundary is the first version component, so a `0.x` package has no boundary between its
+minors: `ruff==0.1.0` may be recommended `0.17.4` (SemVer treats every `0.x` release as potentially
+breaking). Cap such packages with `max_update = "patch"` or `--max-update patch`; see
+[Known limitations](../reference/limitations.md#zero-major-0x-packages-are-not-treated-as-unstable).
+
 When a higher major exists that you could opt in to, depkeeper says so:
 `major available: urllib3 2.8.0 (use --allow-major urllib3)`.
 

@@ -96,7 +96,7 @@ Note what did **not** happen:
 
 ## Project status
 
-depkeeper is at version **1.0.0** and is classified `Development Status :: 5 - Production/Stable`.
+depkeeper is at version **1.0.1** and is classified `Development Status :: 5 - Production/Stable`.
 
 - Supported Python: **3.8+**. Candidate versions are filtered against the target Python (by default the `requires-python` of the file, else the interpreter running depkeeper) — see [Python compatibility](concepts/version-recommendation.md#python-compatibility-filtering).
 - Supported input: pip requirements files, `pyproject.toml` and conda `environment.yml`. See [File formats](reference/file-formats.md).

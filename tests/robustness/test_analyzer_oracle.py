@@ -263,6 +263,9 @@ def test_bookkeeping_matches_recorded_conflicts(seed: int) -> None:
     assert res.total_packages == len(pkgs)
     assert res.packages_with_conflicts == sum(1 for c in recorded.values() if c)
     assert len(res.get_conflicts()) == res.packages_with_conflicts
+    # "unresolved" counts what is still displayed, never the cumulative history
+    assert res.packages_unresolved == sum(1 for p in pkgs if p.conflicts)
+    assert res.packages_unresolved <= res.packages_with_conflicts
     for p in pkgs:
         assert p.conflict_held == bool(recorded[p.name])
         for c in p.conflicts:

@@ -66,6 +66,17 @@ range permits `4.x`. The newer major is reported as `major available`, never app
 policy). depkeeper then moves to the newest `4.x`; your own upper bound (`<5.0`) is never violated, and
 `--max-update` still caps the result. Run `update --verify` and your tests afterwards.
 
+### Zero-major (`0.x`) packages are not treated as unstable
+
+depkeeper's boundary is the first version component. For `ruff==0.1.0` that component is `0`, so
+`0.17.4` is "the same major" and is recommended, labelled `minor`, with no `major available` note.
+SemVer allows breaking changes in any `0.x` release, so this can be a larger jump than the
+default contract suggests (`uvicorn==0.10.0` → `0.54.0`).
+
+**Workaround:** cap the level per package with `max_update = "patch"` under
+`[depkeeper.packages.<name>]`, run `--max-update patch` for the whole run, or `hold` the package.
+Run `update --verify` and your tests afterwards.
+
 ### Target Python defaults to the running interpreter
 
 Without `--python-version`, a `python_version` config key, or a `requires-python` /
@@ -100,7 +111,10 @@ floor.
 ### Conflict lists are cumulative
 
 `conflicts` (JSON), the `Conflicts` column and `packages_with_conflicts` include conflicts that a
-later resolution pass resolved. They are an audit trail, not a list of live problems.
+later resolution pass resolved. They are an audit trail, not a list of live problems. The
+`unresolved conflicts` warnings and the `N still in conflict` note count only conflicts the final
+set still violates (`packages_unresolved`), so a conflict resolved by lowering a recommendation does
+not raise them.
 
 The applied version is always correct — the [result invariant](../concepts/conflict-resolution.md#result-invariant)
 guarantees it. Only the annotation is historical.

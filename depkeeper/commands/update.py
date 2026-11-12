@@ -60,6 +60,7 @@ from depkeeper.utils import (
     create_timestamped_backup,
     safe_read_file,
     safe_write_file,
+    sniff_wide_encoding,
     normalize_package_name,
 )
 from depkeeper.utils.version_utils import (
@@ -620,9 +621,9 @@ async def _update_async(
             ok("All packages are up to date!")
         return exit_code
 
-    if resolution_result and resolution_result.packages_with_conflicts > 0:
+    if resolution_result and resolution_result.packages_unresolved > 0:
         warn(
-            f"\n{resolution_result.packages_with_conflicts} package(s) have "
+            f"\n{resolution_result.packages_unresolved} package(s) have "
             "unresolved conflicts — updates may cause issues"
         )
 
@@ -1221,7 +1222,9 @@ def _brief(exc: Exception) -> str:
 
 def _read_exact(path: Path) -> str:
     """Read *path* byte-faithfully (no newline translation, BOM stripped)."""
-    text = safe_read_file(path, encoding="utf-8", newline="")
+    text = safe_read_file(
+        path, encoding=sniff_wide_encoding(path) or "utf-8", newline=""
+    )
     return text[len(BOM_CHARACTER) :] if text.startswith(BOM_CHARACTER) else text
 
 
@@ -1358,7 +1361,8 @@ def _apply_updates(
         try:
             # newline="" preserves CRLF/mixed endings; plain utf-8 (not
             # utf-8-sig) keeps a BOM visible so it can be detected below.
-            content = safe_read_file(target_path, encoding="utf-8", newline="")
+            wide = sniff_wide_encoding(target_path)
+            content = safe_read_file(target_path, encoding=wide or "utf-8", newline="")
         except FileOperationError as exc:
             raise DepKeeperError(
                 f"Failed to read {target_path}: {_brief(exc)}"
@@ -1391,7 +1395,8 @@ def _apply_updates(
                 path=target_path,
                 original=content,
                 updated=updated,
-                encoding=BOM_WRITE_ENCODING if has_bom else DEFAULT_WRITE_ENCODING,
+                encoding=wide
+                or (BOM_WRITE_ENCODING if has_bom else DEFAULT_WRITE_ENCODING),
             )
         )
 

@@ -23,7 +23,7 @@ resolution decision. Most questions are answered by its first twenty lines:
 
 ```text
 INFO: Target Python: running interpreter (from running interpreter)
-DEBUG: depkeeper v1.0.0
+DEBUG: depkeeper v1.0.1
 DEBUG: Config path: None
 DEBUG: Verbosity: 2 | Color: True
 ```
@@ -90,6 +90,13 @@ right file.
 
 Almost always a byte order mark written by a Windows editor. depkeeper handles this
 automatically (`utf-8-sig` on read, BOM preserved on write).
+
+### `Failed to read file: 'utf-8' codec can't decode byte 0xff`
+
+The file is not UTF-8. A UTF-16 or UTF-32 requirements file with a byte order mark (what
+`pip freeze > requirements.txt` writes in Windows PowerShell 5.1) is read like pip reads it, and
+`update` writes it back in that encoding with a BOM. Any other non-UTF-8 encoding is rejected:
+re-save the file as UTF-8. TOML and YAML sources must be UTF-8.
 
 ### Windows line endings changed after an update
 
@@ -181,6 +188,12 @@ Use TOML booleans, not strings: `check_conflicts = true`, not `"true"`.
 ### `Configuration file <file> is not valid UTF-8`
 
 Re-save the file as UTF-8. A BOM is fine; other encodings are not.
+
+### Arrows show as `?` in redirected output
+
+When stdout or stderr uses a legacy encoding (for example `depkeeper check > out.txt` on Windows
+with Python 3.14 or older, or a non-UTF-8 locale), symbols such as `→` cannot be encoded and print as
+`?` instead of crashing. Set `PYTHONUTF8=1` (or `PYTHONIOENCODING=utf-8`) to keep them.
 
 ### A CLI flag does not override the config file
 

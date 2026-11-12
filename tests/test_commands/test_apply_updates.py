@@ -210,6 +210,32 @@ def test_bom_preserved_when_later_line_updated(tmp_path: Path) -> None:
     assert req_file.read_text(encoding="utf-8-sig") == ("click==8.0.0\nrich==13.7.0\n")
 
 
+@pytest.mark.parametrize("codec", ["utf-16", "utf-16-be", "utf-32"])
+def test_wide_encoded_file_is_parsed_updated_and_stays_wide(
+    tmp_path: Path, codec: str
+) -> None:
+    """``pip freeze > requirements.txt`` in PowerShell 5.1 writes UTF-16 (pip reads it)."""
+    req_file = tmp_path / "requirements.txt"
+    text = "click==8.0.0\r\nrich==13.0.0\r\n"
+    req_file.write_bytes(
+        text.encode(codec)
+        if codec != "utf-16-be"
+        else codecs.BOM_UTF16_BE + text.encode(codec)
+    )
+
+    reqs = RequirementsParser().parse_file(req_file)
+    assert [r.name for r in reqs] == ["click", "rich"]
+    click = next(r for r in reqs if r.name == "click")
+
+    _apply_updates(req_file, reqs, [_update_tuple(click, "8.1.7")])
+
+    raw = req_file.read_bytes()
+    assert raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF32_LE))
+    assert raw.decode("utf-32" if codec == "utf-32" else "utf-16") == (
+        "click==8.1.7\r\nrich==13.0.0\r\n"
+    )
+
+
 def test_bom_not_added_to_plain_utf8_file(tmp_path: Path) -> None:
     """Files without a BOM must never gain one."""
     req_file = tmp_path / "requirements.txt"

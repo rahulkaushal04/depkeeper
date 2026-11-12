@@ -618,6 +618,7 @@ class TestDisplayedConflictsReflectTheFinalState:
         # proposal that actually triggered it) remains available for anyone
         # inspecting `ResolutionResult` directly.
         assert result.packages_with_conflicts == 1
+        assert result.packages_unresolved == 1
         assert result.resolved_versions["werkzeug"].conflicts != []
         assert (
             result.resolved_versions["werkzeug"].conflicts[0].source_version == "3.1.3"
