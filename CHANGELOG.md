@@ -12,6 +12,21 @@ your CI and scripts for these before upgrading.
 
 ---
 
+## [1.0.1] - 2026-11-12
+
+### Documentation
+
+- Documented that `0.x` packages are not treated as unstable (limitations and version recommendation).
+
+### Fixed
+
+- The `unresolved conflicts` warnings and the `N still in conflict` summary note no longer fire for conflicts the resolver already fixed (for example `flask` lowered to suit a pinned `click`). They now use a live count, `ResolutionResult.packages_unresolved`; `packages_with_conflicts` stays cumulative.
+- On a terminal narrower than the report table (roughly under 100 columns), `check` and `update` now switch to a compact layout instead of cropping the right-hand columns.
+- UTF-16 and UTF-32 requirements files with a byte order mark (what `pip freeze >` writes in Windows PowerShell 5.1) are now read, and `update` writes them back in the same encoding.
+- Output no longer crashes with `UnicodeEncodeError` when stdout or stderr uses a legacy encoding (for example a redirected stream on Windows, or a non-UTF-8 locale); unencodable symbols such as `→` print as `?`.
+
+---
+
 ## [1.0.0] - 2026-11-11
 
 First stable release. It adds `pyproject.toml` and conda support, opt-in major upgrades, calendar versions,
@@ -142,7 +157,8 @@ First public release.
 
 ---
 
-[Unreleased]: https://github.com/rahulkaushal04/depkeeper/compare/v1.0.0...main
+[Unreleased]: https://github.com/rahulkaushal04/depkeeper/compare/v1.0.1...main
+[1.0.1]: https://github.com/rahulkaushal04/depkeeper/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/rahulkaushal04/depkeeper/compare/v0.1.1...v1.0.0
 [0.1.1]: https://github.com/rahulkaushal04/depkeeper/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/rahulkaushal04/depkeeper/releases/tag/v0.1.0

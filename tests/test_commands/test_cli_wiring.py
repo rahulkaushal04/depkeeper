@@ -213,7 +213,10 @@ class TestPolicyAndAgeOutput:
         )
         assert "[IGNORED]" in r.stdout
 
-    def test_age_and_cooldown_notice(self, tmp_path: Path) -> None:
+    def test_age_and_cooldown_notice(self, tmp_path: Path, monkeypatch) -> None:
+        # The table is asserted for content, so give it room: a narrow terminal
+        # switches to the compact layout, which wraps "1.0.2 held".
+        monkeypatch.setenv("COLUMNS", "200")
         released = datetime.now(timezone.utc) - timedelta(days=12)
         p = _pkg(
             "a",

@@ -3,8 +3,8 @@
 name: Publish to PyPI
 
 # Triggered by pushing a version tag, e.g.:
-#   git tag -a v1.0.0 -m "Release 1.0.0"
-#   git push origin v1.0.0
+#   git tag -a v1.0.1 -m "Release 1.0.1"
+#   git push origin v1.0.1
 #
 # Authenticates to PyPI via Trusted Publishing (OIDC) -- no stored API token.
 # One-time setup required on PyPI: on the depkeeper project's "Publishing"
@@ -31,10 +31,10 @@ jobs:
     outputs:
       version: ${{ steps.check.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -62,10 +62,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -79,7 +79,7 @@ jobs:
         run: twine check dist/*
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
@@ -96,7 +96,7 @@ jobs:
       id-token: write # required for PyPI Trusted Publishing
     steps:
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/

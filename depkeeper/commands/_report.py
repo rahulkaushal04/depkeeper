@@ -724,8 +724,8 @@ def display_resolution_summary(
         if result.converged
         else f"No (stopped after {result.iterations_used} iterations)"
     )
-    if result.converged and result.packages_with_conflicts:
-        convergence_status += f"; {result.packages_with_conflicts} still in conflict"
+    if result.converged and result.packages_unresolved:
+        convergence_status += f"; {result.packages_unresolved} still in conflict"
     console.print(f"Converged: {convergence_status}")
 
     if changed:

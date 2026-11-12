@@ -115,7 +115,11 @@ class ResolutionResult:
     Attributes:
         resolved_versions: Map of package name → resolution details.
         total_packages: Total number of packages analyzed.
-        packages_with_conflicts: Number of packages that have conflicts.
+        packages_with_conflicts: Number of packages that had a conflict recorded
+            at any point, including ones a later iteration resolved.
+        packages_unresolved: Number of packages whose conflict is still live in
+            the final set. This, not ``packages_with_conflicts``, is what to
+            report as "unresolved".
         iterations_used: How many resolution iterations were performed.
         converged: Whether resolution reached a stable state (True) or
             hit the iteration limit (False).
@@ -130,6 +134,7 @@ class ResolutionResult:
     iterations_used: int
     converged: bool
     dependency_lookup_failures: List[str] = field(default_factory=list)
+    packages_unresolved: int = 0
 
     @property
     def conflict_check_complete(self) -> bool:
@@ -703,6 +708,7 @@ class DependencyAnalyzer:
 
         resolved_versions: Dict[str, PackageResolution] = {}
         packages_with_conflicts = 0
+        packages_unresolved = 0
 
         for pkg, own_proposal in zip(packages, own_proposals):
             name = pkg.name
@@ -730,6 +736,8 @@ class DependencyAnalyzer:
             # always looks resolved to `_live_conflicts`.
             if raw_conflicts:
                 packages_with_conflicts += 1
+            if live:
+                packages_unresolved += 1
 
             status = self._determine_status(pkg, original, name_resolved, raw_conflicts)
 
@@ -765,6 +773,7 @@ class DependencyAnalyzer:
             resolved_versions=resolved_versions,
             total_packages=len(packages),
             packages_with_conflicts=packages_with_conflicts,
+            packages_unresolved=packages_unresolved,
             iterations_used=iterations_used,
             converged=converged,
             dependency_lookup_failures=failures,

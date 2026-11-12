@@ -639,3 +639,59 @@ class TestLeadingNewlines:
         assert lines[0] == ""
         assert lines[1].endswith("something happened")
         assert lines[1].startswith("[")
+
+
+class TestEnsureSafeOutputEncoding:
+    """Legacy stream encodings must not crash on symbols like ``→``."""
+
+    def test_unencodable_characters_are_replaced(self, monkeypatch):
+        import io
+
+        from depkeeper.utils.console import ensure_safe_output_encoding
+
+        raw = io.BytesIO()
+        stream = io.TextIOWrapper(raw, encoding="cp1252")
+        monkeypatch.setattr("sys.stdout", stream)
+        monkeypatch.setattr("sys.stderr", stream)
+
+        ensure_safe_output_encoding()
+        stream.write("1.0 → 2.0")
+        stream.flush()
+
+        assert raw.getvalue() == b"1.0 ? 2.0"
+
+    def test_stream_without_reconfigure_is_ignored(self, monkeypatch):
+        import io
+
+        from depkeeper.utils.console import ensure_safe_output_encoding
+
+        monkeypatch.setattr("sys.stdout", io.StringIO())
+        monkeypatch.setattr("sys.stderr", io.StringIO())
+        ensure_safe_output_encoding()
+
+
+class TestNarrowTable:
+    """A table wider than the terminal switches layout instead of being cropped."""
+
+    def test_wide_table_keeps_every_column_on_a_narrow_terminal(
+        self, monkeypatch, capsys
+    ):
+        from depkeeper.utils.console import print_table, reconfigure_console
+
+        monkeypatch.setenv("COLUMNS", "60")
+        monkeypatch.delenv("FORCE_COLOR", raising=False)
+        reconfigure_console()
+        try:
+            print_table(
+                [{"Status": "[OUTDATED]", "Package": "requests", "Last": "ZZLAST"}] * 3,
+                column_styles={
+                    "Status": {"no_wrap": True, "width": 30},
+                    "Package": {"no_wrap": True, "width": 30},
+                },
+            )
+        finally:
+            reconfigure_console()
+
+        out = capsys.readouterr().out
+        assert "ZZLAST" in out
+        assert max(len(line) for line in out.splitlines()) <= 60

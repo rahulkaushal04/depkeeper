@@ -7,6 +7,7 @@ errors are normalized to `FileOperationError`.
 
 from __future__ import annotations
 
+import codecs
 import os
 import shutil
 import tempfile
@@ -29,6 +30,33 @@ from depkeeper.constants import (
 logger = get_logger("filesystem")
 
 PathLike = Union[str, Path]
+
+
+# Longest first: the UTF-32 LE mark begins with the UTF-16 LE one.
+_WIDE_BOMS = (
+    (codecs.BOM_UTF32_LE, "utf-32"),
+    (codecs.BOM_UTF32_BE, "utf-32"),
+    (codecs.BOM_UTF16_LE, "utf-16"),
+    (codecs.BOM_UTF16_BE, "utf-16"),
+)
+
+
+def sniff_wide_encoding(file_path: PathLike) -> Optional[str]:
+    """Return ``"utf-16"`` or ``"utf-32"`` if the file starts with that BOM.
+
+    Windows PowerShell 5.1 writes UTF-16 for ``pip freeze > requirements.txt``,
+    and pip reads it. Both codecs strip the BOM when decoding and emit one when
+    encoding. Returns ``None`` for anything else, including an unreadable file.
+    """
+    try:
+        with open(file_path, "rb") as handle:
+            head = handle.read(4)
+    except OSError:
+        return None
+    for bom, name in _WIDE_BOMS:
+        if head.startswith(bom):
+            return name
+    return None
 
 
 def _validated_file(path: Path, *, must_exist: bool = True) -> Path:
@@ -247,7 +275,8 @@ def safe_read_file(
         file_path: Path to the file.
         max_size: Maximum allowed file size in bytes (None disables limit).
             Measured in bytes on disk, so a BOM counts toward the limit.
-        encoding: Text encoding.
+        encoding: Text encoding. With the default, a UTF-16 or UTF-32 byte
+            order mark is detected and honoured (as pip does).
         newline: Passed to ``open``; ``""`` keeps line terminators verbatim.
 
     Returns:
@@ -266,6 +295,9 @@ def safe_read_file(
             file_path=str(path),
             operation="read",
         )
+
+    if encoding == DEFAULT_READ_ENCODING:
+        encoding = sniff_wide_encoding(path) or encoding
 
     try:
         if newline is None:

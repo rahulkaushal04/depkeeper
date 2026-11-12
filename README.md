@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/logo.svg" width="120" alt="depkeeper logo"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/rahulkaushal04/depkeeper/main/assets/logo.svg" width="120" alt="depkeeper logo"></p>
 
 <h1 align="center">depkeeper</h1>
 
@@ -9,7 +9,7 @@
   <a href="https://codecov.io/gh/rahulkaushal04/depkeeper"><img src="https://codecov.io/gh/rahulkaushal04/depkeeper/branch/main/graph/badge.svg" alt="Coverage"></a>
   <a href="https://pypi.org/project/depkeeper/"><img src="https://img.shields.io/pypi/v/depkeeper.svg" alt="PyPI"></a>
   <a href="https://pypi.org/project/depkeeper/"><img src="https://img.shields.io/pypi/pyversions/depkeeper.svg" alt="Python versions"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
+  <a href="https://github.com/rahulkaushal04/depkeeper/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0"></a>
   <a href="https://github.com/rahulkaushal04/depkeeper/blob/main/docs/index.md"><img src="https://img.shields.io/badge/docs-in_repo-blue" alt="Docs"></a>
 </p>
 
@@ -322,12 +322,12 @@ More patterns: [CI/CD integration](https://github.com/rahulkaushal04/depkeeper/b
 
 ## How it works
 
-<p align="center"><img src="assets/diagrams/how-it-works.svg" alt="depkeeper parses your dependency file, fetches PyPI metadata, filters each package down to one safe version (staying within its major unless --allow-major), cross-checks the picks, then reports or writes." width="900"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/rahulkaushal04/depkeeper/main/assets/diagrams/how-it-works.svg" alt="depkeeper parses your dependency file, fetches PyPI metadata, filters each package down to one safe version (staying within its major unless --allow-major), cross-checks the picks, then reports or writes." width="900"></p>
 
 <p align="center"><em>Candidate versions pass through six named rules to one pick; only the write branch touches your files.</em></p>
 
 depkeeper is a synchronous CLI around an async core. It keeps no cache and no state between runs.
-Design notes: [ARCHITECTURE.md](ARCHITECTURE.md).
+Design notes: [ARCHITECTURE.md](https://github.com/rahulkaushal04/depkeeper/blob/main/ARCHITECTURE.md).
 
 ## Limitations
 
@@ -357,11 +357,11 @@ Full docs: **[docs/](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/
 - [Concepts](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/concepts/index.md): how versions are recommended, how conflicts are resolved, write safety
 - [Guides](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/guides/index.md): checking, updating, configuration, CI/CD, troubleshooting
 - [Reference](https://github.com/rahulkaushal04/depkeeper/blob/main/docs/reference/index.md): CLI, config, exit codes, file formats, JSON output
-- [CHANGELOG.md](CHANGELOG.md)
+- [CHANGELOG.md](https://github.com/rahulkaushal04/depkeeper/blob/main/CHANGELOG.md)
 
 ## Contributing
 
-Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md).
+Issues and pull requests are welcome. Start with [CONTRIBUTING.md](https://github.com/rahulkaushal04/depkeeper/blob/main/CONTRIBUTING.md).
 
 ```bash
 git clone https://github.com/rahulkaushal04/depkeeper.git
@@ -370,9 +370,9 @@ pip install -e ".[dev]"
 python -m pytest tests -q --no-cov
 ```
 
-Report security problems privately. See [SECURITY.md](SECURITY.md). Please follow the
-[Code of Conduct](CODE_OF_CONDUCT.md).
+Report security problems privately. See [SECURITY.md](https://github.com/rahulkaushal04/depkeeper/blob/main/SECURITY.md). Please follow the
+[Code of Conduct](https://github.com/rahulkaushal04/depkeeper/blob/main/CODE_OF_CONDUCT.md).
 
 ## License
 
-[Apache License 2.0](LICENSE). Copyright 2025-2026 Rahul Kaushal.
+[Apache License 2.0](https://github.com/rahulkaushal04/depkeeper/blob/main/LICENSE). Copyright 2025-2026 Rahul Kaushal.
